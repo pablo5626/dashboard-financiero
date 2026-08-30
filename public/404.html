@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Dashboard Financiero</title>
+    <script>
+      // GitHub Pages no soporta rewrites de servidor para SPAs: cuando el
+      // usuario recarga o entra directo a una ruta como /cuentas, GitHub
+      // sirve este 404.html. Codificamos la ruta pedida en la query string
+      // y redirigimos a index.html, que la restaura con history.replaceState
+      // antes de montar React (ver el script en index.html). Snippet estándar
+      // de rafgraph/spa-github-pages.
+      var pathSegmentsToKeep = 1 // 1 = mantener "/dashboard-financiero"
+      var l = window.location
+      l.replace(
+        l.protocol +
+          '//' +
+          l.hostname +
+          (l.port ? ':' + l.port : '') +
+          l.pathname.split('/').slice(0, 1 + pathSegmentsToKeep).join('/') +
+          '/?/' +
+          l.pathname.slice(1).split('/').slice(pathSegmentsToKeep).join('/').replace(/&/g, '~and~') +
+          (l.search ? '&' + l.search.slice(1).replace(/&/g, '~and~') : '') +
+          l.hash
+      )
+    </script>
+  </head>
+  <body></body>
+</html>

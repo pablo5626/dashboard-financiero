@@ -46,6 +46,24 @@ run once in the Supabase SQL Editor — see
 ya viva") for the `auth.uid()`-is-null and multi-statement-rollback
 gotchas before writing one.
 
+**GitHub Pages deploy**: `.github/workflows/deploy.yml` builds with
+`npm ci && npm run build` (injecting `VITE_SUPABASE_URL`/
+`VITE_SUPABASE_ANON_KEY` from repo Actions secrets, since `.env.local`
+is never committed) and publishes `dist/` via `actions/deploy-pages` on
+every push to `master` — the repo's Pages source must be set to "GitHub
+Actions" (Settings → Pages) for this to take effect, not "Deploy from a
+branch". `vite.config.js` sets `base: '/dashboard-financiero/'` to match
+the project-page subpath, `main.jsx`'s `BrowserRouter` reads that same
+path via `basename={import.meta.env.BASE_URL}`, and `public/404.html` +
+a small inline script in `index.html` implement the standard
+rafgraph/spa-github-pages redirect trick so deep-linked routes survive a
+hard refresh (GitHub Pages has no server-side rewrites). Before this
+setup existed, GitHub Pages served the raw, unbuilt `index.html`
+straight from the repo (pointing at `/src/main.jsx`, which browsers
+can't execute without a bundler) — a blank white page with a 503 on that
+request was the symptom; if that returns, check the Pages source
+setting first.
+
 ## Architecture
 
 **Stack**: Vite + React 18, plain JSX (no TypeScript), plain CSS with custom
