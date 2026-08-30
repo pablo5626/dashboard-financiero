@@ -1,0 +1,8 @@
+node_modules
+dist
+.env
+.env.local
+*.local
+
+# datos financieros reales de MonIA, solo material de referencia local
+MonAi-List-*.csv

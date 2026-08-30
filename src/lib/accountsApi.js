@@ -1,0 +1,85 @@
+import { supabase } from './supabaseClient.js'
+
+export async function listAccounts() {
+  const { data, error } = await supabase
+    .from('accounts')
+    .select('*')
+    .eq('is_active', true)
+    .order('kind', { ascending: false }) // 'madre' antes que 'hija'
+    .order('sort_order', { ascending: true })
+  if (error) throw error
+  return data
+}
+
+export async function createAccount({ name, kind, parentAccountId, currency = 'COP' }) {
+  const { data, error } = await supabase
+    .from('accounts')
+    .insert({ name, kind, parent_account_id: parentAccountId ?? null, currency })
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function updateAccount(id, fields) {
+  const { error } = await supabase.from('accounts').update(fields).eq('id', id)
+  if (error) throw error
+}
+
+export async function archiveAccount(id) {
+  const { error } = await supabase.from('accounts').update({ is_active: false }).eq('id', id)
+  if (error) throw error
+}
+
+// Saldo del mes = saldo inicial del mes + transferencias netas + suma de
+// transacciones del mes — cada cuenta solo suma filas en su propia moneda
+// (currency de la cuenta, default 'COP'), para no mezclar unidades cuando
+// existan cuentas en distinta moneda (ej. una cuenta USD).
+export async function fetchBalancesForMonth(accounts, year, month) {
+  if (accounts.length === 0) return {}
+
+  const accountIds = accounts.map((a) => a.id)
+  const currencyByAccountId = Object.fromEntries(accounts.map((a) => [a.id, a.currency || 'COP']))
+
+  const monthStart = `${year}-${String(month).padStart(2, '0')}-01`
+  const nextMonthStart = month === 12
+    ? `${year + 1}-01-01`
+    : `${year}-${String(month + 1).padStart(2, '0')}-01`
+
+  const [{ data: initialBalances, error: e1 }, { data: transfers, error: e2 }, { data: transactions, error: e3 }, { data: allocations, error: e4 }] =
+    await Promise.all([
+      supabase.from('monthly_initial_balances').select('account_id, initial_balance, currency').eq('year', year).eq('month', month).in('account_id', accountIds),
+      supabase.from('account_transfers').select('from_account_id, to_account_id, amount, currency').gte('transfer_date', monthStart).lt('transfer_date', nextMonthStart),
+      supabase.from('transactions').select('account_id, amount, currency').gte('occurred_at', monthStart).lt('occurred_at', nextMonthStart).in('account_id', accountIds),
+      supabase.from('account_allocations').select('account_id, allocated_amount, currency').eq('year', year).eq('month', month).in('account_id', accountIds),
+    ])
+  if (e1) throw e1
+  if (e2) throw e2
+  if (e3) throw e3
+  if (e4) throw e4
+
+  const balances = Object.fromEntries(accountIds.map((id) => [id, 0]))
+  const allocated = Object.fromEntries(accountIds.map((id) => [id, null]))
+
+  const matches = (accountId, currency) => (currency || 'COP') === currencyByAccountId[accountId]
+
+  for (const row of initialBalances) {
+    if (matches(row.account_id, row.currency)) balances[row.account_id] += Number(row.initial_balance)
+  }
+  for (const row of transactions) {
+    if (matches(row.account_id, row.currency)) balances[row.account_id] += Number(row.amount)
+  }
+  for (const row of transfers) {
+    if (row.to_account_id && row.to_account_id in balances && matches(row.to_account_id, row.currency)) {
+      balances[row.to_account_id] += Number(row.amount)
+    }
+    if (row.from_account_id && row.from_account_id in balances && matches(row.from_account_id, row.currency)) {
+      balances[row.from_account_id] -= Number(row.amount)
+    }
+  }
+  for (const row of allocations) {
+    if (matches(row.account_id, row.currency)) allocated[row.account_id] = Number(row.allocated_amount)
+  }
+
+  return { balances, allocated }
+}

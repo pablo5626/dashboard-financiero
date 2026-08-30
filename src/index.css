@@ -1,0 +1,190 @@
+/* ===== Reset mínimo ===== */
+*, *::before, *::after { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body { margin: 0; overflow-x: hidden; }
+ul, ol { margin: 0; padding: 0; list-style: none; }
+button { font: inherit; color: inherit; background: none; border: none; padding: 0; cursor: pointer; }
+a { color: inherit; text-decoration: none; }
+
+/* ===== Tokens de color (paleta validada dataviz) ===== */
+:root {
+  color-scheme: light;
+
+  /* Chrome & ink */
+  --surface-1: #fcfcfb;
+  --page-plane: #f9f9f7;
+  --surface-raised: #ffffff;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+  --gridline: #e1e0d9;
+  --border-hairline: rgba(11, 11, 11, 0.10);
+  --success-text: #006300;
+
+  /* Categórico (orden fijo, nunca ciclar) */
+  --series-1: #2a78d6; /* blue */
+  --series-2: #eb6834; /* orange */
+  --series-3: #1baf7a; /* aqua */
+  --series-4: #eda100; /* yellow */
+  --series-5: #e87ba4; /* magenta */
+  --series-6: #008300; /* green */
+  --series-7: #4a3aa7; /* violet */
+  --series-8: #e34948; /* red */
+
+  /* Secuencial (magnitud, un solo hue) */
+  --seq-100: #cde2fb;
+  --seq-400: #3987e5;
+  --seq-500: #256abf;
+  --seq-700: #0d366b;
+
+  /* Estatus (fijo, nunca reusado como serie) */
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+
+  /* Espaciado (8 / 16 / 24) */
+  --space-1: 8px;
+  --space-2: 16px;
+  --space-3: 24px;
+
+  /* Tipografía (escala semántica HIG) */
+  --font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  --font-largetitle: 700 34px/1.2 var(--font-family);
+  --font-title: 600 22px/1.25 var(--font-family);
+  --font-headline: 600 17px/1.3 var(--font-family);
+  --font-body: 400 17px/1.4 var(--font-family);
+  --font-subheadline: 400 15px/1.35 var(--font-family);
+  --font-footnote: 400 13px/1.3 var(--font-family);
+  --font-caption: 400 12px/1.3 var(--font-family);
+
+  --radius-card: 14px;
+  --touch-target: 44px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --surface-1: #1a1a19;
+    --page-plane: #0d0d0d;
+    --surface-raised: #242423;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --gridline: #2c2c2a;
+    --border-hairline: rgba(255, 255, 255, 0.10);
+    --success-text: #0ca30c;
+
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-1: #1a1a19;
+  --page-plane: #0d0d0d;
+  --surface-raised: #242423;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #898781;
+  --gridline: #2c2c2a;
+  --border-hairline: rgba(255, 255, 255, 0.10);
+  --success-text: #0ca30c;
+
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+}
+
+body {
+  background: var(--page-plane);
+  color: var(--text-primary);
+  font: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ===== Utilidades de página compartidas entre secciones ===== */
+.page-title {
+  font: var(--font-largetitle);
+  margin: 0 0 var(--space-3);
+}
+
+.grid-auto {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-2);
+}
+
+/* Sin esto, un hijo con contenido ancho (ej. el SVG de un gráfico Recharts)
+   puede forzar la columna del grid — y la página entera — más ancha que la
+   pantalla en vez de encogerse, causando overflow horizontal en móvil. */
+.grid-auto > *,
+.kpi-row > * {
+  min-width: 0;
+}
+
+@media (min-width: 768px) {
+  .grid-auto { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (min-width: 1024px) {
+  .grid-auto { grid-template-columns: repeat(3, 1fr); }
+}
+
+.grid-auto > .span-2 { grid-column: span 1; }
+@media (min-width: 768px) {
+  .grid-auto > .span-2 { grid-column: span 2; }
+}
+@media (min-width: 1024px) {
+  .grid-auto > .span-3 { grid-column: span 3; }
+}
+
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-2);
+}
+
+@media (min-width: 768px) {
+  .kpi-row { grid-template-columns: repeat(4, 1fr); }
+}
+
+/* Envolver cada <table className="simple-table"> en un div.table-scroll —
+   una tabla con muchas columnas debe desplazarse horizontalmente dentro de
+   su propia tarjeta, nunca empujar la página entera fuera de la pantalla. */
+.table-scroll {
+  overflow-x: auto;
+}
+
+.simple-table {
+  width: 100%;
+  border-collapse: collapse;
+  font: var(--font-subheadline);
+}
+
+.simple-table th, .simple-table td {
+  text-align: left;
+  padding: var(--space-1);
+  border-bottom: 1px solid var(--gridline);
+  font-variant-numeric: tabular-nums;
+}
+
+.simple-table th {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}

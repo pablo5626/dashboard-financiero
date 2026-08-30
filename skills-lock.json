@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "ios-hig-design": {
+      "source": "wondelai/skills",
+      "sourceType": "github",
+      "skillPath": "ios-hig-design/SKILL.md",
+      "computedHash": "6483e15378366d4f3eb535450d2406e3926b8e3ec7fcfde290e4373e1ceb89d1"
+    }
+  }
+}

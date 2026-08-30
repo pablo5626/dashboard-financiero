@@ -1,0 +1,38 @@
+.tile {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.label {
+  font: var(--font-subheadline);
+  color: var(--text-secondary);
+}
+
+/* clamp() en base a cqi (ancho del propio tile, vía container-type de
+   arriba) en vez de un tamaño fijo: en kpi-row de 2 columnas (móvil) el
+   valor se achica lo necesario para no desbordar la tarjeta ni partir el
+   signo "-" de un monto negativo a su propia línea; en pantallas anchas
+   (kpi-row de 4 columnas) llega cómodo al tope de 28px. */
+.value {
+  font-family: var(--font-family);
+  font-weight: 600;
+  font-size: clamp(18px, 15cqi, 28px);
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.delta {
+  font: var(--font-footnote);
+  font-weight: 600;
+}
+
+.good {
+  color: var(--success-text);
+}
+
+.bad {
+  color: var(--status-critical);
+}
