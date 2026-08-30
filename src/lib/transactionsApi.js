@@ -158,6 +158,34 @@ export async function importTransactions(rows, year, month) {
   return { imported: data.length, skipped: payload.length - data.length, totalInMonth: monthRows.length }
 }
 
+// Alta manual de un gasto (Fase 3 del prompt original, adelantada para
+// pruebas) — no viene de MonIA, así que no hay un `id` real del CSV para
+// deduplicar; se genera uno sintético para satisfacer el unique constraint
+// (user_id, monia_id) sin colisionar nunca con un id real de MonIA.
+// No usa crypto.randomUUID(): esa API solo existe en contextos seguros
+// (HTTPS o localhost) y esta app se prueba seguido por LAN vía http:// —
+// ahí `crypto.randomUUID` no existe y rompe silenciosamente.
+function generateLocalId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+export async function createManualTransaction({ purpose, amount, occurredAt, categoryId, accountId, tags }) {
+  const { error } = await supabase.from('transactions').insert({
+    monia_id: `manual-${generateLocalId()}`,
+    occurred_at: occurredAt,
+    purpose,
+    amount,
+    currency: 'COP',
+    category_id: categoryId || null,
+    account_id: accountId || null,
+    tags: tags ?? [],
+    assignment_level: accountId ? 3 : null,
+    assignment_confirmed: !!accountId,
+    origin: 'manual',
+  })
+  if (error) throw error
+}
+
 export async function countPendingTransactions() {
   const { count, error } = await supabase
     .from('transactions')
@@ -226,6 +254,38 @@ export async function confirmAssignment(transactionId, accountId, categoryId) {
     { onConflict: 'user_id,category_id,tag,account_id' }
   )
   if (upsertError) throw upsertError
+}
+
+export async function deleteTransaction(id) {
+  const { error } = await supabase.from('transactions').delete().eq('id', id)
+  if (error) throw error
+}
+
+// Gasto real por cuenta en el mes (solo transacciones negativas, en positivo)
+// — para comparar cuánto se ha GASTADO de verdad contra lo asignado, sin
+// confundirlo con el saldo (que sube apenas se transfiere/fondea la cuenta,
+// no cuando se gasta).
+export async function getSpentByAccountForMonth(accountIds, year, month) {
+  if (accountIds.length === 0) return {}
+  const monthStart = `${year}-${String(month).padStart(2, '0')}-01`
+  const nextMonthStart = month === 12
+    ? `${year + 1}-01-01`
+    : `${year}-${String(month + 1).padStart(2, '0')}-01`
+
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('account_id, amount')
+    .gte('occurred_at', monthStart)
+    .lt('occurred_at', nextMonthStart)
+    .in('account_id', accountIds)
+    .lt('amount', 0)
+  if (error) throw error
+
+  const spent = {}
+  for (const row of data) {
+    spent[row.account_id] = (spent[row.account_id] ?? 0) + (-Number(row.amount))
+  }
+  return spent
 }
 
 export async function listTransactionsForMonth(year, month) {

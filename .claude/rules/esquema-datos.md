@@ -1,3 +1,9 @@
+---
+paths:
+  - schema.sql
+  - src/lib/*Api.js
+---
+
 # Reglas del esquema de datos (Supabase / schema.sql)
 
 `schema.sql` en la raíz del proyecto es la fuente de verdad del modelo de
@@ -34,3 +40,28 @@ directamente en el panel de Supabase sin reflejarlo en el archivo.
 - Los bloques de `insert` de valores iniciales (cuentas, categorías) están
   comentados en `schema.sql` a propósito — se ejecutan una vez, ya
   autenticado, para que `auth.uid()` resuelva al usuario real.
+
+## Cambios de esquema en la base de datos ya viva
+
+`schema.sql` solo se ejecuta completo en una instalación limpia. Como el
+proyecto Supabase del usuario ya existe, todo cambio de esquema necesita
+*ambas* cosas: (a) el cambio en `schema.sql` para futuras instalaciones
+limpias, y (b) un snippet SQL de una sola vez que se le entrega al usuario
+para correr en el SQL Editor de Supabase (`alter table ... add column
+...;` / `insert into ...;` plano — no se usa framework de migraciones).
+Dos gotchas aprendidos:
+
+- El SQL Editor corre como el superusuario `postgres` sin JWT, así que
+  `auth.uid()` **siempre evalúa a `null`** ahí — un `insert into
+  categories (user_id, ...) values (auth.uid(), ...)` falla por
+  violación de not-null. En su lugar, toma el `user_id` real de una fila
+  existente de la misma tabla (u otra tabla del mismo usuario), ej.
+  `insert into categories (user_id, name, is_ambiguous) select user_id, 'X', true from categories limit 1;`.
+- Si un snippet de varias sentencias falla a la mitad, el SQL Editor de
+  Supabase revierte *todo el bloque* (corre como una sola transacción) —
+  el error de una sentencia posterior deshace silenciosamente una
+  sentencia anterior que parecía haber funcionado. Entrégale al usuario
+  snippets separados para correr uno a la vez cuando un paso posterior es
+  riesgoso (ej. un `insert` después de un `alter table`), y si PostgREST
+  no reconoce una columna recién agregada de inmediato,
+  `notify pgrst, 'reload schema';` fuerza a que la reconozca.

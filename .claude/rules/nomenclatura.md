@@ -1,3 +1,10 @@
+---
+paths:
+  - src/lib/categoriesApi.js
+  - src/lib/accountsApi.js
+  - schema.sql
+---
+
 # Nomenclatura: categorías y cuentas
 
 La única fuente válida de nombres de **categorías** y **cuentas** es la tabla de

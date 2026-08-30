@@ -31,6 +31,28 @@ export async function archiveAccount(id) {
   if (error) throw error
 }
 
+export async function getMonthlyInitialBalances(accountIds, year, month) {
+  if (accountIds.length === 0) return {}
+  const { data, error } = await supabase
+    .from('monthly_initial_balances')
+    .select('account_id, initial_balance, currency, source')
+    .eq('year', year)
+    .eq('month', month)
+    .in('account_id', accountIds)
+  if (error) throw error
+  return Object.fromEntries(data.map((r) => [r.account_id, r]))
+}
+
+export async function saveMonthlyInitialBalances(rows, year, month) {
+  const payload = rows.map(({ accountId, amount, currency }) => ({
+    account_id: accountId, year, month, initial_balance: amount, currency, source: 'manual',
+  }))
+  const { error } = await supabase
+    .from('monthly_initial_balances')
+    .upsert(payload, { onConflict: 'user_id,account_id,year,month' })
+  if (error) throw error
+}
+
 // Saldo del mes = saldo inicial del mes + transferencias netas + suma de
 // transacciones del mes — cada cuenta solo suma filas en su propia moneda
 // (currency de la cuenta, default 'COP'), para no mezclar unidades cuando

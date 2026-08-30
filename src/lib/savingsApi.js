@@ -66,3 +66,19 @@ export async function addContribution(goal, { amount, contributedAt, note }) {
     if (e2) throw e2
   }
 }
+
+// Borra un aporte del historial. Para metas 'puntual', current_amount es la
+// suma de los aportes (ver nota en addContribution) — hay que descontarlo ahí
+// también para no dejar el avance desincronizado del historial.
+export async function deleteContribution(goal, contribution) {
+  const { error: e1 } = await supabase.from('savings_contributions').delete().eq('id', contribution.id)
+  if (e1) throw e1
+
+  if (goal.kind === 'puntual') {
+    const { error: e2 } = await supabase
+      .from('savings_goals')
+      .update({ current_amount: Number(goal.current_amount) - Number(contribution.amount) })
+      .eq('id', goal.id)
+    if (e2) throw e2
+  }
+}

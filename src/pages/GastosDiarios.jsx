@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell } from 'recharts'
 import Card from '../components/ui/Card.jsx'
+import ConfirmDialog from '../components/ui/ConfirmDialog.jsx'
 import { formatCOP } from '../lib/format.js'
 import { listAccounts } from '../lib/accountsApi.js'
 import { listCategories, updateCategoryBudget } from '../lib/categoriesApi.js'
@@ -10,7 +11,7 @@ import {
   parseMonIACSV, filterRowsByMonth, importTransactions,
   listPendingTransactions, fetchSuggestionsForCategories, confirmAssignment,
   listTransactionsForMonth, listRecentExpenses, detectRecurringCandidates,
-  searchTransactions,
+  searchTransactions, deleteTransaction, createManualTransaction,
 } from '../lib/transactionsApi.js'
 
 const now = new Date()
@@ -18,6 +19,7 @@ const now = new Date()
 const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
 const PATTERN_MONTHS_BACK = 6
 const CHART_COLORS = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)', 'var(--series-5)', 'var(--series-6)', 'var(--series-7)', 'var(--series-8)']
+const emptyManualForm = { date: new Date().toISOString().slice(0, 10), purpose: '', amount: '', categoryId: '', accountId: '', tag: '' }
 
 function formatDate(iso) {
   return new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', timeZone: 'UTC' })
@@ -49,6 +51,10 @@ export default function GastosDiarios() {
   const [searchFilters, setSearchFilters] = useState({ query: '', categoryId: '', accountId: '', tag: '', dateFrom: '', dateTo: '' })
   const [searchResults, setSearchResults] = useState(null)
   const [searching, setSearching] = useState(false)
+  const [confirmDeleteTx, setConfirmDeleteTx] = useState(null) // { id, purpose } | null
+
+  const [manualForm, setManualForm] = useState(emptyManualForm)
+  const [savingManual, setSavingManual] = useState(false)
 
   async function reload() {
     try {
@@ -106,6 +112,28 @@ export default function GastosDiarios() {
       setError(err.message)
     } finally {
       setImporting(false)
+    }
+  }
+
+  async function handleAddManual(e) {
+    e.preventDefault()
+    if (!manualForm.purpose.trim() || !manualForm.amount) return
+    setSavingManual(true)
+    try {
+      await createManualTransaction({
+        purpose: manualForm.purpose.trim(),
+        amount: -Math.abs(Number(manualForm.amount)),
+        occurredAt: `${manualForm.date}T12:00:00Z`,
+        categoryId: manualForm.categoryId || null,
+        accountId: manualForm.accountId || null,
+        tags: manualForm.tag.trim() ? [manualForm.tag.trim().toLowerCase()] : [],
+      })
+      setManualForm({ ...emptyManualForm, date: manualForm.date })
+      await reload()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSavingManual(false)
     }
   }
 
@@ -173,6 +201,22 @@ export default function GastosDiarios() {
   function handleClearSearch() {
     setSearchFilters({ query: '', categoryId: '', accountId: '', tag: '', dateFrom: '', dateTo: '' })
     setSearchResults(null)
+  }
+
+  function handleDeleteTx(tx) {
+    setConfirmDeleteTx({ id: tx.id, purpose: tx.purpose })
+  }
+
+  async function doDeleteTx() {
+    const target = confirmDeleteTx
+    setConfirmDeleteTx(null)
+    try {
+      await deleteTransaction(target.id)
+      setSearchResults((prev) => prev?.filter((t) => t.id !== target.id) ?? prev)
+      await reload()
+    } catch (err) {
+      setError(err.message)
+    }
   }
 
   if (error) {
@@ -256,6 +300,56 @@ export default function GastosDiarios() {
           )}
         </Card>
 
+        <Card title="Agregar gasto manual" className="span-3">
+          <p style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', margin: '0 0 var(--space-1)' }}>
+            Para pruebas o gastos que no vienen del CSV de MonIA — se guarda igual que uno importado, con origen "manual".
+          </p>
+          <form onSubmit={handleAddManual} style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            <input
+              type="date" value={manualForm.date}
+              onChange={(e) => setManualForm({ ...manualForm, date: e.target.value })}
+              style={formInput}
+            />
+            <input
+              placeholder="Descripción" value={manualForm.purpose}
+              onChange={(e) => setManualForm({ ...manualForm, purpose: e.target.value })}
+              style={{ ...formInput, flex: '1 1 160px', minWidth: 0 }}
+            />
+            <input
+              type="number" placeholder="Monto" value={manualForm.amount}
+              onChange={(e) => setManualForm({ ...manualForm, amount: e.target.value })}
+              style={{ ...formInput, width: 120 }}
+            />
+            <select
+              value={manualForm.categoryId}
+              onChange={(e) => setManualForm({ ...manualForm, categoryId: e.target.value })}
+              style={{ ...formInput, flex: '1 1 150px', minWidth: 0 }}
+            >
+              <option value="">Sin categoría</option>
+              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <select
+              value={manualForm.accountId}
+              onChange={(e) => setManualForm({ ...manualForm, accountId: e.target.value })}
+              style={{ ...formInput, flex: '1 1 150px', minWidth: 0 }}
+            >
+              <option value="">Pendiente de banco</option>
+              {hijas.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
+            </select>
+            <input
+              placeholder="Tag (opcional)" value={manualForm.tag}
+              onChange={(e) => setManualForm({ ...manualForm, tag: e.target.value })}
+              style={{ ...formInput, width: 130 }}
+            />
+            <button
+              type="submit" disabled={savingManual}
+              style={{ minHeight: 'var(--touch-target)', padding: '0 var(--space-2)', borderRadius: 10, background: 'var(--series-1)', color: '#fff', fontWeight: 600, opacity: savingManual ? 0.6 : 1 }}
+            >
+              {savingManual ? 'Guardando…' : 'Agregar gasto'}
+            </button>
+          </form>
+        </Card>
+
         {pending === null ? (
           <Card title="Pendientes de banco" className="span-3"><p style={{ color: 'var(--text-muted)' }}>Cargando…</p></Card>
         ) : pending.length > 0 && (
@@ -295,13 +389,16 @@ export default function GastosDiarios() {
                           ))}
                         </select>
                       </td>
-                      <td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
                         <button
                           onClick={() => handleConfirm(t)}
                           disabled={!selected || confirmingId === t.id}
-                          style={{ color: 'var(--series-1)', fontWeight: 600 }}
+                          style={{ color: 'var(--series-1)', fontWeight: 600, marginRight: 8 }}
                         >
                           Confirmar
+                        </button>
+                        <button onClick={() => handleDeleteTx(t)} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>
+                          Eliminar
                         </button>
                       </td>
                     </tr>
@@ -510,7 +607,7 @@ export default function GastosDiarios() {
               <div className="table-scroll">
                 <table className="simple-table">
                   <thead>
-                    <tr><th>Fecha</th><th>Descripción</th><th>Monto</th><th>Categoría</th><th>Cuenta</th><th>Tags</th></tr>
+                    <tr><th>Fecha</th><th>Descripción</th><th>Monto</th><th>Categoría</th><th>Cuenta</th><th>Tags</th><th></th></tr>
                   </thead>
                   <tbody>
                     {searchResults.map((t) => (
@@ -521,10 +618,13 @@ export default function GastosDiarios() {
                         <td>{t.categories?.name ?? '—'}</td>
                         <td>{t.accounts?.name ?? '— pendiente —'}</td>
                         <td>{(t.tags ?? []).join(', ') || '—'}</td>
+                        <td>
+                          <button onClick={() => handleDeleteTx(t)} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button>
+                        </td>
                       </tr>
                     ))}
                     {searchResults.length === 0 && (
-                      <tr><td colSpan={6} style={{ color: 'var(--text-muted)' }}>Sin resultados para esos filtros.</td></tr>
+                      <tr><td colSpan={7} style={{ color: 'var(--text-muted)' }}>Sin resultados para esos filtros.</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -540,7 +640,7 @@ export default function GastosDiarios() {
             <div className="table-scroll">
             <table className="simple-table">
               <thead>
-                <tr><th>Fecha</th><th>Descripción</th><th>Monto</th><th>Categoría</th><th>Cuenta</th></tr>
+                <tr><th>Fecha</th><th>Descripción</th><th>Monto</th><th>Categoría</th><th>Cuenta</th><th></th></tr>
               </thead>
               <tbody>
                 {monthTransactions.map((t) => (
@@ -550,10 +650,13 @@ export default function GastosDiarios() {
                     <td>{formatCOP(t.amount)}</td>
                     <td>{t.categories?.name ?? '—'}</td>
                     <td>{t.accounts?.name ?? '— pendiente —'}</td>
+                    <td>
+                      <button onClick={() => handleDeleteTx(t)} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button>
+                    </td>
                   </tr>
                 ))}
                 {monthTransactions.length === 0 && (
-                  <tr><td colSpan={5} style={{ color: 'var(--text-muted)' }}>No hay movimientos importados para este mes todavía.</td></tr>
+                  <tr><td colSpan={6} style={{ color: 'var(--text-muted)' }}>No hay movimientos importados para este mes todavía.</td></tr>
                 )}
               </tbody>
             </table>
@@ -561,6 +664,16 @@ export default function GastosDiarios() {
           )}
         </Card>
       </div>
+
+      <ConfirmDialog
+        open={!!confirmDeleteTx}
+        title={`¿Eliminar el movimiento "${confirmDeleteTx?.purpose}"?`}
+        message="No se puede deshacer. Si vuelves a importar el mismo CSV, se detecta como nuevo y se vuelve a agregar."
+        confirmLabel="Eliminar"
+        destructive
+        onConfirm={doDeleteTx}
+        onCancel={() => setConfirmDeleteTx(null)}
+      />
     </div>
   )
 }

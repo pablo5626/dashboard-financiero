@@ -7,7 +7,7 @@ import { listAccounts, fetchBalancesForMonth } from '../lib/accountsApi.js'
 import { lastNMonths, fetchMonthlyTrend } from '../lib/panelApi.js'
 import {
   listSavingsGoals, createSavingsGoal, updateSavingsGoal, archiveSavingsGoal,
-  listContributions, addContribution,
+  listContributions, addContribution, deleteContribution,
 } from '../lib/savingsApi.js'
 
 const now = new Date()
@@ -84,6 +84,7 @@ export default function MetasAhorro() {
   const [editForm, setEditForm] = useState(emptyGoalForm)
   const [contribForm, setContribForm] = useState({})
   const [confirmArchive, setConfirmArchive] = useState(null) // { id, name } | null
+  const [confirmDeleteContribution, setConfirmDeleteContribution] = useState(null) // { goal, contribution } | null
 
   async function reload() {
     try {
@@ -176,6 +177,21 @@ export default function MetasAhorro() {
     try {
       await addContribution(goal, { amount: Number(draft.amount), contributedAt: draft.date, note: draft.note })
       setContribForm({ ...contribForm, [goal.id]: emptyContribForm })
+      await reload()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  function handleDeleteContribution(goal, contribution) {
+    setConfirmDeleteContribution({ goal, contribution })
+  }
+
+  async function doDeleteContribution() {
+    const target = confirmDeleteContribution
+    setConfirmDeleteContribution(null)
+    try {
+      await deleteContribution(target.goal, target.contribution)
       await reload()
     } catch (err) {
       setError(err.message)
@@ -327,13 +343,20 @@ export default function MetasAhorro() {
               </h3>
               <div className="table-scroll" style={{ marginBottom: 'var(--space-1)' }}>
               <table className="simple-table">
-                <thead><tr><th>Fecha</th><th>Monto</th><th>Nota</th></tr></thead>
+                <thead><tr><th>Fecha</th><th>Monto</th><th>Nota</th><th></th></tr></thead>
                 <tbody>
                   {goalContributions.map((c) => (
-                    <tr key={c.id}><td>{c.contributed_at}</td><td>{formatCOP(c.amount)}</td><td>{c.note ?? '—'}</td></tr>
+                    <tr key={c.id}>
+                      <td>{c.contributed_at}</td>
+                      <td>{formatCOP(c.amount)}</td>
+                      <td>{c.note ?? '—'}</td>
+                      <td>
+                        <button onClick={() => handleDeleteContribution(g, c)} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button>
+                      </td>
+                    </tr>
                   ))}
                   {goalContributions.length === 0 && (
-                    <tr><td colSpan={3} style={{ color: 'var(--text-muted)' }}>Sin aportes registrados todavía.</td></tr>
+                    <tr><td colSpan={4} style={{ color: 'var(--text-muted)' }}>Sin aportes registrados todavía.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -388,6 +411,16 @@ export default function MetasAhorro() {
         destructive
         onConfirm={doArchive}
         onCancel={() => setConfirmArchive(null)}
+      />
+
+      <ConfirmDialog
+        open={!!confirmDeleteContribution}
+        title="¿Eliminar este aporte?"
+        message="Si la meta es puntual, el monto acumulado se ajusta automáticamente."
+        confirmLabel="Eliminar"
+        destructive
+        onConfirm={doDeleteContribution}
+        onCancel={() => setConfirmDeleteContribution(null)}
       />
     </div>
   )

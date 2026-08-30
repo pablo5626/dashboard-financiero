@@ -2,18 +2,20 @@ import { useEffect, useState } from 'react'
 import Card from './ui/Card.jsx'
 import { formatCOP } from '../lib/format.js'
 import { getAllocationsForMonth, saveAllocations, previousMonth } from '../lib/allocationsApi.js'
+import { getTransfersForMonth, createTransfers } from '../lib/transfersApi.js'
 
-export default function MonthlyAllocationSection({ hijas, year, month, onSaved }) {
+export default function MonthlyAllocationSection({ hijas, madre, year, month, onSaved }) {
   const [values, setValues] = useState({})
   const [isTemplate, setIsTemplate] = useState(false)
+  const [alreadyTransferred, setAlreadyTransferred] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState(null)
 
   useEffect(() => {
     let cancelled = false
     async function load() {
-      setLoading(true)
       try {
         const ids = hijas.map((h) => h.id)
         const current = await getAllocationsForMonth(ids, year, month)
@@ -26,6 +28,11 @@ export default function MonthlyAllocationSection({ hijas, year, month, onSaved }
           const prevValues = await getAllocationsForMonth(ids, prev.year, prev.month)
           if (!cancelled) { setValues(prevValues); setIsTemplate(Object.keys(prevValues).length > 0) }
         }
+
+        if (madre) {
+          const transfers = await getTransfersForMonth([madre.id, ...ids], year, month)
+          if (!cancelled) setAlreadyTransferred(transfers.some((t) => t.from_account_id === madre.id))
+        }
       } catch (err) {
         if (!cancelled) setError(err.message)
       } finally {
@@ -34,7 +41,7 @@ export default function MonthlyAllocationSection({ hijas, year, month, onSaved }
     }
     load()
     return () => { cancelled = true }
-  }, [hijas, year, month])
+  }, [hijas, madre, year, month])
 
   function handleChange(accountId, raw) {
     setValues((prev) => ({ ...prev, [accountId]: raw === '' ? '' : Number(raw) }))
@@ -53,6 +60,29 @@ export default function MonthlyAllocationSection({ hijas, year, month, onSaved }
       setError(err.message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleConfirmTransfers() {
+    setConfirming(true)
+    setError(null)
+    try {
+      const today = new Date().toISOString().slice(0, 10)
+      const rows = hijas
+        .map((h) => ({ accountId: h.id, amount: Number(values[h.id]) || 0 }))
+        .filter((r) => r.amount > 0)
+        .map((r) => ({
+          fromAccountId: madre.id, toAccountId: r.accountId, amount: r.amount,
+          currency: 'COP', transferDate: today, note: 'Distribución mensual',
+        }))
+      if (rows.length === 0) return
+      await createTransfers(rows)
+      setAlreadyTransferred(true)
+      onSaved?.()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setConfirming(false)
     }
   }
 
@@ -96,16 +126,32 @@ export default function MonthlyAllocationSection({ hijas, year, month, onSaved }
         </table>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
           <span style={{ font: 'var(--font-subheadline)', color: 'var(--text-secondary)' }}>
             Total a distribuir: <strong style={{ color: 'var(--text-primary)' }}>{formatCOP(total)}</strong>
           </span>
-          <button
-            type="submit" disabled={saving || hijas.length === 0}
-            style={{ minHeight: 'var(--touch-target)', padding: '0 var(--space-2)', borderRadius: 10, background: 'var(--series-1)', color: '#fff', fontWeight: 600, opacity: saving ? 0.6 : 1 }}
-          >
-            {saving ? 'Guardando…' : 'Guardar distribución'}
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              type="submit" disabled={saving || hijas.length === 0}
+              style={{ minHeight: 'var(--touch-target)', padding: '0 var(--space-2)', borderRadius: 10, background: 'var(--series-1)', color: '#fff', fontWeight: 600, opacity: saving ? 0.6 : 1 }}
+            >
+              {saving ? 'Guardando…' : 'Guardar distribución'}
+            </button>
+            {madre && (
+              alreadyTransferred ? (
+                <span style={{ font: 'var(--font-caption)', color: 'var(--status-good)', display: 'flex', alignItems: 'center' }}>
+                  Transferencia confirmada — el saldo de {madre.name} ya lo refleja
+                </span>
+              ) : (
+                <button
+                  type="button" onClick={handleConfirmTransfers} disabled={confirming || total === 0}
+                  style={{ minHeight: 'var(--touch-target)', padding: '0 var(--space-2)', borderRadius: 10, border: '1px solid var(--series-1)', color: 'var(--series-1)', fontWeight: 600, opacity: confirming ? 0.6 : 1 }}
+                >
+                  {confirming ? 'Confirmando…' : 'Confirmar transferencia real'}
+                </button>
+              )
+            )}
+          </div>
         </div>
       </form>
     </Card>

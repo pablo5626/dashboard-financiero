@@ -39,26 +39,12 @@ and `VITE_SUPABASE_ANON_KEY` — copy `.env.example` and fill in real values.
 template and must stay generic placeholders. Vite does not hot-reload env
 changes; restart `npm run dev` after editing `.env.local`.
 
-**Live-DB schema changes**: `schema.sql` is only executed in full on a
-fresh install. Because the user's Supabase project already exists, any
-schema change needs *both* (a) the edit to `schema.sql` for future clean
-installs, and (b) a standalone one-time SQL snippet handed to the user to
-run once in the Supabase SQL Editor (plain `alter table ... add column
-...;` / `insert into ...;` — no migration framework is used). Two gotchas
-learned the hard way this session, worth remembering:
-- The SQL Editor runs as the `postgres` superuser with no JWT, so
-  `auth.uid()` **always evaluates to `null`** there — an `insert into
-  categories (user_id, ...) values (auth.uid(), ...)` fails with a
-  not-null violation. Instead, borrow the real `user_id` from an existing
-  row of the same (or another owned) table, e.g.
-  `insert into categories (user_id, name, is_ambiguous) select user_id, 'X', true from categories limit 1;`.
-- If a multi-statement snippet errors partway through, Supabase's SQL
-  Editor rolls back the *entire* block (it runs as one transaction) — a
-  later statement's error silently undoes an earlier statement that
-  looked like it succeeded. Hand the user separate snippets to run one at
-  a time when a later step is risky (e.g. an `insert` after an `alter
-  table`), and if PostgREST doesn't see a just-added column right away,
-  `notify pgrst, 'reload schema';` forces it to pick it up.
+**Live-DB schema changes**: any schema change needs *both* the edit to
+`schema.sql` and a standalone one-time SQL snippet handed to the user to
+run once in the Supabase SQL Editor — see
+`.claude/rules/esquema-datos.md` ("Cambios de esquema en la base de datos
+ya viva") for the `auth.uid()`-is-null and multi-statement-rollback
+gotchas before writing one.
 
 ## Architecture
 
@@ -131,7 +117,15 @@ month's transactions.amount` (see `fetchBalancesForMonth` in
 budgeted this month" figure, not the balance. `parent_account_id` on
 `accounts` is purely a structural/UI grouping (e.g. for the Sankey view) —
 it says nothing about where an account's money actually comes from; that's
-always `account_transfers`. `fetchBalancesForMonth(accounts, year, month)`
+always `account_transfers`. **A hija's saldo (balance) is not the same as
+how much of its budget has been spent** — the balance rises the moment it's
+funded (via `monthly_initial_balances` or a transfer in), before any real
+spending happens, so `Cuentas.jsx`'s hija cards compute the "% usado"
+progress bar from `transactionsApi.getSpentByAccountForMonth` (real negative
+`transactions` for the month, summed per account) against `account_allocations`
+— never from `balances[account.id]` — otherwise funding a hija to 100% of
+its budget shows as "100% usado" before a single peso was actually spent.
+`fetchBalancesForMonth(accounts, year, month)`
 takes the full account **objects** (not bare ids) because it's
 currency-aware: each account only sums rows whose `currency` matches that
 account's own `currency` (default `'COP'`), so a COP account and a USD
@@ -178,42 +172,133 @@ explicit, repeatedly-reinforced user rule.
 **Alerts system** (`panelApi.fetchAlerts`, rendered in `PanelGeneral.jsx`'s
 "Alertas" card): surfaces fixed expenses and debt installments due within
 5 days (or overdue), savings goals within 30 days of their target date (or
-past it), pending "sin cuenta asignada" transactions, and categories that
+past it), pending "sin cuenta asignada" transactions, categories that
 exceeded their `monthly_budget` (`categories.monthly_budget`, a flat
 monthly cap edited from a "Presupuesto por categoría" card in
 `GastosDiarios.jsx` — not month-by-month, just one number that applies
-every month until changed). Every alert carries an `href` so it renders as
-a `<Link>` to the page where it's resolved.
+every month until changed), and a `'anomalia_categoria'` alert when a
+category's spend this month exceeds 1.5× its trailing-6-month average
+(reuses the same widened query `fetchAlerts` already runs for the budget
+check, no new Supabase call). Every alert carries an `href` so it renders
+as a `<Link>` to the page where it's resolved.
+
+**Confirmation dialogs**: every destructive or state-changing confirmation
+in the app uses `src/components/ui/ConfirmDialog.jsx` (a themed,
+dark-mode-aware modal following the iOS HIG "Alert" pattern — title as a
+question, brief consequence line, destructive action + cancel) — **never**
+a native `window.confirm()`/`alert()`, which don't respect the app's
+design system or dark mode. Every page that can delete/archive something
+follows the same local-state pattern: a `confirm*` state holding the
+pending target (or `null`), a `handle*` that sets it, a `do*` that performs
+the action and clears it, and one `<ConfirmDialog>` rendered near the end
+of the component. Copy this pattern for any new delete/destructive action
+instead of reaching for `window.confirm`.
+
+**Every create/log action needs a matching delete**: transactions, savings
+contributions, transfers, accounts, debts (+ installments), fixed
+expenses, and savings goals can all be deleted or archived from the UI —
+this is a standing expectation, not something to add only when the user
+notices a gap. A resource that's a single current-state value fully
+overwritten on save (the monthly allocation amounts, the monthly initial
+balances) is fine without a delete button, since re-entering the right
+number and saving is an equivalent fix and there's no historical log being
+polluted — but anything that accumulates as a list over time needs an
+explicit delete with a `ConfirmDialog`. When deleting needs to keep a
+derived total in sync (e.g. `savingsApi.deleteContribution` decrementing a
+`'puntual'` goal's `current_amount` by the same amount `addContribution`
+incremented it by), that adjustment lives in the same API function as the
+delete.
+
+**Client-generated IDs must not use `crypto.randomUUID()`** — that API only
+exists in secure contexts (HTTPS or `localhost`), and this app gets tested
+a lot over plain `http://<lan-ip>:5173` from a phone/iPad
+(`npm run dev --host`), where it's `undefined` and throws. Use a small
+non-cryptographic fallback instead (see `generateLocalId` in
+`transactionsApi.js`, used for manually-entered transactions' synthetic
+`monia_id`) — a personal single-user app has no need for
+cryptographically-strong randomness here, just uniqueness.
+
+**Loading state on reload, not just first mount**: a component with a
+boolean `loading` state must only flip it back to `true` on the very first
+fetch, never on every subsequent `reload()`. `MonthlyAllocationSection.jsx`
+and `MonthlyInitialBalancesSection.jsx` used to call `setLoading(true)` at
+the top of their effect on every re-run — since their props are re-derived
+(new array/object references) on *every* `Cuentas.jsx` render, that fired
+on every unrelated save/delete elsewhere on the page, briefly collapsing
+those cards down to a one-line "Cargando…" and back, which shifted the
+page's layout enough to look like the browser jumped scroll position. Fix:
+initialize `loading` to `true`, only ever set it `false` (never back to
+`true`) — subsequent reloads swap in new data silently, no blank flash.
 
 **Current state of the 5 sections** (`src/pages/`) — all fully wired to
 Supabase, no sample data left anywhere:
 - **`PanelGeneral.jsx`**: consolidated KPIs (balance total, patrimonio
-  neto, ingresos/gastos del mes), the alerts list above, account
-  distribution bar chart, 6-month trend line + comparison table.
-- **`Cuentas.jsx`**: cuenta madre + hijas CRUD (name, currency), monthly
-  allocation editor with previous-month templating
-  (`MonthlyAllocationSection.jsx`), fixed-expenses CRUD with per-month
-  paid status (`FixedExpensesSection.jsx`), and the exchange-rate card.
+  neto, ingresos/gastos del mes), the alerts list above (including the
+  category-anomaly alert), account distribution bar chart, 6-month trend
+  line + comparison table, and a "Comparativa año a año" card (current YTD
+  vs. same months last year via `panelApi.fetchMonthlyTrend`, 2 StatTiles +
+  a 4-line chart with dashed lines for the prior year).
+- **`Cuentas.jsx`**: cuenta madre + hijas CRUD (name, currency), a monthly
+  initial-balances editor covering every active account
+  (`MonthlyInitialBalancesSection.jsx` — manual entry or via the iPhone
+  Shortcut described in `prompt-dashboard-financiero.md`'s "Fase 2"; both
+  write to `monthly_initial_balances` with `source: 'manual'|'shortcut'`),
+  monthly allocation editor with previous-month templating
+  (`MonthlyAllocationSection.jsx`), which also has a "Confirmar
+  transferencia real" button that turns that month's planned amounts into
+  actual `account_transfers` rows (madre → each hija) once, so the
+  madre's computed balance drops automatically instead of needing a
+  manual `monthly_initial_balances` adjustment — kept as a deliberate
+  second step from "Guardar distribución" because `account_transfers` has
+  no upsert key, so merging the two would duplicate transfers on every
+  re-save of the plan; a `TransferHistorySection.jsx` below it lists the
+  month's transfers (any account pair, not just madre→hija) with a small
+  add/delete form, covering the "Historial de transferencias" line from
+  `prompt-dashboard-financiero.md`. Also fixed-expenses CRUD with
+  per-month paid status (`FixedExpensesSection.jsx`), and the
+  exchange-rate card.
 - **`GastosDiarios.jsx`**: MonIA CSV import (month/year picker, dedup via
   `monia_id`), the bank-assignment engine above, a "Pendientes de banco"
   confirmation table with historical-frequency suggestions, per-category
   monthly budgets, spend-by-category and spend-by-tag bar charts, gasto
-  real vs. presupuesto asignado per cuenta hija, and a "candidatos a gasto
+  real vs. presupuesto asignado per cuenta hija, a "candidatos a gasto
   fijo" detector that flags a description repeated in ≥3 of the last 6
-  months and offers to add it as a recurring fixed expense.
+  months and offers to add it as a recurring fixed expense, a manual
+  expense form (`transactionsApi.createManualTransaction`) that brought
+  forward the prompt's "Fase 3" manual-entry idea early, for testing —
+  `monia_id` is `not null`/unique so manual rows get a synthetic
+  `manual-<id>` id (see `generateLocalId` gotcha above) and
+  `origin: 'manual'`; the account picker is optional (blank = "pendiente
+  de banco", same as an imported row) — and a free-text/multi-filter
+  "Buscar movimientos" card (`transactionsApi.searchTransactions`, capped
+  at 200 results) that searches the *entire* history, unlike every other
+  table on this page which is scoped to the active month/year picker.
+  Every transaction table on this page (pendientes, búsqueda, movimientos
+  del mes) has a delete action wired to `transactionsApi.deleteTransaction`
+  — deleting one and reimporting the same CSV re-adds it, since the
+  `monia_id` dedup row is gone.
 - **`Deudas.jsx`**: debt CRUD (creditor, total/restante, tasa mensual
   opcional, plazo opcional), per-debt installment calendar with a French
   fixed-payment amortization generator (`generateAmortizationSchedule` in
   `debtsApi.js`) when both tasa and plazo are set, a "regenerar cuotas
   pendientes" flow that replaces only unpaid installments, and the
-  patrimonio-vs-deuda health chart.
+  patrimonio-vs-deuda health chart. Amortization reconciliation: `debts`
+  has a `schedule_synced_remaining_amount` column snapshotting
+  `remaining_amount` at the moment the schedule was last
+  generated/regenerated (kept in sync by `toggleInstallmentPaid`); when it
+  drifts from the live `remaining_amount` (e.g. a manual payment made
+  outside the installment flow), `Deudas.jsx` shows a warning banner next
+  to "Regenerar cuotas pendientes" rather than silently letting the
+  schedule go stale.
 - **`MetasAhorro.jsx`**: both goal kinds — `'proposito'` (tied to a hija
   account, progress = that account's real balance, contribution log is
   annotation-only) and `'puntual'` (progress = sum of logged
   contributions, which *is* `current_amount`'s source of truth) — with a
   growth chart, a pace-based "cumplirás en ~X meses" projection, and a
   planeado-vs-aportado table (only shown when both `target_amount` and
-  `target_date` are set).
+  `target_date` are set). Contributions can be deleted
+  (`savingsApi.deleteContribution`); for `'puntual'` goals this also
+  decrements `current_amount` to keep it matching the log.
 
 **Category/account naming is constrained**: only the categories and
 accounts listed in `prompt-dashboard-financiero.md`'s mapping table (plus
@@ -228,11 +313,6 @@ schema or UI.
 
 These were explicitly discussed and left out — don't "fix" them
 unprompted, they're deliberate cuts, not oversights:
-- No category-spend chart / tag breakdown / recurring-expense detection
-  existed before this session's "Gastos Diarios" pass; those are now done,
-  but there's still no "categoría se disparó vs. promedio histórico"
-  anomaly alert (distinct from the flat monthly-budget alert that does
-  exist).
 - `MonthlyAllocationSection.jsx`/`FixedExpensesSection.jsx` have zero
   currency awareness by design (USD accounts are filtered out before
   reaching them, not made to understand currency).
@@ -241,9 +321,25 @@ unprompted, they're deliberate cuts, not oversights:
   total) and `accounts` actually branch on it anywhere in the UI today.
 - `generateAmortizationSchedule` only runs once per debt (guarded by "zero
   installments yet"); regenerating replaces unpaid installments and
-  recomputes the remaining term as `term_months - cuotas ya pagadas` — it
-  does not reconcile a changed `total_amount` or partial manual payments
-  made outside the installment flow.
+  recomputes the remaining term as `term_months - cuotas ya pagadas`.
+  Drift from a changed `total_amount` or a partial manual payment made
+  outside the installment flow is *detected and surfaced* (see the
+  `schedule_synced_remaining_amount` warning banner above) but never
+  auto-reconciled — the user still has to hit "Regenerar cuotas
+  pendientes" themselves to fix it.
+- `account_transfers` is a plain event log with no per-pair uniqueness —
+  running the same "confirm transfer" action twice for the same month (in
+  the app or, more easily, by re-running the iPhone Shortcut described in
+  the next bullet) creates duplicate real transfers with no built-in guard; deleting
+  the extra row from `TransferHistorySection` is the only fix today.
+- No iOS Shortcut file is checked into this repo — the user builds and
+  maintains it themselves on their phone. As currently designed it does 3
+  Supabase REST calls per hija account per month: sign in
+  (`/auth/v1/token?grant_type=password` for a fresh `access_token`), then
+  upsert into `account_allocations` (`?on_conflict=user_id,account_id,year,month`,
+  `Prefer: resolution=merge-duplicates`) and insert into `account_transfers`
+  (madre → hija, no upsert — see the duplicate-transfer risk above), using
+  `apikey` + `Authorization: Bearer <access_token>` headers throughout.
 
 ## Importable external-agent config detected
 

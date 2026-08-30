@@ -3,9 +3,12 @@ import Card from '../components/ui/Card.jsx'
 import ConfirmDialog from '../components/ui/ConfirmDialog.jsx'
 import FixedExpensesSection from '../components/FixedExpensesSection.jsx'
 import MonthlyAllocationSection from '../components/MonthlyAllocationSection.jsx'
+import MonthlyInitialBalancesSection from '../components/MonthlyInitialBalancesSection.jsx'
+import TransferHistorySection from '../components/TransferHistorySection.jsx'
 import { formatCOP, formatByCurrency } from '../lib/format.js'
 import { listAccounts, createAccount, updateAccount, archiveAccount, fetchBalancesForMonth } from '../lib/accountsApi.js'
 import { getRate, setRate } from '../lib/exchangeRatesApi.js'
+import { getSpentByAccountForMonth } from '../lib/transactionsApi.js'
 
 const now = new Date()
 const YEAR = now.getFullYear()
@@ -15,6 +18,7 @@ export default function Cuentas() {
   const [accounts, setAccounts] = useState(null)
   const [balances, setBalances] = useState({})
   const [allocated, setAllocated] = useState({})
+  const [spent, setSpent] = useState({})
   const [rate, setRateState] = useState(null)
   const [error, setError] = useState(null)
   const [editingId, setEditingId] = useState(null)
@@ -31,13 +35,15 @@ export default function Cuentas() {
     try {
       const rows = await listAccounts()
       setAccounts(rows)
-      const [{ balances: b, allocated: a }, currentRate] = await Promise.all([
+      const [{ balances: b, allocated: a }, currentRate, s] = await Promise.all([
         fetchBalancesForMonth(rows, YEAR, MONTH),
         getRate(),
+        getSpentByAccountForMonth(rows.map((r) => r.id), YEAR, MONTH),
       ])
       setBalances(b)
       setAllocated(a)
       setRateState(currentRate)
+      setSpent(s)
     } catch (err) {
       setError(err.message)
     }
@@ -137,7 +143,8 @@ export default function Cuentas() {
           const currency = h.currency || 'COP'
           const bal = balances[h.id] ?? 0
           const alloc = allocated[h.id]
-          const pct = alloc ? Math.round((bal / alloc) * 100) : null
+          const spentAmt = spent[h.id] ?? 0
+          const pct = alloc ? Math.round((spentAmt / alloc) * 100) : null
           const isEditing = editingId === h.id
 
           return (
@@ -180,10 +187,10 @@ export default function Cuentas() {
               {pct != null && (
                 <>
                   <div style={{ height: 6, background: 'var(--gridline)', borderRadius: 3, overflow: 'hidden' }}>
-                    <div style={{ width: `${pct < 0 ? 100 : Math.min(pct, 100)}%`, height: '100%', background: pct > 100 || pct < 0 ? 'var(--status-critical)' : 'var(--series-1)' }} />
+                    <div style={{ width: `${Math.min(pct, 100)}%`, height: '100%', background: pct > 100 ? 'var(--status-critical)' : 'var(--series-1)' }} />
                   </div>
-                  <div style={{ font: 'var(--font-caption)', color: pct < 0 ? 'var(--status-critical)' : 'var(--text-muted)', marginTop: 4 }}>
-                    {pct < 0 ? `Sobregirada — ${Math.abs(pct)}% por encima de lo asignado` : `${pct}% usado`}
+                  <div style={{ font: 'var(--font-caption)', color: pct > 100 ? 'var(--status-critical)' : 'var(--text-muted)', marginTop: 4 }}>
+                    {pct > 100 ? `Sobregirada — ${pct - 100}% por encima de lo asignado` : `${pct}% usado`}
                   </div>
                 </>
               )}
@@ -238,7 +245,11 @@ export default function Cuentas() {
           </form>
         </Card>
 
-        <MonthlyAllocationSection hijas={hijasCop} year={YEAR} month={MONTH} onSaved={reload} />
+        <MonthlyAllocationSection hijas={hijasCop} madre={madre} year={YEAR} month={MONTH} onSaved={reload} />
+
+        <MonthlyInitialBalancesSection accounts={accounts} year={YEAR} month={MONTH} onSaved={reload} />
+
+        <TransferHistorySection accounts={accountsCop} year={YEAR} month={MONTH} onSaved={reload} />
 
         <FixedExpensesSection accounts={accountsCop} />
       </div>

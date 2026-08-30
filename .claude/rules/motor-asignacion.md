@@ -1,3 +1,9 @@
+---
+paths:
+  - src/lib/transactionsApi.js
+  - src/pages/GastosDiarios.jsx
+---
+
 # Motor de asignación de cuenta (3 niveles de confianza)
 
 Al importar movimientos de MonIA, la cuenta hija de cada transacción se asigna
