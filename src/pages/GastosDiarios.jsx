@@ -42,7 +42,8 @@ export default function GastosDiarios() {
   const [importResult, setImportResult] = useState(null)
   const [confirmingId, setConfirmingId] = useState(null)
   const [selectedAccountByTx, setSelectedAccountByTx] = useState({})
-  const [budgetDraft, setBudgetDraft] = useState({})
+  const [budgetCategoryId, setBudgetCategoryId] = useState('')
+  const [budgetDraft, setBudgetDraft] = useState('')
   const [allocations, setAllocations] = useState({})
   const [fixedExpenses, setFixedExpenses] = useState([])
   const [recentExpenses, setRecentExpenses] = useState([])
@@ -151,10 +152,10 @@ export default function GastosDiarios() {
     }
   }
 
-  async function handleSaveBudget(categoryId) {
-    const raw = budgetDraft[categoryId]
+  async function handleSaveBudget() {
+    if (!budgetCategoryId) return
     try {
-      await updateCategoryBudget(categoryId, raw === '' ? null : Number(raw))
+      await updateCategoryBudget(budgetCategoryId, budgetDraft === '' ? null : Number(budgetDraft))
       await reload()
     } catch (err) {
       setError(err.message)
@@ -300,56 +301,6 @@ export default function GastosDiarios() {
           )}
         </Card>
 
-        <Card title="Agregar gasto manual" className="span-3">
-          <p style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', margin: '0 0 var(--space-1)' }}>
-            Para pruebas o gastos que no vienen del CSV de MonIA — se guarda igual que uno importado, con origen "manual".
-          </p>
-          <form onSubmit={handleAddManual} style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            <input
-              type="date" value={manualForm.date}
-              onChange={(e) => setManualForm({ ...manualForm, date: e.target.value })}
-              style={formInput}
-            />
-            <input
-              placeholder="Descripción" value={manualForm.purpose}
-              onChange={(e) => setManualForm({ ...manualForm, purpose: e.target.value })}
-              style={{ ...formInput, flex: '1 1 160px', minWidth: 0 }}
-            />
-            <input
-              type="number" placeholder="Monto" value={manualForm.amount}
-              onChange={(e) => setManualForm({ ...manualForm, amount: e.target.value })}
-              style={{ ...formInput, width: 120 }}
-            />
-            <select
-              value={manualForm.categoryId}
-              onChange={(e) => setManualForm({ ...manualForm, categoryId: e.target.value })}
-              style={{ ...formInput, flex: '1 1 150px', minWidth: 0 }}
-            >
-              <option value="">Sin categoría</option>
-              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-            <select
-              value={manualForm.accountId}
-              onChange={(e) => setManualForm({ ...manualForm, accountId: e.target.value })}
-              style={{ ...formInput, flex: '1 1 150px', minWidth: 0 }}
-            >
-              <option value="">Pendiente de banco</option>
-              {hijas.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
-            </select>
-            <input
-              placeholder="Tag (opcional)" value={manualForm.tag}
-              onChange={(e) => setManualForm({ ...manualForm, tag: e.target.value })}
-              style={{ ...formInput, width: 130 }}
-            />
-            <button
-              type="submit" disabled={savingManual}
-              style={{ minHeight: 'var(--touch-target)', padding: '0 var(--space-2)', borderRadius: 10, background: 'var(--series-1)', color: '#fff', fontWeight: 600, opacity: savingManual ? 0.6 : 1 }}
-            >
-              {savingManual ? 'Guardando…' : 'Agregar gasto'}
-            </button>
-          </form>
-        </Card>
-
         {pending === null ? (
           <Card title="Pendientes de banco" className="span-3"><p style={{ color: 'var(--text-muted)' }}>Cargando…</p></Card>
         ) : pending.length > 0 && (
@@ -415,39 +366,49 @@ export default function GastosDiarios() {
             Tope mensual editable por categoría (mismo monto todos los meses hasta que lo cambies). Vacío = sin presupuesto definido, no genera alerta.
             Gasto del mes mostrado es el de {MONTH_NAMES[month - 1]} {year}.
           </p>
-          <div className="table-scroll">
-          <table className="simple-table">
-            <thead><tr><th>Categoría</th><th>Gastado este mes</th><th>Presupuesto</th><th></th></tr></thead>
-            <tbody>
-              {categories.map((c) => {
-                const spent = spentByCategory[c.id] ?? 0
-                const budget = c.monthly_budget != null ? Number(c.monthly_budget) : null
-                const draft = budgetDraft[c.id] ?? (budget != null ? String(budget) : '')
-                const over = budget != null && spent > budget
-                return (
-                  <tr key={c.id}>
-                    <td>{c.name}</td>
-                    <td style={{ color: over ? 'var(--status-critical)' : 'inherit' }}>{formatCOP(spent)}</td>
-                    <td>
-                      <input
-                        type="number" placeholder="Sin definir" value={draft}
-                        onChange={(e) => setBudgetDraft({ ...budgetDraft, [c.id]: e.target.value })}
-                        style={{ ...cellInput, width: 110 }}
-                      />
-                    </td>
-                    <td>
-                      <button onClick={() => handleSaveBudget(c.id)} style={{ font: 'var(--font-caption)', color: 'var(--series-1)', fontWeight: 600 }}>
-                        Guardar
-                      </button>
-                    </td>
-                  </tr>
-                )
-              })}
-              {categories.length === 0 && (
-                <tr><td colSpan={4} style={{ color: 'var(--text-muted)' }}>No hay categorías en el catálogo todavía.</td></tr>
-              )}
-            </tbody>
-          </table>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+            <select
+              value={budgetCategoryId}
+              onChange={(e) => {
+                const id = e.target.value
+                setBudgetCategoryId(id)
+                const cat = categories.find((c) => c.id === id)
+                setBudgetDraft(cat?.monthly_budget != null ? String(cat.monthly_budget) : '')
+              }}
+              style={{ ...formInput, flex: '1 1 200px', minWidth: 0 }}
+            >
+              <option value="">Selecciona una categoría…</option>
+              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+
+            {budgetCategoryId && (() => {
+              const spent = spentByCategory[budgetCategoryId] ?? 0
+              const currentCat = categories.find((c) => c.id === budgetCategoryId)
+              const budget = currentCat?.monthly_budget != null ? Number(currentCat.monthly_budget) : null
+              const over = budget != null && spent > budget
+              return (
+                <>
+                  <span style={{ font: 'var(--font-subheadline)', color: over ? 'var(--status-critical)' : 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                    Gastado este mes: {formatCOP(spent)}
+                  </span>
+                  <input
+                    type="number" placeholder="Sin definir" value={budgetDraft}
+                    onChange={(e) => setBudgetDraft(e.target.value)}
+                    style={{ ...formInput, width: 130 }}
+                  />
+                  <button
+                    onClick={handleSaveBudget}
+                    style={{ minHeight: 'var(--touch-target)', padding: '0 var(--space-2)', borderRadius: 10, background: 'var(--series-1)', color: '#fff', fontWeight: 600 }}
+                  >
+                    Guardar
+                  </button>
+                </>
+              )
+            })()}
+
+            {categories.length === 0 && (
+              <p style={{ color: 'var(--text-muted)', margin: 0 }}>No hay categorías en el catálogo todavía.</p>
+            )}
           </div>
         </Card>
 
@@ -662,6 +623,56 @@ export default function GastosDiarios() {
             </table>
             </div>
           )}
+        </Card>
+
+        <Card title="Agregar gasto manual" className="span-3">
+          <p style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', margin: '0 0 var(--space-1)' }}>
+            Para pruebas o gastos que no vienen del CSV de MonIA — se guarda igual que uno importado, con origen "manual".
+          </p>
+          <form onSubmit={handleAddManual} style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            <input
+              type="date" value={manualForm.date}
+              onChange={(e) => setManualForm({ ...manualForm, date: e.target.value })}
+              style={formInput}
+            />
+            <input
+              placeholder="Descripción" value={manualForm.purpose}
+              onChange={(e) => setManualForm({ ...manualForm, purpose: e.target.value })}
+              style={{ ...formInput, flex: '1 1 160px', minWidth: 0 }}
+            />
+            <input
+              type="number" placeholder="Monto" value={manualForm.amount}
+              onChange={(e) => setManualForm({ ...manualForm, amount: e.target.value })}
+              style={{ ...formInput, width: 120 }}
+            />
+            <select
+              value={manualForm.categoryId}
+              onChange={(e) => setManualForm({ ...manualForm, categoryId: e.target.value })}
+              style={{ ...formInput, flex: '1 1 150px', minWidth: 0 }}
+            >
+              <option value="">Sin categoría</option>
+              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <select
+              value={manualForm.accountId}
+              onChange={(e) => setManualForm({ ...manualForm, accountId: e.target.value })}
+              style={{ ...formInput, flex: '1 1 150px', minWidth: 0 }}
+            >
+              <option value="">Pendiente de banco</option>
+              {hijas.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
+            </select>
+            <input
+              placeholder="Tag (opcional)" value={manualForm.tag}
+              onChange={(e) => setManualForm({ ...manualForm, tag: e.target.value })}
+              style={{ ...formInput, width: 130 }}
+            />
+            <button
+              type="submit" disabled={savingManual}
+              style={{ minHeight: 'var(--touch-target)', padding: '0 var(--space-2)', borderRadius: 10, background: 'var(--series-1)', color: '#fff', fontWeight: 600, opacity: savingManual ? 0.6 : 1 }}
+            >
+              {savingManual ? 'Guardando…' : 'Agregar gasto'}
+            </button>
+          </form>
         </Card>
       </div>
 
