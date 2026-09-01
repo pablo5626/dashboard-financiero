@@ -163,6 +163,16 @@ body {
   gap: var(--space-1);
 }
 
+/* Card.jsx renderiza un <section> — este selector estructural apunta solo a
+   las tarjetas que envuelven un StatTile dentro de kpi-row, sin tocar el
+   padding de Card en el resto de la app (títulos, tablas, formularios sí
+   necesitan el padding completo). El padding por defecto de Card
+   (var(--space-2), 16px) se sentía como demasiado aire alrededor de un
+   simple label + número de 2 líneas. */
+.kpi-row > section {
+  padding: var(--space-1);
+}
+
 @media (min-width: 768px) {
   .kpi-row { grid-template-columns: repeat(4, 1fr); }
 }
