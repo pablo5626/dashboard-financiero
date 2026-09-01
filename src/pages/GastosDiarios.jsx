@@ -19,7 +19,7 @@ const now = new Date()
 const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
 const PATTERN_MONTHS_BACK = 6
 const CHART_COLORS = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)', 'var(--series-5)', 'var(--series-6)', 'var(--series-7)', 'var(--series-8)']
-const emptyManualForm = { date: new Date().toISOString().slice(0, 10), purpose: '', amount: '', categoryId: '', accountId: '', tag: '' }
+const emptyManualForm = { date: new Date().toISOString().slice(0, 10), type: 'gasto', purpose: '', amount: '', categoryId: '', accountId: '', tag: '' }
 
 function formatDate(iso) {
   return new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', timeZone: 'UTC' })
@@ -121,15 +121,18 @@ export default function GastosDiarios() {
     if (!manualForm.purpose.trim() || !manualForm.amount) return
     setSavingManual(true)
     try {
+      const signedAmount = manualForm.type === 'ingreso'
+        ? Math.abs(Number(manualForm.amount))
+        : -Math.abs(Number(manualForm.amount))
       await createManualTransaction({
         purpose: manualForm.purpose.trim(),
-        amount: -Math.abs(Number(manualForm.amount)),
+        amount: signedAmount,
         occurredAt: `${manualForm.date}T12:00:00Z`,
         categoryId: manualForm.categoryId || null,
         accountId: manualForm.accountId || null,
         tags: manualForm.tag.trim() ? [manualForm.tag.trim().toLowerCase()] : [],
       })
-      setManualForm({ ...emptyManualForm, date: manualForm.date })
+      setManualForm({ ...emptyManualForm, date: manualForm.date, type: manualForm.type })
       await reload()
     } catch (err) {
       setError(err.message)
@@ -317,6 +320,10 @@ export default function GastosDiarios() {
                 {pending.map((t) => {
                   const suggested = suggestions[t.category_id] ?? []
                   const selected = selectedAccountByTx[t.id] ?? suggested[0]?.accountId ?? ''
+                  // Un ingreso puede confirmarse contra la madre (le puede llegar plata
+                  // directo a ella); un gasto se queda restringido a hijas — el dinero
+                  // nunca sale de la madre directamente en este modelo.
+                  const pickableAccounts = Number(t.amount) > 0 ? accounts : hijas
                   return (
                     <tr key={t.id}>
                       <td>{formatDate(t.occurred_at)}</td>
@@ -332,11 +339,11 @@ export default function GastosDiarios() {
                           <option value="">Elegir cuenta…</option>
                           {suggested.map((s) => (
                             <option key={s.accountId} value={s.accountId}>
-                              {hijas.find((h) => h.id === s.accountId)?.name ?? '?'} ({s.count}×)
+                              {pickableAccounts.find((a) => a.id === s.accountId)?.name ?? '?'} ({s.count}×)
                             </option>
                           ))}
-                          {hijas.filter((h) => !suggested.some((s) => s.accountId === h.id)).map((h) => (
-                            <option key={h.id} value={h.id}>{h.name}</option>
+                          {pickableAccounts.filter((a) => !suggested.some((s) => s.accountId === a.id)).map((a) => (
+                            <option key={a.id} value={a.id}>{a.kind === 'madre' ? `${a.name} (madre)` : a.name}</option>
                           ))}
                         </select>
                       </td>
@@ -530,7 +537,9 @@ export default function GastosDiarios() {
             >
               <option value="">Todas las cuentas</option>
               <option value="pending">Pendiente de banco</option>
-              {hijas.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>{a.kind === 'madre' ? `${a.name} (madre)` : a.name}</option>
+              ))}
             </select>
             <input
               placeholder="Tag (ej. rappi)" value={searchFilters.tag}
@@ -625,11 +634,21 @@ export default function GastosDiarios() {
           )}
         </Card>
 
-        <Card title="Agregar gasto manual" className="span-3">
+        <Card title="Agregar movimiento manual" className="span-3">
           <p style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', margin: '0 0 var(--space-1)' }}>
-            Para pruebas o gastos que no vienen del CSV de MonIA — se guarda igual que uno importado, con origen "manual".
+            Para pruebas, gastos o ingresos puntuales que no vienen del CSV de MonIA (ej. plata que le
+            llegó a una cuenta hija o a la madre fuera del CSV) — se guarda igual que uno importado, con
+            origen "manual".
           </p>
           <form onSubmit={handleAddManual} style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            <select
+              value={manualForm.type}
+              onChange={(e) => setManualForm({ ...manualForm, type: e.target.value, accountId: '' })}
+              style={{ ...formInput, width: 110 }}
+            >
+              <option value="gasto">Gasto</option>
+              <option value="ingreso">Ingreso</option>
+            </select>
             <input
               type="date" value={manualForm.date}
               onChange={(e) => setManualForm({ ...manualForm, date: e.target.value })}
@@ -659,7 +678,9 @@ export default function GastosDiarios() {
               style={{ ...formInput, flex: '1 1 150px', minWidth: 0 }}
             >
               <option value="">Pendiente de banco</option>
-              {hijas.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
+              {(manualForm.type === 'ingreso' ? accounts : hijas).map((a) => (
+                <option key={a.id} value={a.id}>{a.kind === 'madre' ? `${a.name} (madre)` : a.name}</option>
+              ))}
             </select>
             <input
               placeholder="Tag (opcional)" value={manualForm.tag}
@@ -670,7 +691,7 @@ export default function GastosDiarios() {
               type="submit" disabled={savingManual}
               style={{ minHeight: 'var(--touch-target)', padding: '0 var(--space-2)', borderRadius: 10, background: 'var(--series-1)', color: '#fff', fontWeight: 600, opacity: savingManual ? 0.6 : 1 }}
             >
-              {savingManual ? 'Guardando…' : 'Agregar gasto'}
+              {savingManual ? 'Guardando…' : manualForm.type === 'ingreso' ? 'Agregar ingreso' : 'Agregar gasto'}
             </button>
           </form>
         </Card>
