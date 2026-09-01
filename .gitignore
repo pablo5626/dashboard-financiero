@@ -6,3 +6,7 @@ dist
 
 # datos financieros reales de MonIA, solo material de referencia local
 MonAi-List-*.csv
+
+# metadata local del Supabase CLI (supabase link) — .temp/pooler-url trae
+# credenciales de conexión reales, nunca debe commitearse
+supabase/

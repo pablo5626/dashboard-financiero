@@ -7,6 +7,13 @@ export async function listAccounts() {
     .eq('is_active', true)
     .order('kind', { ascending: false }) // 'madre' antes que 'hija'
     .order('sort_order', { ascending: true })
+    // Todas las cuentas comparten sort_order = 0 (no hay UI para reordenarlas
+    // todavía), así que sin un desempate determinista Postgres no garantiza
+    // el mismo orden entre consultas — la lista podía reordenarse solo al
+    // recargar, haciendo parecer que un valor editado en una fila terminó
+    // afectando la fila de abajo cuando en realidad cada guardado sí fue a
+    // la cuenta correcta, solo que su posición visual había cambiado.
+    .order('created_at', { ascending: true })
   if (error) throw error
   return data
 }
