@@ -86,7 +86,7 @@ export async function fetchMonthlyTrend(accountIds, months, { convertToCOP = tru
 
 export async function fetchTotalDebt() {
   const [{ data, error }, rate] = await Promise.all([
-    supabase.from('debts').select('remaining_amount, currency').eq('is_active', true),
+    supabase.from('debts').select('remaining_amount, currency').eq('is_active', true).eq('direction', 'debo'),
     getRate(),
   ])
   if (error) throw error
@@ -128,7 +128,7 @@ export async function fetchAlerts() {
     pendingCount, { data: allCategories, error: e5 }, { data: expenseRows, error: e6 },
   ] = await Promise.all([
     supabase.from('fixed_expenses').select('id, name, amount, due_day').eq('is_active', true),
-    supabase.from('debt_installments').select('id, due_date, amount, debts(creditor_name, is_active)').eq('paid', false).lte('due_date', dueSoonCutoff),
+    supabase.from('debt_installments').select('id, due_date, amount, debts(creditor_name, is_active, direction)').eq('paid', false).lte('due_date', dueSoonCutoff),
     supabase.from('savings_goals').select('id, name, current_amount, target_amount, target_date').eq('is_active', true).eq('kind', 'puntual').not('target_date', 'is', null),
     countPendingTransactions(),
     supabase.from('categories').select('id, name, monthly_budget'),
@@ -181,7 +181,7 @@ export async function fetchAlerts() {
   }
 
   for (const inst of debtInstallments) {
-    if (!inst.debts?.is_active) continue
+    if (!inst.debts?.is_active || inst.debts?.direction === 'me_deben') continue
     const daysUntil = Math.round((new Date(inst.due_date) - today) / MS_PER_DAY)
     alerts.push({
       id: `debt-${inst.id}`,

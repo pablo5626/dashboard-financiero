@@ -132,6 +132,7 @@ create table transactions (
   assignment_level smallint,                  -- 1 = tag banco, 2 = categoría inequívoca, 3 = manual
   assignment_confirmed boolean not null default false,
   origin text not null default 'csv_import' check (origin in ('csv_import', 'manual')),
+  loan_reviewed boolean not null default false, -- true una vez que una fila de categoría "Préstamo" (dinero prestado saliente) fue vinculada a un registro en `debts` o descartada explícitamente — evita volver a sugerirla en cada importación
   created_at timestamptz not null default now(),
   unique (user_id, monia_id)
 );
@@ -199,6 +200,12 @@ create table debts (
   start_date date,
   is_active boolean not null default true,
   schedule_synced_remaining_amount numeric,   -- snapshot de remaining_amount al generar/regenerar el cronograma; drift vs. remaining_amount = cronograma desactualizado
+  direction text not null default 'debo' check (direction in ('debo', 'me_deben')), -- 'debo' = deuda propia, 'me_deben' = préstamo dado (cobro pendiente)
+  counterparty_relationship text check (counterparty_relationship is null or counterparty_relationship in ('amigo', 'familiar', 'companero', 'pareja', 'conocido', 'otro')), -- solo aplica cuando direction = 'me_deben'
+  contact_info text,                          -- teléfono/contacto opcional, solo 'me_deben'
+  expected_payment_date date,                 -- fecha esperada de pago, opcional, solo 'me_deben'
+  notes text,                                 -- motivo / descripción libre
+  source_transaction_id uuid references transactions(id), -- si se creó desde un movimiento MonIA de categoría "Préstamo" detectado en el import, referencia esa fila
   created_at timestamptz not null default now()
 );
 
@@ -209,7 +216,9 @@ create table debt_installments (
   due_date date not null,
   amount numeric not null,
   paid boolean not null default false,
-  paid_at timestamptz
+  paid_at timestamptz,
+  linked_transaction_id uuid references transactions(id), -- para abonos de 'me_deben' con cuenta destino: la transacción real que refleja el ingreso, para poder revertirla si se borra el abono
+  account_id uuid references accounts(id) -- copia de la cuenta destino del abono, solo para mostrarla en la tabla sin tener que hacer join contra transactions
 );
 
 -- ----------------------------------------------------------------------------

@@ -170,7 +170,7 @@ function generateLocalId() {
 }
 
 export async function createManualTransaction({ purpose, amount, occurredAt, categoryId, accountId, tags }) {
-  const { error } = await supabase.from('transactions').insert({
+  const { data, error } = await supabase.from('transactions').insert({
     monia_id: `manual-${generateLocalId()}`,
     occurred_at: occurredAt,
     purpose,
@@ -182,8 +182,9 @@ export async function createManualTransaction({ purpose, amount, occurredAt, cat
     assignment_level: accountId ? 3 : null,
     assignment_confirmed: !!accountId,
     origin: 'manual',
-  })
+  }).select().single()
   if (error) throw error
+  return data
 }
 
 export async function countPendingTransactions() {
@@ -372,4 +373,32 @@ export function detectRecurringCandidates(expenses, existingFixedNames, minMonth
   }
 
   return candidates.sort((a, b) => b.monthsSeen - a.monthsSeen)
+}
+
+// Movimientos de la categoría "Préstamo" (dinero prestado saliente, monto
+// negativo) que todavía no fueron revisados — ni vinculados a un registro en
+// `debts` (direction = 'me_deben') ni descartados explícitamente. Se filtra
+// por category_id ya resuelto (no por nombre en cada fila) para no depender
+// del join; si la categoría "Préstamo" no existe en el catálogo del usuario
+// todavía, categoryId es null y no hay nada que detectar.
+export async function listUnreviewedLoanTransactions(categoryId) {
+  if (!categoryId) return []
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('id, purpose, amount, occurred_at')
+    .eq('category_id', categoryId)
+    .eq('loan_reviewed', false)
+    .lt('amount', 0)
+    .order('occurred_at', { ascending: false })
+  if (error) throw error
+  return data
+}
+
+// Marca un movimiento de categoría "Préstamo" como revisado, ya sea porque
+// se creó un préstamo (debts.source_transaction_id) a partir de él o porque
+// el usuario decidió ignorarlo — en ambos casos deja de sugerirse en
+// próximas importaciones.
+export async function markLoanTransactionReviewed(id) {
+  const { error } = await supabase.from('transactions').update({ loan_reviewed: true }).eq('id', id)
+  if (error) throw error
 }

@@ -6,7 +6,10 @@ export async function listDebts() {
   return data
 }
 
-export async function createDebt({ creditorName, totalAmount, remainingAmount, interestRate, monthlyPayment, termMonths, startDate }) {
+export async function createDebt({
+  creditorName, totalAmount, remainingAmount, interestRate, monthlyPayment, termMonths, startDate,
+  direction, counterpartyRelationship, contactInfo, expectedPaymentDate, notes, sourceTransactionId,
+}) {
   const { data, error } = await supabase.from('debts').insert({
     creditor_name: creditorName,
     total_amount: totalAmount,
@@ -15,6 +18,12 @@ export async function createDebt({ creditorName, totalAmount, remainingAmount, i
     monthly_payment: monthlyPayment ?? null,
     term_months: termMonths ?? null,
     start_date: startDate || null,
+    direction: direction || 'debo',
+    counterparty_relationship: counterpartyRelationship || null,
+    contact_info: contactInfo || null,
+    expected_payment_date: expectedPaymentDate || null,
+    notes: notes || null,
+    source_transaction_id: sourceTransactionId || null,
   }).select().single()
   if (error) throw error
   return data
@@ -87,6 +96,56 @@ export function generateAmortizationSchedule(principal, monthlyRatePercent, term
 export async function deleteInstallment(id) {
   const { error } = await supabase.from('debt_installments').delete().eq('id', id)
   if (error) throw error
+}
+
+// Registra un abono de 'me_deben' ya recibido (a diferencia de una cuota de
+// 'debo', que nace pendiente y se marca pagada después, un abono es plata
+// que YA llegó): crea la cuota directamente en paid=true y descuenta
+// remaining_amount de una vez, en el mismo paso — sin el ida y vuelta de
+// agregar + marcar pagada que usa el flujo de 'debo'. `linkedTransactionId`
+// es opcional (viene de createManualTransaction cuando el usuario indicó a
+// qué cuenta llegó el abono) y solo se guarda como referencia para poder
+// revertir esa transacción si el abono se borra.
+export async function addAbono(debt, { date, amount, linkedTransactionId, accountId }) {
+  const { data: inst, error: e1 } = await supabase.from('debt_installments').insert({
+    debt_id: debt.id, due_date: date, amount, paid: true, paid_at: new Date().toISOString(),
+    linked_transaction_id: linkedTransactionId || null,
+    account_id: accountId || null,
+  }).select().single()
+  if (e1) throw e1
+
+  const newRemaining = Math.max(0, Number(debt.remaining_amount) - Number(amount))
+  const fields = { remaining_amount: newRemaining }
+  const hasSchedule = debt.schedule_synced_remaining_amount != null
+  if (hasSchedule) fields.schedule_synced_remaining_amount = Math.max(0, Number(debt.schedule_synced_remaining_amount) - Number(amount))
+
+  const { error: e2 } = await supabase.from('debts').update(fields).eq('id', debt.id)
+  if (e2) throw e2
+  return { installment: inst, remainingAmount: newRemaining }
+}
+
+// Contraparte de addAbono: borra la cuota, revierte remaining_amount (a
+// diferencia de deleteInstallment/deleteUnpaidInstallments, que no tocan el
+// saldo porque operan sobre cuotas de 'debo' aún no pagadas) y borra también
+// la transacción vinculada si el abono tenía cuenta destino, para que el
+// saldo de esa cuenta no quede inflado por un abono que ya no existe.
+export async function deleteAbono(installment, debt) {
+  const { error: e1 } = await supabase.from('debt_installments').delete().eq('id', installment.id)
+  if (e1) throw e1
+
+  if (installment.linked_transaction_id) {
+    const { error: e2 } = await supabase.from('transactions').delete().eq('id', installment.linked_transaction_id)
+    if (e2) throw e2
+  }
+
+  const newRemaining = Number(debt.remaining_amount) + Number(installment.amount)
+  const fields = { remaining_amount: newRemaining }
+  const hasSchedule = debt.schedule_synced_remaining_amount != null
+  if (hasSchedule) fields.schedule_synced_remaining_amount = Number(debt.schedule_synced_remaining_amount) + Number(installment.amount)
+
+  const { error: e3 } = await supabase.from('debts').update(fields).eq('id', debt.id)
+  if (e3) throw e3
+  return { remainingAmount: newRemaining }
 }
 
 // Borra solo las cuotas no pagadas de una deuda, para poder regenerar el
