@@ -20,7 +20,13 @@
   font-weight: 600;
   font-size: clamp(18px, 15cqi, 28px);
   line-height: 1.2;
-  font-variant-numeric: tabular-nums;
+  /* Sin tabular-nums a propósito: forzaba a cada dígito al mismo ancho fijo,
+     así que el "1" (angosto por naturaleza) quedaba con relleno a los lados
+     y se veía suelto frente al resto — "9.116.759" mostraba los unos
+     separados y el "759" agrupado. Acá el valor se lee solo, no se compara
+     en columna con otras filas, así que el ancho proporcional se ve mejor.
+     En .simple-table (index.css) sí se mantiene, porque ahí alinear los
+     dígitos entre filas es justamente lo que se quiere. */
   white-space: nowrap;
 }
 
