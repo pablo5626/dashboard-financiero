@@ -288,8 +288,11 @@ Supabase, no sample data left anywhere:
 - **`GastosDiarios.jsx`**: MonIA CSV import (month/year picker, dedup via
   `monia_id`), the bank-assignment engine above, a "Pendientes de banco"
   confirmation table with historical-frequency suggestions, per-category
-  monthly budgets, spend-by-category and spend-by-tag bar charts, gasto
-  real vs. presupuesto asignado per cuenta hija, a "candidatos a gasto
+  monthly budgets, spend-by-category and spend-by-tag bar charts (the
+  spend-by-tag chart excludes `BANK_TAGS` — a transaction typically carries
+  both a bank tag and a descriptive tag in the same `tags` array, so
+  without this filter the same amount would be double-counted under both),
+  gasto real vs. presupuesto asignado per cuenta hija, a "candidatos a gasto
   fijo" detector that flags a description repeated in ≥3 of the last 6
   months and offers to add it as a recurring fixed expense, a manual
   expense form (`transactionsApi.createManualTransaction`) that brought
