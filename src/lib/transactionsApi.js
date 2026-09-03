@@ -8,6 +8,12 @@ import { listCategories } from './categoriesApi.js'
 // nombre (en minúsculas) de una cuenta hija real para poder asignarla.
 const BANK_TAGS = ['dale', 'nequi', 'rappi', 'nubank', 'efectivo', 'pibank']
 
+// Tag de nivel 1 que, a diferencia de BANK_TAGS, no asigna una cuenta sino
+// que resuelve la fila a "sin cuenta, a propósito" (gastos puntuales de
+// manejo de divisas, ya expresados en COP en el CSV) — nunca debe entrar a
+// la cola de "pendiente de banco" ni sumar a sus contadores/alertas.
+const MONEY_TAG = 'moneda'
+
 // Parsea el CSV exportado de MonIA (columnas: date, purpose, amount,
 // currency, category, emoji, creator, creator_name, tags, timezone, id) a
 // un shape intermedio en camelCase, sin tocar Supabase todavía.
@@ -120,6 +126,11 @@ export async function importTransactions(rows, year, month) {
       accountId = tagAccountId
       assignmentLevel = 1
       assignmentConfirmed = true
+    } else if (r.tags.includes(MONEY_TAG)) {
+      // Resuelto a propósito sin cuenta — corta acá, nunca cae a nivel 2/3.
+      accountId = null
+      assignmentLevel = 1
+      assignmentConfirmed = true
     } else if (currencyAccountId) {
       accountId = currencyAccountId
       assignmentLevel = 1
@@ -192,6 +203,7 @@ export async function countPendingTransactions() {
     .from('transactions')
     .select('*', { count: 'exact', head: true })
     .is('account_id', null)
+    .eq('assignment_confirmed', false)
   if (error) throw error
   return count ?? 0
 }
@@ -201,6 +213,7 @@ export async function listPendingTransactions() {
     .from('transactions')
     .select('*, categories(name)')
     .is('account_id', null)
+    .eq('assignment_confirmed', false)
     .order('occurred_at', { ascending: false })
   if (error) throw error
   return data

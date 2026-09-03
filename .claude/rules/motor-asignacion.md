@@ -14,7 +14,19 @@ en este orden, priorizando siempre el dato explícito sobre la especulación:
    específico, así que gana en el caso raro de conflicto):
    a. **Tag de banco** (`dale`, `nequi`, `rappi`, `nubank`, `efectivo`,
       `pibank` dentro del campo `tags` del CSV) → asignación automática.
-   b. **Moneda de la fila** (`currency` del CSV, ej. `USD`): si es distinta
+   b. **Tag `moneda`**: a diferencia de un tag de banco, no asigna ninguna
+      cuenta — resuelve la fila a `account_id = null` de forma permanente y
+      ya resuelta (`assignment_level = 1`, `assignment_confirmed = true`).
+      Es para gastos puntuales de manejo de divisas que el usuario etiqueta
+      a mano en MonIA y cuyo monto ya viene en COP en el CSV (no hay
+      conversión de moneda involucrada) — por diseño nunca deben terminar en
+      una cuenta hija ni madre. Al no ser "pendiente" real
+      (`assignment_confirmed = true`), no entra a la cola de "Pendientes de
+      banco" ni suma al badge/alerta de pendientes. Gana sobre el match por
+      `currency` (punto c) y sobre la categoría inequívoca (nivel 2) — solo
+      un tag de banco (punto a) puede ganarle, si por algún motivo raro
+      coexisten en la misma fila.
+   c. **Moneda de la fila** (`currency` del CSV, ej. `USD`): si es distinta
       de COP y existe exactamente una cuenta hija activa con esa moneda
       (ej. "arq"), se asigna esa cuenta automáticamente — la moneda es un
       dato explícito de la transacción, no una inferencia, igual que el tag.

@@ -185,7 +185,17 @@ tag wins if a row somehow has both), (2) a category with
 banco") for manual confirmation in `GastosDiarios.jsx`, which also feeds
 `category_account_stats` to improve future suggestion ordering. Never add
 a 4th, frequency/probability-based auto-assignment level — this is an
-explicit, repeatedly-reinforced user rule.
+explicit, repeatedly-reinforced user rule. A `moneda` tag is a fourth
+level-1 signal that, unlike a bank tag, does *not* assign an account — it
+resolves the row to `account_id = null` on purpose (`assignment_level = 1`,
+`assignment_confirmed = true`) for one-off currency-exchange purchases the
+user tags by hand in MonIA, whose amount is already in COP in the CSV.
+Because it's marked `assignment_confirmed = true` rather than needing the
+default `false`, it never shows up in "pendiente de banco" or its
+badge/alert count — both `countPendingTransactions` and
+`listPendingTransactions` filter on `assignment_confirmed = false`, not
+just `account_id is null`, specifically so these rows are excluded without
+a schema change.
 
 **Alerts system** (`panelApi.fetchAlerts`, rendered in `PanelGeneral.jsx`'s
 "Alertas" card): surfaces fixed expenses and debt installments due within

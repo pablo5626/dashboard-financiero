@@ -586,7 +586,7 @@ export default function GastosDiarios() {
                         <td>{t.purpose}</td>
                         <td>{formatCOP(t.amount)}</td>
                         <td>{t.categories?.name ?? '—'}</td>
-                        <td>{t.accounts?.name ?? '— pendiente —'}</td>
+                        <td>{t.accounts?.name ?? (t.assignment_confirmed ? '— sin cuenta (moneda) —' : '— pendiente —')}</td>
                         <td>{(t.tags ?? []).join(', ') || '—'}</td>
                         <td>
                           <button onClick={() => handleDeleteTx(t)} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button>
@@ -619,7 +619,7 @@ export default function GastosDiarios() {
                     <td>{t.purpose}</td>
                     <td>{formatCOP(t.amount)}</td>
                     <td>{t.categories?.name ?? '—'}</td>
-                    <td>{t.accounts?.name ?? '— pendiente —'}</td>
+                    <td>{t.accounts?.name ?? (t.assignment_confirmed ? '— sin cuenta (moneda) —' : '— pendiente —')}</td>
                     <td>
                       <button onClick={() => handleDeleteTx(t)} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button>
                     </td>
