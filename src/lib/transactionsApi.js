@@ -6,7 +6,7 @@ import { listCategories } from './categoriesApi.js'
 // Tags de banco/medio de pago reconocidos por el motor de asignación
 // (nivel 1 — ver .claude/rules/motor-asignacion.md). Deben coincidir con el
 // nombre (en minúsculas) de una cuenta hija real para poder asignarla.
-const BANK_TAGS = ['dale', 'nequi', 'rappi', 'nubank', 'efectivo', 'pibank']
+export const BANK_TAGS = ['dale', 'nequi', 'rappi', 'nubank', 'efectivo', 'pibank']
 
 // Tag de nivel 1 que, a diferencia de BANK_TAGS, no asigna una cuenta sino
 // que resuelve la fila a "sin cuenta, a propósito" (gastos puntuales de

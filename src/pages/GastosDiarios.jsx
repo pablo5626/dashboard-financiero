@@ -11,7 +11,7 @@ import {
   parseMonIACSV, filterRowsByMonth, importTransactions,
   listPendingTransactions, fetchSuggestionsForCategories, confirmAssignment,
   listTransactionsForMonth, listRecentExpenses, detectRecurringCandidates,
-  searchTransactions, deleteTransaction, createManualTransaction,
+  searchTransactions, deleteTransaction, createManualTransaction, BANK_TAGS,
 } from '../lib/transactionsApi.js'
 
 const now = new Date()
@@ -235,7 +235,10 @@ export default function GastosDiarios() {
     const amount = -Number(t.amount)
     spentByCategory[t.category_id] = (spentByCategory[t.category_id] ?? 0) + amount
     if (t.account_id) spentByAccount[t.account_id] = (spentByAccount[t.account_id] ?? 0) + amount
-    for (const tag of t.tags ?? []) spentByTag[tag] = (spentByTag[tag] ?? 0) + amount
+    for (const tag of t.tags ?? []) {
+      if (BANK_TAGS.includes(tag)) continue
+      spentByTag[tag] = (spentByTag[tag] ?? 0) + amount
+    }
   }
 
   const categoryChartData = categories
