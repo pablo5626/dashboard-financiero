@@ -155,24 +155,58 @@ to `fetchMonthlyTrend` when the caller wants a trend to stay in the
 linked account's native currency instead (used by 'proposito' savings
 goals tied to a USD account).
 
-**Multi-currency (COP/USD)**: `accounts.currency` (default `'COP'`) is the
-only account-level currency field; `transactions`, `account_transfers`,
-`monthly_initial_balances`, `account_allocations`, `debts`,
-`fixed_expenses`, and `savings_goals` each carry their own `currency` too.
-The manual exchange rate (one live row, `exchange_rates` table,
-`base_currency='COP'`/`quote_currency='USD'`) is edited from a "Tasa de
-cambio" card in `Cuentas.jsx` via `exchangeRatesApi.getRate`/`setRate`; if
-it isn't set yet, `toCOP` returns `0` for USD amounts rather than
-inventing a conversion, so USD balances are silently excluded from
-consolidated totals (Panel General, Deudas) until the user sets it — a
-warning is shown on that Cuentas card when this is the case. USD accounts
-are deliberately kept out of `MonthlyAllocationSection` (madre→hijas
-monthly distribution) and `FixedExpensesSection` (recurring fixed
-expenses) — neither component has any currency concept, and the one real
-USD account (**arq**) is used ~once a year for international purchases,
-so it doesn't participate in either monthly ritual. Individual debts
-(`Deudas.jsx`) are COP-only in the UI for now — only the consolidated
-"Deuda total vs. Patrimonio" comparison is currency-aware.
+**Multi-currency (COP/USD/EUR)**: `accounts.currency` (default `'COP'`) is
+the only account-level currency field (free text, no CHECK/enum — any
+currency code is technically legal, but only COP/USD/EUR have real support
+in the UI, see `CURRENCIES` in `format.js`); `transactions`,
+`account_transfers`, `monthly_initial_balances`, `account_allocations`,
+`debts`, `fixed_expenses`, and `savings_goals` each carry their own
+`currency` too. `arq` isn't a simple USD account — it's a multi-currency
+account (several manually-tracked pockets) whose USD and EUR pockets are
+each modeled as their own `accounts` row. Exchange rates are **one row per
+currency pair** in `exchange_rates` (`base_currency`/`quote_currency`/
+`rate`, unique per `(user_id, base_currency, quote_currency)`), edited
+from a "Tasa de cambio" card in `Cuentas.jsx` via
+`exchangeRatesApi.getRates`/`setRate(base, quote, rate)` — up to 3 pairs in
+practice (COP↔USD, COP↔EUR, USD↔EUR); the USD↔EUR pair is stored directly
+rather than derived by crossing the two COP rates, since a real USD→EUR
+exchange (the most common cross-currency movement) doesn't necessarily
+match a rate computed by pivoting through COP. A `(base, quote, rate)` row
+always means "1 `quote` = `rate` `base`" (e.g. `base='COP'`,
+`quote='USD'`, `rate=4000` → "1 USD = 4000 COP"), consistently across all
+3 pairs — so the "Tasa de cambio" card's third row, `(base='USD',
+quote='EUR')`, reads "1 EUR = rate USD" (e.g. `rate=1.16` → 1 EUR = 1.16
+USD). **This bit us once already**: a user-quoted "dollar to euro" rate
+(e.g. "0.86", meaning "1 USD buys 0.86 EUR") is the *reciprocal* of what
+this field expects — it must be entered as `1 / 0.86 ≈ 1.16`, not typed in
+as-is. There's no validation catching an inverted rate (any positive
+number is "valid"), so double-check which direction a quoted rate is in
+before saving it here. `exchangeRatesApi.toCOP`
+(used for consolidated totals in Panel General/Deudas) and the generic
+`convertAmount(amount, from, to, rates)` it's built on both take the full
+`rates` array rather than a single scalar, and look up the matching pair
+(or its inverse) each time; if no rate is configured for a given
+non-COP currency, `toCOP` returns `0` rather than inventing a conversion,
+so that currency's balances are silently excluded from consolidated totals
+until the user sets it — a warning is shown on the Cuentas card when this
+is the case. A dedicated `CurrencyExchangeSection.jsx` widget (rendered in
+`Cuentas.jsx`, above `TransferHistorySection`) exists specifically to
+register a currency swap between two accounts quickly: it prefills the
+destination amount via `convertAmount` using whatever rate is configured
+for that pair (still editable, since the real rate of a one-off exchange —
+bank spread, cash exchange house — rarely matches the saved manual rate
+exactly), then writes a single row to `account_transfers` via the same
+`transfersApi.createTransfers` used by `TransferHistorySection` — so it has
+no separate history list, its rows just show up in
+`TransferHistorySection`'s table for the month like any other transfer.
+Non-COP accounts (USD or EUR) are deliberately kept out of
+`MonthlyAllocationSection` (madre→hijas monthly distribution) and
+`FixedExpensesSection` (recurring fixed expenses) — neither component has
+any currency concept, and arq's pockets are used rarely enough (mostly
+international purchases) that they don't participate in either monthly
+ritual. Individual debts (`Deudas.jsx`) are COP-only in the UI for now —
+only the consolidated "Deuda total vs. Patrimonio" comparison is
+currency-aware.
 
 **Bank-assignment engine** (full rules in `.claude/rules/motor-asignacion.md`,
 implemented in `transactionsApi.js`'s `importTransactions`): a MonIA CSV
@@ -291,9 +325,14 @@ Supabase, no sample data left anywhere:
   `accountsApi.fetchBalancesForMonth` credits the destination account using
   `to_amount`/`to_currency` when present (falling back to `amount`/
   `currency` otherwise) while the source account is always debited in its
-  own `amount`/`currency`. Also fixed-expenses CRUD with
+  own `amount`/`currency`. `CurrencyExchangeSection.jsx` (above
+  `TransferHistorySection.jsx`) is the fast path for that same scenario —
+  same underlying `createTransfers` call, but with the destination amount
+  pre-filled from the saved per-pair rate instead of typed by hand every
+  time. Also fixed-expenses CRUD with
   per-month paid status (`FixedExpensesSection.jsx`), and the
-  exchange-rate card.
+  exchange-rate card (now one row per currency pair, see "Multi-currency"
+  above).
 - **`GastosDiarios.jsx`**: MonIA CSV import (month/year picker, dedup via
   `monia_id`), the bank-assignment engine above, a "Pendientes de banco"
   confirmation table with historical-frequency suggestions, per-category

@@ -50,7 +50,8 @@ create table exchange_rates (
   base_currency text not null default 'COP',
   quote_currency text not null default 'USD',
   rate numeric not null,                      -- ej. 1 USD = 4000 COP -> rate = 4000
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  unique (user_id, base_currency, quote_currency)
 );
 
 -- ----------------------------------------------------------------------------

@@ -9,7 +9,7 @@ import StatTile from '../components/ui/StatTile.jsx'
 import { formatCOP, formatCompact } from '../lib/format.js'
 import { listAccounts, fetchBalancesForMonth } from '../lib/accountsApi.js'
 import { lastNMonths, fetchMonthlyTrend, fetchTotalDebt, fetchAlerts } from '../lib/panelApi.js'
-import { getRate, toCOP } from '../lib/exchangeRatesApi.js'
+import { getRates, toCOP } from '../lib/exchangeRatesApi.js'
 
 const STATUS_DOT = {
   good: 'var(--status-good)',
@@ -56,7 +56,7 @@ function alertText(a) {
 export default function PanelGeneral() {
   const [accounts, setAccounts] = useState(null)
   const [balances, setBalances] = useState({})
-  const [rate, setRate] = useState(null)
+  const [rates, setRates] = useState([])
   const [trend, setTrend] = useState(null)
   const [totalDebt, setTotalDebt] = useState(0)
   const [alerts, setAlerts] = useState([])
@@ -72,9 +72,9 @@ export default function PanelGeneral() {
         const ids = accs.map((a) => a.id)
         const currentYearMonths = Array.from({ length: MONTH }, (_, i) => ({ year: YEAR, month: i + 1 }))
         const previousYearMonths = Array.from({ length: MONTH }, (_, i) => ({ year: YEAR - 1, month: i + 1 }))
-        const [{ balances: b }, currentRate, trendRows, debt, alertRows, yoyCurrentRows, yoyPreviousRows] = await Promise.all([
+        const [{ balances: b }, currentRates, trendRows, debt, alertRows, yoyCurrentRows, yoyPreviousRows] = await Promise.all([
           fetchBalancesForMonth(accs, YEAR, MONTH),
-          getRate(),
+          getRates(),
           fetchMonthlyTrend(ids, lastNMonths(YEAR, MONTH, TREND_MONTHS)),
           fetchTotalDebt(),
           fetchAlerts(),
@@ -82,7 +82,7 @@ export default function PanelGeneral() {
           fetchMonthlyTrend(ids, previousYearMonths),
         ])
         setBalances(b)
-        setRate(currentRate)
+        setRates(currentRates)
         setTrend(trendRows)
         setTotalDebt(debt)
         setAlerts(alertRows)
@@ -104,7 +104,7 @@ export default function PanelGeneral() {
   }
 
   const hijas = accounts.filter((a) => a.kind === 'hija')
-  const balanceTotal = accounts.reduce((sum, a) => sum + toCOP(balances[a.id] ?? 0, a.currency, rate?.rate), 0)
+  const balanceTotal = accounts.reduce((sum, a) => sum + toCOP(balances[a.id] ?? 0, a.currency, rates), 0)
 
   const netWorthTrend = trend.map((t) => ({
     month: MONTH_LABELS[t.month - 1],
@@ -176,7 +176,7 @@ export default function PanelGeneral() {
 
         <Card title="Distribución por cuenta">
           <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={hijas.map((a) => ({ name: a.name, balance: toCOP(balances[a.id] ?? 0, a.currency, rate?.rate) }))} layout="vertical" margin={{ left: 8 }}>
+            <BarChart data={hijas.map((a) => ({ name: a.name, balance: toCOP(balances[a.id] ?? 0, a.currency, rates) }))} layout="vertical" margin={{ left: 8 }}>
               <CartesianGrid horizontal={false} stroke="var(--gridline)" />
               <XAxis type="number" hide />
               <YAxis type="category" dataKey="name" width={70} tick={{ fill: 'var(--text-secondary)', fontSize: 12 }} axisLine={false} tickLine={false} />

@@ -1,6 +1,6 @@
 import { supabase } from './supabaseClient.js'
 import { countPendingTransactions } from './transactionsApi.js'
-import { getRate, toCOP } from './exchangeRatesApi.js'
+import { getRates, toCOP } from './exchangeRatesApi.js'
 
 // Devuelve los últimos n meses (incluyendo year/month) ordenados de más
 // antiguo a más reciente, como [{ year, month }, ...].
@@ -36,7 +36,7 @@ export async function fetchMonthlyTrend(accountIds, months, { convertToCOP = tru
   const afterLast = last.month === 12 ? { year: last.year + 1, month: 1 } : { year: last.year, month: last.month + 1 }
   const rangeEnd = `${afterLast.year}-${String(afterLast.month).padStart(2, '0')}-01`
 
-  const [{ data: initialBalances, error: e1 }, { data: transfers, error: e2 }, { data: transactions, error: e3 }, rate] =
+  const [{ data: initialBalances, error: e1 }, { data: transfers, error: e2 }, { data: transactions, error: e3 }, rates] =
     await Promise.all([
       supabase.from('monthly_initial_balances').select('account_id, year, month, initial_balance, currency')
         .gte('year', first.year).lte('year', last.year).in('account_id', accountIds),
@@ -44,14 +44,14 @@ export async function fetchMonthlyTrend(accountIds, months, { convertToCOP = tru
         .gte('transfer_date', rangeStart).lt('transfer_date', rangeEnd),
       supabase.from('transactions').select('account_id, amount, occurred_at, currency')
         .gte('occurred_at', rangeStart).lt('occurred_at', rangeEnd),
-      convertToCOP ? getRate() : Promise.resolve(null),
+      convertToCOP ? getRates() : Promise.resolve([]),
     ])
   if (e1) throw e1
   if (e2) throw e2
   if (e3) throw e3
 
   const accountIdSet = new Set(accountIds)
-  const convert = (amount, currency) => (convertToCOP ? toCOP(amount, currency, rate?.rate) : amount)
+  const convert = (amount, currency) => (convertToCOP ? toCOP(amount, currency, rates) : amount)
 
   return months.map(({ year, month }) => {
     const monthStart = new Date(Date.UTC(year, month - 1, 1))
@@ -85,12 +85,12 @@ export async function fetchMonthlyTrend(accountIds, months, { convertToCOP = tru
 }
 
 export async function fetchTotalDebt() {
-  const [{ data, error }, rate] = await Promise.all([
+  const [{ data, error }, rates] = await Promise.all([
     supabase.from('debts').select('remaining_amount, currency').eq('is_active', true).eq('direction', 'debo'),
-    getRate(),
+    getRates(),
   ])
   if (error) throw error
-  return data.reduce((sum, d) => sum + toCOP(Number(d.remaining_amount), d.currency, rate?.rate), 0)
+  return data.reduce((sum, d) => sum + toCOP(Number(d.remaining_amount), d.currency, rates), 0)
 }
 
 const MS_PER_DAY = 86400000

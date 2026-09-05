@@ -83,7 +83,7 @@ export default function MonthlyInitialBalancesSection({ accounts, year, month, o
               const row = existing[a.id]
               return (
                 <tr key={a.id}>
-                  <td>{a.name}{currency === 'USD' && <span style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', marginLeft: 6 }}>USD</span>}</td>
+                  <td>{a.name}{currency !== 'COP' && <span style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', marginLeft: 6 }}>{currency}</span>}</td>
                   <td>
                     <input
                       type="number" value={values[a.id] ?? ''}

@@ -5,7 +5,7 @@ import ConfirmDialog from '../components/ui/ConfirmDialog.jsx'
 import StatTile from '../components/ui/StatTile.jsx'
 import { formatCOP } from '../lib/format.js'
 import { listAccounts, fetchBalancesForMonth } from '../lib/accountsApi.js'
-import { getRate, toCOP } from '../lib/exchangeRatesApi.js'
+import { getRates, toCOP } from '../lib/exchangeRatesApi.js'
 import { listCategories } from '../lib/categoriesApi.js'
 import { createManualTransaction, listUnreviewedLoanTransactions, markLoanTransactionReviewed } from '../lib/transactionsApi.js'
 import {
@@ -75,7 +75,7 @@ export default function Deudas() {
   const [installments, setInstallments] = useState([])
   const [accounts, setAccounts] = useState([])
   const [patrimonio, setPatrimonio] = useState(0)
-  const [rate, setRate] = useState(null)
+  const [rates, setRates] = useState([])
   const [error, setError] = useState(null)
 
   const [activeDirection, setActiveDirection] = useState('debo')
@@ -110,12 +110,12 @@ export default function Deudas() {
       setPrestamoCategoryId(prestamoCategory?.id ?? null)
       setLoanCandidates(await listUnreviewedLoanTransactions(prestamoCategory?.id ?? null))
 
-      const [{ balances }, currentRate] = await Promise.all([
+      const [{ balances }, currentRates] = await Promise.all([
         fetchBalancesForMonth(accountsList, YEAR, MONTH),
-        getRate(),
+        getRates(),
       ])
-      setRate(currentRate)
-      setPatrimonio(accountsList.reduce((sum, a) => sum + toCOP(balances[a.id] ?? 0, a.currency, currentRate?.rate), 0))
+      setRates(currentRates)
+      setPatrimonio(accountsList.reduce((sum, a) => sum + toCOP(balances[a.id] ?? 0, a.currency, currentRates), 0))
     } catch (err) {
       setError(err.message)
     }
@@ -367,9 +367,9 @@ export default function Deudas() {
   if (!debts) return <p style={{ color: 'var(--text-muted)' }}>Cargando deudas…</p>
 
   const deudaDebo = debts.filter((d) => (d.direction || 'debo') === 'debo')
-  const deudaTotal = deudaDebo.reduce((sum, d) => sum + toCOP(Number(d.remaining_amount), d.currency, rate?.rate), 0)
+  const deudaTotal = deudaDebo.reduce((sum, d) => sum + toCOP(Number(d.remaining_amount), d.currency, rates), 0)
   const totalMeDeben = debts.filter((d) => d.direction === 'me_deben')
-    .reduce((sum, d) => sum + toCOP(Number(d.remaining_amount), d.currency, rate?.rate), 0)
+    .reduce((sum, d) => sum + toCOP(Number(d.remaining_amount), d.currency, rates), 0)
   const saldoNeto = totalMeDeben - deudaTotal
   const visibleDebts = debts.filter((d) => (d.direction || 'debo') === activeDirection)
   const healthData = [
