@@ -249,7 +249,7 @@ export default function Cuentas() {
 
         <MonthlyInitialBalancesSection accounts={accounts} year={YEAR} month={MONTH} onSaved={reload} />
 
-        <TransferHistorySection accounts={accountsCop} year={YEAR} month={MONTH} onSaved={reload} />
+        <TransferHistorySection accounts={accounts} year={YEAR} month={MONTH} onSaved={reload} />
 
         <FixedExpensesSection accounts={accountsCop} />
       </div>

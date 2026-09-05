@@ -282,7 +282,16 @@ Supabase, no sample data left anywhere:
   re-save of the plan; a `TransferHistorySection.jsx` below it lists the
   month's transfers (any account pair, not just madre→hija) with a small
   add/delete form, covering the "Historial de transferencias" line from
-  `prompt-dashboard-financiero.md`. Also fixed-expenses CRUD with
+  `prompt-dashboard-financiero.md`. A transfer between accounts of
+  different currency (e.g. a COP hija → **arq**, USD) is supported via two
+  manual amounts — `account_transfers.to_amount`/`to_currency` (nullable,
+  null for same-currency transfers) hold the destination leg, entered by
+  hand rather than auto-converted, since a one-off currency-exchange rate
+  doesn't have to match the manual rate in `exchange_rates`;
+  `accountsApi.fetchBalancesForMonth` credits the destination account using
+  `to_amount`/`to_currency` when present (falling back to `amount`/
+  `currency` otherwise) while the source account is always debited in its
+  own `amount`/`currency`. Also fixed-expenses CRUD with
   per-month paid status (`FixedExpensesSection.jsx`), and the
   exchange-rate card.
 - **`GastosDiarios.jsx`**: MonIA CSV import (month/year picker, dedup via

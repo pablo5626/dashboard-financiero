@@ -92,6 +92,8 @@ create table account_transfers (
   to_account_id uuid references accounts(id),
   amount numeric not null,
   currency text not null default 'COP',
+  to_amount numeric,
+  to_currency text,
   transfer_date date not null default current_date,
   note text,
   created_at timestamptz not null default now()

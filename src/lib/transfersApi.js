@@ -1,11 +1,13 @@
 import { supabase } from './supabaseClient.js'
 
 export async function createTransfers(rows) {
-  const payload = rows.map(({ fromAccountId, toAccountId, amount, currency, transferDate, note }) => ({
+  const payload = rows.map(({ fromAccountId, toAccountId, amount, currency, toAmount, toCurrency, transferDate, note }) => ({
     from_account_id: fromAccountId,
     to_account_id: toAccountId,
     amount,
     currency: currency || 'COP',
+    to_amount: toAmount ?? null,
+    to_currency: toCurrency ?? null,
     transfer_date: transferDate,
     note: note ?? null,
   }))
@@ -23,7 +25,7 @@ export async function getTransfersForMonth(accountIds, year, month) {
   const ids = accountIds.join(',')
   const { data, error } = await supabase
     .from('account_transfers')
-    .select('id, from_account_id, to_account_id, amount, currency, transfer_date, note')
+    .select('id, from_account_id, to_account_id, amount, currency, to_amount, to_currency, transfer_date, note')
     .gte('transfer_date', monthStart)
     .lt('transfer_date', nextMonthStart)
     .or(`from_account_id.in.(${ids}),to_account_id.in.(${ids})`)

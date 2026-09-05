@@ -4,7 +4,7 @@ import ConfirmDialog from './ui/ConfirmDialog.jsx'
 import { formatByCurrency } from '../lib/format.js'
 import { getTransfersForMonth, createTransfers, deleteTransfer } from '../lib/transfersApi.js'
 
-const emptyForm = { fromAccountId: '', toAccountId: '', amount: '', note: '' }
+const emptyForm = { fromAccountId: '', toAccountId: '', amount: '', toAmount: '', note: '' }
 
 export default function TransferHistorySection({ accounts, year, month, onSaved }) {
   const [transfers, setTransfers] = useState(null)
@@ -33,12 +33,15 @@ export default function TransferHistorySection({ accounts, year, month, onSaved 
   }
 
   const toOptions = form.fromAccountId
-    ? accounts.filter((a) => a.id !== form.fromAccountId && (a.currency || 'COP') === currencyOf(form.fromAccountId))
+    ? accounts.filter((a) => a.id !== form.fromAccountId)
     : accounts
+
+  const crossCurrency = !!(form.fromAccountId && form.toAccountId && currencyOf(form.toAccountId) !== currencyOf(form.fromAccountId))
 
   async function handleCreate(e) {
     e.preventDefault()
     if (!form.fromAccountId || !form.toAccountId || !form.amount) return
+    if (crossCurrency && !form.toAmount) return
     setSaving(true)
     try {
       await createTransfers([{
@@ -46,6 +49,7 @@ export default function TransferHistorySection({ accounts, year, month, onSaved 
         toAccountId: form.toAccountId,
         amount: Number(form.amount),
         currency: currencyOf(form.fromAccountId),
+        ...(crossCurrency ? { toAmount: Number(form.toAmount), toCurrency: currencyOf(form.toAccountId) } : {}),
         transferDate: new Date().toISOString().slice(0, 10),
         note: form.note.trim() || null,
       }])
@@ -86,7 +90,11 @@ export default function TransferHistorySection({ accounts, year, month, onSaved 
                 <td>{t.transfer_date}</td>
                 <td>{accountName(t.from_account_id)}</td>
                 <td>{accountName(t.to_account_id)}</td>
-                <td>{formatByCurrency(t.amount, t.currency)}</td>
+                <td>
+                  {t.to_amount != null
+                    ? `${formatByCurrency(t.amount, t.currency)} → ${formatByCurrency(t.to_amount, t.to_currency)}`
+                    : formatByCurrency(t.amount, t.currency)}
+                </td>
                 <td style={{ color: 'var(--text-muted)' }}>{t.note ?? '—'}</td>
                 <td>
                   <button onClick={() => setConfirmDelete({ id: t.id })} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button>
@@ -119,10 +127,21 @@ export default function TransferHistorySection({ accounts, year, month, onSaved 
           {toOptions.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
         <input
-          type="number" placeholder="Monto" value={form.amount}
+          type="number"
+          placeholder={crossCurrency ? `Monto enviado (${currencyOf(form.fromAccountId)})` : 'Monto'}
+          value={form.amount}
           onChange={(e) => setForm({ ...form, amount: e.target.value })}
-          style={{ ...formInput, width: 120 }}
+          style={{ ...formInput, width: crossCurrency ? 170 : 120 }}
         />
+        {crossCurrency && (
+          <input
+            type="number"
+            placeholder={`Monto recibido (${currencyOf(form.toAccountId)})`}
+            value={form.toAmount}
+            onChange={(e) => setForm({ ...form, toAmount: e.target.value })}
+            style={{ ...formInput, width: 170 }}
+          />
+        )}
         <input
           placeholder="Nota (opcional)" value={form.note}
           onChange={(e) => setForm({ ...form, note: e.target.value })}
