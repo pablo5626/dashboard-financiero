@@ -64,6 +64,56 @@ can't execute without a bundler) — a blank white page with a 503 on that
 request was the symptom; if that returns, check the Pages source
 setting first.
 
+## How the user actually operates this, month to month
+
+The code docs below explain how things work; this section explains **what the
+user does**, which is not deducible from the code and is what the conventions
+around tags and transfers exist to serve.
+
+**The accounts** (state as of Sep 2026 — they're CRUD-able from the UI, so
+treat this as a starting map, not a rule to enforce): **Bold** is the cuenta
+madre (COP); the hijas are **Nubank, Rappi, Nequi, Dale, Pibank, Efectivo**
+(COP), plus **Arq** (USD) and **Arq EUR** (EUR). Two things a fresh session
+can't infer: Arq and Arq EUR are **one real multi-currency account** split into
+two rows because `accounts.currency` holds a single currency per row; and both
+are `kind = 'hija'` even though they sit out the monthly madre→hijas ritual.
+
+**The monthly ritual, in order:**
+1. **Start of month, in Cuentas** — review the "Distribución mensual" (it comes
+   pre-filled from last month's template), *Guardar distribución*, then
+   *Confirmar transferencia real* **once**. That second button is what turns
+   the plan into real `account_transfers` rows madre→hija and drops Bold's
+   balance; it's deliberately separate, and re-running it duplicates transfers.
+2. Load the month's **"Saldos iniciales"** (by hand, or via the iPhone
+   Shortcut).
+3. **During the month, in Gastos** — import the MonIA CSV with the month/year
+   picker (re-importing is safe: it dedups on `monia_id`) and drain the
+   "Pendientes de banco" queue.
+4. **Closing check, in Panel** — read the alerts, and confirm each hija's
+   "% usado" reconciles against its balance (`disponible − usado = saldo`, see
+   Money math). That identity failing is the fastest signal something was
+   entered wrong.
+
+**What to do in each situation, and which MonIA tag it needs:**
+
+| Situación | Qué hace el usuario | Tag en MonIA |
+|---|---|---|
+| Gasto normal desde una hija COP | Nada: lo trae el CSV | El nombre de la cuenta (`dale`, `nequi`, `pibank`…) |
+| Compra desde arq en USD/EUR | La carga a mano en la app, en su moneda, contra Arq / Arq EUR | `ignorar` en la fila espejo del CSV |
+| Mover plata entre cuentas propias | La registra como transferencia en la app, decidiendo el checkbox de presupuesto | `traslado`, solo si además aparece en el CSV |
+| Comprar divisas (COP→USD, USD→EUR…) | Usa "Cambio de divisa", que sugiere el monto con la tasa guardada | `traslado` (o `moneda`, alias viejo) |
+| Ingreso que cae fuera del reparto mensual | Nada especial: entra como transacción positiva y amplía el disponible solo | El nombre de la cuenta |
+| No sabe de qué cuenta salió | Lo confirma en "Pendientes de banco" | Ninguno |
+
+Three rules behind that table, in the order they're most often forgotten:
+**a transfer is never a gasto** (moving money doesn't consume it — the
+consolidated views count the purchase once, where it happened); **`ignorar`
+exists only because MonIA can't record foreign currencies yet**, so the expense
+is entered by hand in EUR/USD and the CSV's COP mirror row must not be booked
+twice; and **the budget checkbox on a transfer** distinguishes "moving money to
+spend it from the other account" (consumes the source's budget) from "just
+rebalancing pockets" (doesn't).
+
 ## Architecture
 
 **Stack**: Vite + React 18, plain JSX (no TypeScript), plain CSS with custom

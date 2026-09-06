@@ -1,5 +1,15 @@
 # Prompt Maestro: Dashboard Financiero Personal
 
+> **Este es el prompt original con el que arrancó el proyecto, y se conserva
+> como registro de la intención de producto.** Varias partes ya quedaron
+> superadas por la implementación real: la app no es un artifact sino un
+> proyecto Vite desplegado en GitHub Pages, el multi-moneda incluye EUR además
+> de COP y USD, la tasa de cambio no es "un valor" sino una fila por par de
+> monedas, y el proyecto de Supabase hace rato que existe. **Para el estado
+> vigente de cualquier cosa, mandá `CLAUDE.md`, no este archivo.** Lo que sí
+> sigue siendo normativo acá es la tabla de mapeo categorías→cuentas, mantenida
+> al día (ver `.claude/rules/nomenclatura.md`).
+
 ## 🎯 Objetivo general
 Construir una **app web interactiva** (React/HTML como artifact) que funcione como panel de control financiero personal, consolidando cuentas, gastos, deudas y metas de ahorro en un único lugar, con gráficos visuales para entender el comportamiento financiero mes a mes.
 
@@ -44,7 +54,7 @@ date, purpose, amount, currency, category, emoji, creator, creator_name, tags, t
 ### 2. Cuentas (sistema de cuenta "madre" + cuentas "hijas")
 - **Aclaración de modelo**: no hay dos capas separadas (banco vs. propósito) — cada cuenta hija **es directamente un banco o medio de pago real**, y ese medio ya tiene implícito su propósito (ej. la cuenta en Nequi se usa para transporte, la de Nubank para suscripciones, etc.). Así, el mapeo de categorías del CSV apunta directo a la cuenta hija real.
 - **Cuenta madre**: Bold. Recibe el ingreso principal.
-- **Cuentas hijas** (personalizables, punto de partida conocido): Dale, Nequi, Rappi, Nubank, Efectivo — el usuario puede agregar, renombrar o eliminar cuentas hijas libremente desde la app.
+- **Cuentas hijas** (personalizables): Dale, Nequi, Rappi, Nubank, Efectivo, **Pibank**, y las dos de moneda extranjera **arq** (USD) y **arq eur** (EUR) — el usuario puede agregar, renombrar o eliminar cuentas hijas libremente desde la app. `arq` y `arq eur` son en realidad **una sola cuenta multi-moneda**, modelada como dos filas porque cada cuenta guarda una única moneda; no participan de la distribución mensual madre→hijas.
 - Cada cuenta hija tiene: saldo actual, monto asignado mensual (presupuesto/tope), % usado.
 - **Distribución mensual**: al inicio de cada mes el usuario define manualmente cuánto se destina de la cuenta madre a cada hija. El sistema **recuerda la distribución del mes anterior** y la propone como plantilla editable (no 100% automático, pero con memoria de patrón).
 - Gráfico tipo Sankey o de flujo mostrando cómo se reparte el dinero desde la madre hacia las hijas cada mes.
@@ -57,7 +67,7 @@ date, purpose, amount, currency, category, emoji, creator, creator_name, tags, t
 - Importación manual del CSV de MonIA (ver estructura real arriba). Al subir el archivo, la app permite **elegir el mes/año a importar** (o rango de fechas) desde el histórico completo del CSV.
 - **Detección de duplicados** usando el campo `id` del CSV, para poder resubir el mismo archivo sin duplicar transacciones ya guardadas en Supabase.
 - **Motor de asignación de cuenta (3 niveles de confianza, priorizando siempre el dato explícito sobre la especulación)**, ya que casi todas las categorías pueden repartirse entre varias cuentas/bancos según el gasto puntual:
-  1. **Tag de banco/cuenta (única fuente confiable, sin especulación)**: si la transacción trae un tag reconocido como medio de pago (ej. `rappi`, `nequi`, `dale`, `nubank`, `efectivo`), se asigna esa cuenta automáticamente — este es el dato real, no una suposición.
+  1. **Tag de cuenta (única fuente confiable, sin especulación)**: si la transacción trae un tag que coincide con el nombre de una cuenta hija (ej. `rappi`, `nequi`, `dale`, `nubank`, `efectivo`, `pibank`, `arq`, `arq eur`), se asigna esa cuenta automáticamente — este es el dato real, no una suposición. *(Al día de hoy el nivel 1 tiene además dos señales más: la moneda de la fila cuando es no-COP, y los tags de fila ignorada `traslado`/`moneda`/`ignorar`. Ver `.claude/rules/motor-asignacion.md`, que es la versión normativa.)*
   2. **Categoría 100% inequívoca** (muy pocas, ej. "Suscripciones" → Nubank): se asigna automático solo cuando la categoría históricamente **siempre** fue a una única cuenta.
   3. **Categoría ambigua sin tag de banco (la mayoría de los casos)**: el sistema **no asigna nada en automático** para evitar especular — la deja marcada como "pendiente de banco" y muestra las cuentas posibles según el histórico como sugerencia ordenada por frecuencia, pero requiere que el usuario confirme manualmente cuál fue. Cada confirmación se guarda para mejorar el orden de sugerencias futuras (aprendizaje incremental), aunque nunca se auto-asigna sin tag mientras la categoría siga siendo ambigua.
   - **Mapeo inicial de referencia** (guía de posibles cuentas por categoría, actualizada y a seguir ajustando dentro de la app):
