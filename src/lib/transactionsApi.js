@@ -3,16 +3,22 @@ import { supabase } from './supabaseClient.js'
 import { listAccounts } from './accountsApi.js'
 import { listCategories } from './categoriesApi.js'
 
-// Tags de banco/medio de pago reconocidos por el motor de asignación
-// (nivel 1 — ver .claude/rules/motor-asignacion.md). Deben coincidir con el
-// nombre (en minúsculas) de una cuenta hija real para poder asignarla.
-export const BANK_TAGS = ['dale', 'nequi', 'rappi', 'nubank', 'efectivo', 'pibank']
+// Tags de nivel 1 que marcan una fila del CSV que el dashboard NO debe contar,
+// porque el movimiento real ya está registrado en otro lado — ver
+// .claude/rules/motor-asignacion.md. Dos motivos, mismo efecto:
+//   - 'traslado' (y 'moneda', su nombre histórico): mover plata entre cuentas
+//     propias o comprar divisas; el movimiento vive en account_transfers.
+//   - 'ignorar': la compra ya se cargó a mano como transacción, típicamente
+//     porque fue en otra moneda y MonIA solo la exporta en COP.
+// No asignan cuenta: resuelven la fila a "sin cuenta, a propósito", nunca
+// entran a la cola de "pendiente de banco", y no cuentan como gasto/ingreso en
+// NINGUNA vista — contarlas sería contar el mismo movimiento dos veces.
+export const IGNORED_TAGS = ['traslado', 'moneda', 'ignorar']
 
-// Tag de nivel 1 que, a diferencia de BANK_TAGS, no asigna una cuenta sino
-// que resuelve la fila a "sin cuenta, a propósito" (gastos puntuales de
-// manejo de divisas, ya expresados en COP en el CSV) — nunca debe entrar a
-// la cola de "pendiente de banco" ni sumar a sus contadores/alertas.
-const MONEY_TAG = 'moneda'
+// Toda query nueva que sume gastos o ingresos debe filtrar con este helper.
+export function isIgnoredRow(tags) {
+  return (tags ?? []).some((t) => IGNORED_TAGS.includes(t))
+}
 
 // Parsea el CSV exportado de MonIA (columnas: date, purpose, amount,
 // currency, category, emoji, creator, creator_name, tags, timezone, id) a
@@ -45,9 +51,12 @@ export function filterRowsByMonth(rows, year, month) {
   })
 }
 
+// El vocabulario de tags de cuenta son los nombres mismos de las cuentas
+// hijas activas (en minúsculas): 'dale', 'nequi', ..., 'arq', 'arq eur'. No
+// hay lista fija que mantener — crear una cuenta habilita su tag solo.
 function tagAssignedAccountId(tags, accountIdByLowerName) {
   for (const tag of tags) {
-    if (BANK_TAGS.includes(tag) && accountIdByLowerName[tag]) return accountIdByLowerName[tag]
+    if (accountIdByLowerName[tag]) return accountIdByLowerName[tag]
   }
   return null
 }
@@ -126,7 +135,7 @@ export async function importTransactions(rows, year, month) {
       accountId = tagAccountId
       assignmentLevel = 1
       assignmentConfirmed = true
-    } else if (r.tags.includes(MONEY_TAG)) {
+    } else if (isIgnoredRow(r.tags)) {
       // Resuelto a propósito sin cuenta — corta acá, nunca cae a nivel 2/3.
       accountId = null
       assignmentLevel = 1
@@ -180,13 +189,18 @@ function generateLocalId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
 }
 
-export async function createManualTransaction({ purpose, amount, occurredAt, categoryId, accountId, tags }) {
+// `currency` sale de la moneda de la cuenta elegida en el formulario, no de un
+// selector aparte: es la única forma de cargar un gasto en EUR/USD contra las
+// cuentas de arq, y evita que un monto en euros quede marcado como pesos (en
+// cuyo caso fetchBalancesForMonth lo descartaría en silencio por no coincidir
+// con la moneda de la cuenta).
+export async function createManualTransaction({ purpose, amount, occurredAt, categoryId, accountId, tags, currency }) {
   const { data, error } = await supabase.from('transactions').insert({
     monia_id: `manual-${generateLocalId()}`,
     occurred_at: occurredAt,
     purpose,
     amount,
-    currency: 'COP',
+    currency: currency || 'COP',
     category_id: categoryId || null,
     account_id: accountId || null,
     tags: tags ?? [],
@@ -275,12 +289,20 @@ export async function deleteTransaction(id) {
   if (error) throw error
 }
 
-// Gasto real por cuenta en el mes (solo transacciones negativas, en positivo)
-// — para comparar cuánto se ha GASTADO de verdad contra lo asignado, sin
-// confundirlo con el saldo (que sube apenas se transfiere/fondea la cuenta,
-// no cuando se gasta).
-export async function getSpentByAccountForMonth(accountIds, year, month) {
-  if (accountIds.length === 0) return {}
+// Movimiento real por cuenta en el mes: `spent` (transacciones negativas, en
+// positivo) e `income` (positivas). El gasto sirve para comparar cuánto se ha
+// GASTADO de verdad contra lo asignado, sin confundirlo con el saldo (que sube
+// apenas se transfiere/fondea la cuenta, no cuando se gasta); el ingreso sirve
+// para ampliar el disponible de la cuenta cuando entra plata fuera del reparto
+// mensual de la madre.
+//
+// Toma los objetos de cuenta (no ids) porque es currency-aware, igual que
+// fetchBalancesForMonth: cada cuenta solo suma filas en su propia moneda, para
+// no mezclar euros con pesos en un mismo total.
+export async function getAccountFlowsForMonth(accounts, year, month) {
+  if (accounts.length === 0) return { spent: {}, income: {} }
+  const accountIds = accounts.map((a) => a.id)
+  const currencyByAccountId = Object.fromEntries(accounts.map((a) => [a.id, a.currency || 'COP']))
   const monthStart = `${year}-${String(month).padStart(2, '0')}-01`
   const nextMonthStart = month === 12
     ? `${year + 1}-01-01`
@@ -288,18 +310,21 @@ export async function getSpentByAccountForMonth(accountIds, year, month) {
 
   const { data, error } = await supabase
     .from('transactions')
-    .select('account_id, amount')
+    .select('account_id, amount, currency')
     .gte('occurred_at', monthStart)
     .lt('occurred_at', nextMonthStart)
     .in('account_id', accountIds)
-    .lt('amount', 0)
   if (error) throw error
 
   const spent = {}
+  const income = {}
   for (const row of data) {
-    spent[row.account_id] = (spent[row.account_id] ?? 0) + (-Number(row.amount))
+    if ((row.currency || 'COP') !== currencyByAccountId[row.account_id]) continue
+    const amount = Number(row.amount)
+    if (amount < 0) spent[row.account_id] = (spent[row.account_id] ?? 0) + -amount
+    else income[row.account_id] = (income[row.account_id] ?? 0) + amount
   }
-  return spent
+  return { spent, income }
 }
 
 export async function listTransactionsForMonth(year, month) {
@@ -318,18 +343,21 @@ export async function listTransactionsForMonth(year, month) {
 
 // Gastos (amount < 0) de los últimos monthsBack meses (incluyendo el actual),
 // para detección de patrones — no incluye ingresos, que no aplican a "gasto
-// fijo recurrente".
+// fijo recurrente". Solo filas en COP: el detector promedia montos y
+// FixedExpensesSection no tiene concepto de moneda, así que mezclar euros con
+// pesos daría un promedio sin sentido (y una compra internacional un par de
+// veces al año tampoco es candidata a gasto fijo mensual).
 export async function listRecentExpenses(monthsBack) {
   const now = new Date()
   const start = new Date(Date.UTC(now.getFullYear(), now.getMonth() - monthsBack + 1, 1))
   const startStr = start.toISOString().slice(0, 10)
   const { data, error } = await supabase
     .from('transactions')
-    .select('purpose, amount, occurred_at, account_id')
+    .select('purpose, amount, occurred_at, account_id, tags, currency')
     .gte('occurred_at', startStr)
     .lt('amount', 0)
   if (error) throw error
-  return data
+  return data.filter((row) => !isIgnoredRow(row.tags) && (row.currency || 'COP') === 'COP')
 }
 
 // Búsqueda libre de movimientos por texto/categoría/cuenta/tag/rango de

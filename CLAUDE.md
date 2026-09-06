@@ -139,21 +139,75 @@ always `account_transfers`. **A hija's saldo (balance) is not the same as
 how much of its budget has been spent** — the balance rises the moment it's
 funded (via `monthly_initial_balances` or a transfer in), before any real
 spending happens, so `Cuentas.jsx`'s hija cards compute the "% usado"
-progress bar from `transactionsApi.getSpentByAccountForMonth` (real negative
-`transactions` for the month, summed per account) against `account_allocations`
-— never from `balances[account.id]` — otherwise funding a hija to 100% of
-its budget shows as "100% usado" before a single peso was actually spent.
-`fetchBalancesForMonth(accounts, year, month)`
-takes the full account **objects** (not bare ids) because it's
-currency-aware: each account only sums rows whose `currency` matches that
-account's own `currency` (default `'COP'`), so a COP account and a USD
-account never get their amounts mixed. `panelApi.fetchMonthlyTrend` and
-`fetchTotalDebt` do the equivalent per-row currency check but additionally
-convert non-COP amounts to COP (via `exchangeRatesApi.toCOP`) before
-summing into a single consolidated number — pass `{ convertToCOP: false }`
-to `fetchMonthlyTrend` when the caller wants a trend to stay in the
-linked account's native currency instead (used by 'proposito' savings
-goals tied to a USD account).
+progress bar from `transactionsApi.getAccountFlowsForMonth` (which returns
+both `spent` — real negative `transactions` for the month, summed per
+account — and `income`, the positive ones) — never from
+`balances[account.id]`, otherwise funding a hija to 100% of its budget shows
+as "100% usado" before a single peso was actually spent. **The denominator is
+`disponible = account_allocations + ingresos reales del mes en esa cuenta`,
+not the allocation alone**: money that lands in a hija outside the monthly
+madre→hijas ritual (an unexpected income straight into Dale, say) is real
+spendable money, and measuring against the plan alone would flag spending it
+as an overdraft. `account_allocations` is deliberately left untouched by
+this — it keeps meaning exactly "lo que la madre repartió este mes", so
+`MonthlyAllocationSection`'s "Total a distribuir" and "Confirmar
+transferencia real" keep asking Bold only for what Bold actually owes.
+**Transfers never expand the disponible, only real income transactions do** —
+a madre→hija transfer *is* the allocation (counting it would double the
+budget) and a hija→hija top-up is money that was already inside.
+
+The numerator is **`usado = gasto directo + transferencias salientes`**, not
+spending alone: money wired out of a hija is money that left its budget, even
+though the purchase itself shows up on the destination account. The real case
+this fixes: $300.000 landed in Dale, $333.500 then moved Dale → arq, and the
+purchase executed from arq — Dale's balance dropped correctly but its card
+still read "5% usado", as if that money were still there to spend. Outgoing
+transfers are summed by `transfersApi.sumOutgoingByAccount(transfers,
+accounts)`, the single definition of the rule, which **excludes transfers back
+to the madre** (returning leftover money to Bold is not using the budget),
+**excludes rows flagged `consumes_budget = false`**, and applies the same
+currency check as every other per-account view. That flag exists because moving
+money between two hijas is ambiguous — it can be funding a purchase that will
+execute from the other account (consumes the budget) or just rebalancing
+pockets (doesn't) — so both transfer forms (`TransferHistorySection` and
+`CurrencyExchangeSection`) ask with a checkbox, defaulted to checked, shown only
+when neither end is the madre. It's set at creation and not editable
+afterwards: to change it, delete the transfer and re-create it, same as every
+other field of a transfer.
+`fetchBalancesForMonth` returns it as `transferredOut` at no extra query cost
+(it already fetches the month's transfers), and `GastosDiarios.jsx` fetches
+them via `getTransfersForMonth` for its "Movido a otras cuentas" column — kept
+separate from "Gastado este mes" so that column keeps meaning direct spending
+only. This makes the hija card reconcile exactly: **`disponible − usado =
+saldo`** (645.420 − 368.500 = 276.920 in that case), which is the quickest way
+to sanity-check the math after touching any of these numbers. None of this
+makes a transfer a *gasto*: the consolidated views still ignore transfers
+entirely and count the purchase once, where it happened. The same money showing
+in Dale's "% usado" and in arq's gasto is not double counting — they answer two
+different questions.
+**The rule for every money aggregation: per-account views stay in the
+account's own currency; consolidated (cross-account) views convert to COP.**
+`fetchBalancesForMonth(accounts, year, month)` and
+`transactionsApi.getAccountFlowsForMonth(accounts, year, month)` are the
+canonical per-account pair — both take the full account **objects** (not bare
+ids) precisely because they're currency-aware: each account only sums rows
+whose `currency` matches that account's own `currency` (default `'COP'`), so a
+COP account and a USD account never get their amounts mixed, and
+`GastosDiarios.jsx` applies the same check when building `spentByAccount` /
+`incomeByAccount`. `panelApi.fetchMonthlyTrend` and `fetchTotalDebt` are the
+canonical consolidated pair: they do the equivalent per-row currency check but
+additionally convert non-COP amounts to COP (via `exchangeRatesApi.toCOP`)
+before summing into a single number — same as `GastosDiarios.jsx`'s
+spend-by-category and spend-by-tag charts, which cross accounts of different
+currencies and so convert too. Pass `{ convertToCOP: false }` to
+`fetchMonthlyTrend` when the caller wants a trend to stay in the linked
+account's native currency instead (used by 'proposito' savings goals tied to a
+USD account). Amounts of a single transaction are rendered with
+`formatByCurrency(t.amount, t.currency)`, never bare `formatCOP` — that's what
+made a EUR row print as pesos. `listRecentExpenses` (the recurring
+fixed-expense detector) is the one place that simply **drops** non-COP rows
+instead of converting: it averages amounts and `FixedExpensesSection` has no
+currency concept at all.
 
 **Multi-currency (COP/USD/EUR)**: `accounts.currency` (default `'COP'`) is
 the only account-level currency field (free text, no CHECK/enum — any
@@ -210,26 +264,56 @@ currency-aware.
 
 **Bank-assignment engine** (full rules in `.claude/rules/motor-asignacion.md`,
 implemented in `transactionsApi.js`'s `importTransactions`): a MonIA CSV
-row's account is assigned via, in order, (1) a recognized bank tag in the
-row's `tags`, OR a non-COP `currency` when exactly one active account has
-that currency (both are "level 1" — real explicit data, never speculation;
-tag wins if a row somehow has both), (2) a category with
+row's account is assigned via, in order, (1) a tag matching the lowercased
+name of an active hija account, OR a non-COP `currency` when exactly one
+active account has that currency (both are "level 1" — real explicit data,
+never speculation; tag wins if a row somehow has both), (2) a category with
 `is_ambiguous = false` whose entire history has gone to a single account,
 (3) otherwise the transaction is left `account_id = null` ("pendiente de
 banco") for manual confirmation in `GastosDiarios.jsx`, which also feeds
 `category_account_stats` to improve future suggestion ordering. Never add
 a 4th, frequency/probability-based auto-assignment level — this is an
-explicit, repeatedly-reinforced user rule. A `moneda` tag is a fourth
-level-1 signal that, unlike a bank tag, does *not* assign an account — it
+explicit, repeatedly-reinforced user rule. There is **no fixed list of valid
+tags**: the vocabulary *is* the set of active hija account names (`dale`,
+`nequi`, … plus `arq` / `arq eur`), so creating an account enables its tag on
+its own. The old hardcoded `BANK_TAGS` constant was deleted precisely because
+it drifted — it gated assignment *and* the spend-by-tag chart exclusion, so a
+purchase tagged `arq` silently fell through to "pendiente" and would have
+double-counted in that chart.
+
+**Ignored rows (`IGNORED_TAGS` = `traslado`, `moneda`, `ignorar`)** are a third
+level-1 signal that, unlike an account tag, does *not* assign an account — it
 resolves the row to `account_id = null` on purpose (`assignment_level = 1`,
-`assignment_confirmed = true`) for one-off currency-exchange purchases the
-user tags by hand in MonIA, whose amount is already in COP in the CSV.
-Because it's marked `assignment_confirmed = true` rather than needing the
-default `false`, it never shows up in "pendiente de banco" or its
-badge/alert count — both `countPendingTransactions` and
-`listPendingTransactions` filter on `assignment_confirmed = false`, not
-just `account_id is null`, specifically so these rows are excluded without
-a schema change.
+`assignment_confirmed = true`). It marks a CSV row whose real movement is
+**already recorded somewhere else**, for two distinct reasons that share one
+behavior: `traslado` (and `moneda`, its historical alias) is a movement between
+the user's own accounts — Dale → arq, buying foreign currency — that lives in
+`account_transfers`; `ignorar` is a purchase already entered by hand as a
+transaction (see the foreign-currency flow below). Because it's marked
+`assignment_confirmed = true` rather than needing the default `false`, it never
+shows up in "pendiente de banco" or its badge/alert count — both
+`countPendingTransactions` and `listPendingTransactions` filter on
+`assignment_confirmed = false`, not just `account_id is null`, specifically so
+these rows are excluded without a schema change. On top of that, **these rows
+must never count as gasto or ingreso anywhere** — counting the CSV row too
+would book the same movement twice, subtracting it from the source account
+again and inflating "gastos del mes". The filter is applied at read time via
+the exported helper `isIgnoredRow(tags)` in `fetchMonthlyTrend`,
+`fetchAlerts`, `listRecentExpenses` and `GastosDiarios.jsx`'s chart loop —
+**any new query that sums gastos or ingresos has to filter with it too**, which
+is the easy part to forget (each of those queries had to add `tags` to its
+`select`).
+
+**Foreign-currency purchases (the arq flow)**: MonIA does not handle currencies
+yet — a purchase made in euros from arq is exported to the CSV in COP. So the
+expense is entered **by hand, in its own currency**: pick the arq account in
+`GastosDiarios.jsx`'s manual form and `createManualTransaction` takes the
+`currency` from that account (there is deliberately no separate currency
+picker — a EUR amount saved as COP would be silently dropped from the balance
+by `fetchBalancesForMonth`'s currency check). Then the mirror row in MonIA gets
+the `ignorar` tag so the CSV import doesn't book it a second time. Net effect:
+arq's balance drops in euros, and Panel General counts the gasto converted to
+COP at the stored COP↔EUR rate.
 
 **Alerts system** (`panelApi.fetchAlerts`, rendered in `PanelGeneral.jsx`'s
 "Alertas" card): surfaces fixed expenses and debt installments due within
@@ -337,10 +421,12 @@ Supabase, no sample data left anywhere:
   `monia_id`), the bank-assignment engine above, a "Pendientes de banco"
   confirmation table with historical-frequency suggestions, per-category
   monthly budgets, spend-by-category and spend-by-tag bar charts (the
-  spend-by-tag chart excludes `BANK_TAGS` — a transaction typically carries
-  both a bank tag and a descriptive tag in the same `tags` array, so
-  without this filter the same amount would be double-counted under both),
-  gasto real vs. presupuesto asignado per cuenta hija, a "candidatos a gasto
+  spend-by-tag chart excludes tags that name an account — a transaction
+  typically carries both an account tag and a descriptive tag in the same
+  `tags` array, so without this filter the same amount would be
+  double-counted under both; the exclusion set is derived from the hijas'
+  names, the same source of truth the assignment engine matches against),
+  gasto real vs. presupuesto asignado (más ingresos) per cuenta hija, a "candidatos a gasto
   fijo" detector that flags a description repeated in ≥3 of the last 6
   months and offers to add it as a recurring fixed expense, a manual
   expense form (`transactionsApi.createManualTransaction`) that brought

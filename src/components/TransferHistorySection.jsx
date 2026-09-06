@@ -4,7 +4,7 @@ import ConfirmDialog from './ui/ConfirmDialog.jsx'
 import { formatByCurrency } from '../lib/format.js'
 import { getTransfersForMonth, createTransfers, deleteTransfer } from '../lib/transfersApi.js'
 
-const emptyForm = { fromAccountId: '', toAccountId: '', amount: '', toAmount: '', note: '' }
+const emptyForm = { fromAccountId: '', toAccountId: '', amount: '', toAmount: '', note: '', consumesBudget: true }
 
 export default function TransferHistorySection({ accounts, year, month, onSaved }) {
   const [transfers, setTransfers] = useState(null)
@@ -38,6 +38,12 @@ export default function TransferHistorySection({ accounts, year, month, onSaved 
 
   const crossCurrency = !!(form.fromAccountId && form.toAccountId && currencyOf(form.toAccountId) !== currencyOf(form.fromAccountId))
 
+  // Devolver plata a la madre nunca consume presupuesto, así que ahí ni se
+  // pregunta; entre hijas sí, porque puede ser plata que se va a gastar desde
+  // la otra cuenta o puro reacomodo entre bolsillos.
+  const madreId = accounts.find((a) => a.kind === 'madre')?.id
+  const askConsumesBudget = !!(form.fromAccountId && form.fromAccountId !== madreId && form.toAccountId && form.toAccountId !== madreId)
+
   async function handleCreate(e) {
     e.preventDefault()
     if (!form.fromAccountId || !form.toAccountId || !form.amount) return
@@ -50,6 +56,7 @@ export default function TransferHistorySection({ accounts, year, month, onSaved 
         amount: Number(form.amount),
         currency: currencyOf(form.fromAccountId),
         ...(crossCurrency ? { toAmount: Number(form.toAmount), toCurrency: currencyOf(form.toAccountId) } : {}),
+        consumesBudget: askConsumesBudget ? form.consumesBudget : true,
         transferDate: new Date().toISOString().slice(0, 10),
         note: form.note.trim() || null,
       }])
@@ -95,7 +102,9 @@ export default function TransferHistorySection({ accounts, year, month, onSaved 
                     ? `${formatByCurrency(t.amount, t.currency)} → ${formatByCurrency(t.to_amount, t.to_currency)}`
                     : formatByCurrency(t.amount, t.currency)}
                 </td>
-                <td style={{ color: 'var(--text-muted)' }}>{t.note ?? '—'}</td>
+                <td style={{ color: 'var(--text-muted)' }}>
+                  {[t.note, t.consumes_budget === false ? 'no descuenta presupuesto' : null].filter(Boolean).join(' · ') || '—'}
+                </td>
                 <td>
                   <button onClick={() => setConfirmDelete({ id: t.id })} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button>
                 </td>
@@ -153,6 +162,16 @@ export default function TransferHistorySection({ accounts, year, month, onSaved 
         >
           Agregar
         </button>
+        {askConsumesBudget && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, font: 'var(--font-caption)', color: 'var(--text-muted)', flex: '1 1 100%', minHeight: 'var(--touch-target)' }}>
+            <input
+              type="checkbox" checked={form.consumesBudget}
+              onChange={(e) => setForm({ ...form, consumesBudget: e.target.checked })}
+              style={{ width: 20, height: 20 }}
+            />
+            Descontar del presupuesto de {accountName(form.fromAccountId)} — desmarcá si es solo mover plata entre cuentas, sin gastarla
+          </label>
+        )}
       </form>
     </Card>
 

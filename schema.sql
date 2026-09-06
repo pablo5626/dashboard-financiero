@@ -95,6 +95,10 @@ create table account_transfers (
   currency text not null default 'COP',
   to_amount numeric,
   to_currency text,
+  -- Si la plata que sale consume el presupuesto de la cuenta de origen (se
+  -- movió para gastarla desde la otra cuenta) o es solo reacomodo entre
+  -- bolsillos. Se elige al crear la transferencia; ver sumOutgoingByAccount.
+  consumes_budget boolean not null default true,
   transfer_date date not null default current_date,
   note text,
   created_at timestamptz not null default now()

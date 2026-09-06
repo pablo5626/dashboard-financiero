@@ -9,7 +9,7 @@ import CurrencyExchangeSection from '../components/CurrencyExchangeSection.jsx'
 import { formatCOP, formatByCurrency, CURRENCIES } from '../lib/format.js'
 import { listAccounts, createAccount, updateAccount, archiveAccount, fetchBalancesForMonth } from '../lib/accountsApi.js'
 import { getRates, setRate } from '../lib/exchangeRatesApi.js'
-import { getSpentByAccountForMonth } from '../lib/transactionsApi.js'
+import { getAccountFlowsForMonth } from '../lib/transactionsApi.js'
 
 const now = new Date()
 const YEAR = now.getFullYear()
@@ -34,6 +34,8 @@ export default function Cuentas() {
   const [balances, setBalances] = useState({})
   const [allocated, setAllocated] = useState({})
   const [spent, setSpent] = useState({})
+  const [income, setIncome] = useState({})
+  const [transferredOut, setTransferredOut] = useState({})
   const [rates, setRates] = useState([])
   const [error, setError] = useState(null)
   const [editingId, setEditingId] = useState(null)
@@ -50,15 +52,17 @@ export default function Cuentas() {
     try {
       const rows = await listAccounts()
       setAccounts(rows)
-      const [{ balances: b, allocated: a }, currentRates, s] = await Promise.all([
+      const [{ balances: b, allocated: a, transferredOut: out }, currentRates, flows] = await Promise.all([
         fetchBalancesForMonth(rows, YEAR, MONTH),
         getRates(),
-        getSpentByAccountForMonth(rows.map((r) => r.id), YEAR, MONTH),
+        getAccountFlowsForMonth(rows, YEAR, MONTH),
       ])
       setBalances(b)
       setAllocated(a)
+      setTransferredOut(out)
       setRates(currentRates)
-      setSpent(s)
+      setSpent(flows.spent)
+      setIncome(flows.income)
     } catch (err) {
       setError(err.message)
     }
@@ -161,7 +165,17 @@ export default function Cuentas() {
           const bal = balances[h.id] ?? 0
           const alloc = allocated[h.id]
           const spentAmt = spent[h.id] ?? 0
-          const pct = alloc ? Math.round((spentAmt / alloc) * 100) : null
+          // La plata que entra a la cuenta fuera del reparto mensual de la
+          // madre amplía lo disponible: gastarla no es sobregirar el
+          // presupuesto. account_allocations queda intacta, siempre significa
+          // "lo que la madre repartió".
+          const incomeAmt = income[h.id] ?? 0
+          const disponible = (alloc ?? 0) + incomeAmt
+          // Lo transferido a otra cuenta también consume el presupuesto: si la
+          // plata salió de acá para gastarse desde arq, no sigue disponible.
+          const movidoAmt = transferredOut[h.id] ?? 0
+          const usado = spentAmt + movidoAmt
+          const pct = disponible > 0 ? Math.round((usado / disponible) * 100) : null
           const isEditing = editingId === h.id
 
           return (
@@ -198,7 +212,9 @@ export default function Cuentas() {
                 {formatByCurrency(bal, currency)}
               </div>
               <div style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', marginBottom: 8 }}>
-                {alloc != null ? `de ${formatByCurrency(alloc, currency)} asignados este mes` : 'sin distribución definida este mes'}
+                {incomeAmt > 0
+                  ? `de ${formatByCurrency(disponible, currency)} disponibles (${alloc != null ? formatByCurrency(alloc, currency) : formatByCurrency(0, currency)} asignados + ${formatByCurrency(incomeAmt, currency)} de ingresos)`
+                  : alloc != null ? `de ${formatByCurrency(alloc, currency)} asignados este mes` : 'sin distribución definida este mes'}
               </div>
               {pct != null && (
                 <>
@@ -206,7 +222,10 @@ export default function Cuentas() {
                     <div style={{ width: `${Math.min(pct, 100)}%`, height: '100%', background: pct > 100 ? 'var(--status-critical)' : 'var(--series-1)' }} />
                   </div>
                   <div style={{ font: 'var(--font-caption)', color: pct > 100 ? 'var(--status-critical)' : 'var(--text-muted)', marginTop: 4 }}>
-                    {pct > 100 ? `Sobregirada — ${pct - 100}% por encima de lo asignado` : `${pct}% usado`}
+                    {pct > 100
+                      ? `Sobregirada — ${pct - 100}% por encima de lo ${incomeAmt > 0 ? 'disponible' : 'asignado'}`
+                      : `${pct}% usado`}
+                    {movidoAmt > 0 && ` — ${formatByCurrency(movidoAmt, currency)} movidos a otras cuentas`}
                   </div>
                 </>
               )}

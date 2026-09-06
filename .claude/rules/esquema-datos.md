@@ -29,6 +29,17 @@ directamente en el panel de Supabase sin reflejarlo en el archivo.
 - **`account_allocations`** modela específicamente el ritual mensual
   madre→hijas (distribución de presupuesto). Una cuenta financiada de forma
   puntual desde otra hija no necesita fila ahí ese mes.
+- **`account_transfers` alimenta dos cosas, no una**: el saldo de ambas cuentas
+  (siempre lo hizo) y además el "% usado" de la cuenta de **origen** — la plata
+  que sale de una hija consume su presupuesto aunque la compra final se ejecute
+  desde la cuenta destino. La regla vive en `sumOutgoingByAccount`
+  (`transfersApi.js`), que excluye las transferencias de vuelta a la madre
+  (devolución, no uso) y las marcadas `consumes_budget = false`. Esa columna
+  (boolean, default `true`) la elige el usuario con un checkbox al crear la
+  transferencia, porque mover plata entre dos hijas es ambiguo: puede ser
+  fondear una compra que se ejecuta desde la otra cuenta o puro reacomodo de
+  bolsillos. Lo que sigue sin cambiar: una transferencia **nunca** es un gasto
+  en las vistas consolidadas (Panel general).
 - **`monthly_initial_balances`** es la tabla pensada para recibir el POST del
   futuro Shortcut de iOS (Fase 2) vía la API REST auto-generada de Supabase —
   mantenerla simple (una fila por cuenta hija por mes) porque ese es su

@@ -4,7 +4,7 @@ import { formatByCurrency } from '../lib/format.js'
 import { convertAmount } from '../lib/exchangeRatesApi.js'
 import { createTransfers } from '../lib/transfersApi.js'
 
-const emptyForm = { fromAccountId: '', toAccountId: '', amount: '', toAmount: '' }
+const emptyForm = { fromAccountId: '', toAccountId: '', amount: '', toAmount: '', consumesBudget: true }
 
 // Acceso rápido para registrar un cambio de divisa entre dos cuentas (ej.
 // arq-USD <-> arq-EUR, o una hija COP <-> arq) — a diferencia del
@@ -27,6 +27,12 @@ export default function CurrencyExchangeSection({ accounts, rates, onSaved }) {
   const toCurrency = form.toAccountId ? currencyOf(form.toAccountId) : null
   const crossCurrency = !!(fromCurrency && toCurrency && fromCurrency !== toCurrency)
 
+  // Un cambio de divisa no siempre es para comprar: si estás guardando dólares
+  // la plata sigue disponible, así que el descuento del presupuesto se
+  // pregunta. Devolver a la madre nunca descuenta, así que ahí no se pregunta.
+  const madreId = accounts.find((a) => a.kind === 'madre')?.id
+  const askConsumesBudget = !!(form.fromAccountId && form.fromAccountId !== madreId && form.toAccountId && form.toAccountId !== madreId)
+
   useEffect(() => {
     if (!crossCurrency || !form.amount || amountTouchedByUser) return
     const suggested = convertAmount(Number(form.amount), fromCurrency, toCurrency, rates)
@@ -46,6 +52,7 @@ export default function CurrencyExchangeSection({ accounts, rates, onSaved }) {
         amount: Number(form.amount),
         currency: fromCurrency,
         ...(crossCurrency ? { toAmount: Number(form.toAmount), toCurrency } : {}),
+        consumesBudget: askConsumesBudget ? form.consumesBudget : true,
         transferDate: new Date().toISOString().slice(0, 10),
         note: 'Cambio de divisa',
       }])
@@ -100,6 +107,16 @@ export default function CurrencyExchangeSection({ accounts, rates, onSaved }) {
         >
           Registrar cambio
         </button>
+        {askConsumesBudget && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, font: 'var(--font-caption)', color: 'var(--text-muted)', flex: '1 1 100%', minHeight: 'var(--touch-target)' }}>
+            <input
+              type="checkbox" checked={form.consumesBudget}
+              onChange={(e) => setForm({ ...form, consumesBudget: e.target.checked })}
+              style={{ width: 20, height: 20 }}
+            />
+            Descontar del presupuesto de la cuenta origen — desmarcá si es solo guardar plata en otra moneda, sin gastarla
+          </label>
+        )}
       </form>
       {crossCurrency && form.amount && form.toAmount && (
         <p style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', marginTop: 8 }}>

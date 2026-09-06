@@ -2,16 +2,18 @@ import { useEffect, useState } from 'react'
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell } from 'recharts'
 import Card from '../components/ui/Card.jsx'
 import ConfirmDialog from '../components/ui/ConfirmDialog.jsx'
-import { formatCOP } from '../lib/format.js'
+import { formatCOP, formatByCurrency } from '../lib/format.js'
 import { listAccounts } from '../lib/accountsApi.js'
+import { getRates, toCOP } from '../lib/exchangeRatesApi.js'
 import { listCategories, updateCategoryBudget } from '../lib/categoriesApi.js'
 import { getAllocationsForMonth } from '../lib/allocationsApi.js'
+import { getTransfersForMonth, sumOutgoingByAccount } from '../lib/transfersApi.js'
 import { listFixedExpenses, createFixedExpense } from '../lib/fixedExpensesApi.js'
 import {
   parseMonIACSV, filterRowsByMonth, importTransactions,
   listPendingTransactions, fetchSuggestionsForCategories, confirmAssignment,
   listTransactionsForMonth, listRecentExpenses, detectRecurringCandidates,
-  searchTransactions, deleteTransaction, createManualTransaction, BANK_TAGS,
+  searchTransactions, deleteTransaction, createManualTransaction, isIgnoredRow,
 } from '../lib/transactionsApi.js'
 
 const now = new Date()
@@ -34,6 +36,7 @@ export default function GastosDiarios() {
   const [pending, setPending] = useState(null)
   const [suggestions, setSuggestions] = useState({})
   const [monthTransactions, setMonthTransactions] = useState(null)
+  const [rates, setRates] = useState([])
   const [error, setError] = useState(null)
 
   const [csvRows, setCsvRows] = useState(null)
@@ -45,6 +48,7 @@ export default function GastosDiarios() {
   const [budgetCategoryId, setBudgetCategoryId] = useState('')
   const [budgetDraft, setBudgetDraft] = useState('')
   const [allocations, setAllocations] = useState({})
+  const [transferredOut, setTransferredOut] = useState({})
   const [fixedExpenses, setFixedExpenses] = useState([])
   const [recentExpenses, setRecentExpenses] = useState([])
   const [addingCandidate, setAddingCandidate] = useState(null)
@@ -59,14 +63,16 @@ export default function GastosDiarios() {
 
   async function reload() {
     try {
-      const [accs, cats, pendingRows, monthRows, fixedRows, recent] = await Promise.all([
+      const [accs, cats, pendingRows, monthRows, fixedRows, recent, currentRates] = await Promise.all([
         listAccounts(),
         listCategories(),
         listPendingTransactions(),
         listTransactionsForMonth(year, month),
         listFixedExpenses(),
         listRecentExpenses(PATTERN_MONTHS_BACK),
+        getRates(),
       ])
+      setRates(currentRates)
       setAccounts(accs)
       setCategories(cats)
       setPending(pendingRows)
@@ -75,6 +81,7 @@ export default function GastosDiarios() {
       setRecentExpenses(recent)
       setSuggestions(await fetchSuggestionsForCategories(pendingRows.map((t) => t.category_id)))
       setAllocations(await getAllocationsForMonth(accs.filter((a) => a.kind === 'hija').map((a) => a.id), year, month))
+      setTransferredOut(sumOutgoingByAccount(await getTransfersForMonth(accs.map((a) => a.id), year, month), accs))
     } catch (err) {
       setError(err.message)
     }
@@ -83,6 +90,11 @@ export default function GastosDiarios() {
   useEffect(() => { reload() }, [year, month])
 
   const hijas = accounts.filter((a) => a.kind === 'hija')
+
+  // La moneda del movimiento manual la manda la cuenta elegida (COP si quedó
+  // "pendiente de banco"): así un gasto contra arq se guarda en USD/EUR y sí
+  // mueve su saldo, en vez de quedar marcado COP y descartarse en silencio.
+  const manualCurrency = accounts.find((a) => a.id === manualForm.accountId)?.currency || 'COP'
 
   function handleFileChange(e) {
     const file = e.target.files?.[0]
@@ -130,6 +142,7 @@ export default function GastosDiarios() {
         occurredAt: `${manualForm.date}T12:00:00Z`,
         categoryId: manualForm.categoryId || null,
         accountId: manualForm.accountId || null,
+        currency: manualCurrency,
         tags: manualForm.tag.trim() ? [manualForm.tag.trim().toLowerCase()] : [],
       })
       setManualForm({ ...emptyManualForm, date: manualForm.date, type: manualForm.type })
@@ -227,17 +240,35 @@ export default function GastosDiarios() {
     return <p style={{ color: 'var(--status-critical)' }}>Error cargando gastos diarios: {error}</p>
   }
 
+  // Los tags que nombran una cuenta ya están representados en el desglose por
+  // cuenta; contarlos acá duplicaría el monto de la misma compra, que suele
+  // traer además un tag descriptivo.
+  const accountNameTags = new Set(hijas.map((h) => h.name.toLowerCase()))
+
+  // Vistas por cuenta (spentByAccount/incomeByAccount) van en la moneda propia
+  // de la cuenta, igual que los saldos; las consolidadas (categoría y tag,
+  // que cruzan cuentas de distinta moneda) convierten a COP con la tasa
+  // vigente, igual que el Panel general.
+  const currencyByAccountId = Object.fromEntries(accounts.map((a) => [a.id, a.currency || 'COP']))
   const spentByCategory = {}
   const spentByTag = {}
   const spentByAccount = {}
+  const incomeByAccount = {}
   for (const t of monthTransactions ?? []) {
-    if (Number(t.amount) >= 0) continue
+    if (isIgnoredRow(t.tags)) continue
+    const currency = t.currency || 'COP'
+    const matchesAccount = t.account_id && currency === currencyByAccountId[t.account_id]
+    if (Number(t.amount) >= 0) {
+      if (matchesAccount) incomeByAccount[t.account_id] = (incomeByAccount[t.account_id] ?? 0) + Number(t.amount)
+      continue
+    }
     const amount = -Number(t.amount)
-    spentByCategory[t.category_id] = (spentByCategory[t.category_id] ?? 0) + amount
-    if (t.account_id) spentByAccount[t.account_id] = (spentByAccount[t.account_id] ?? 0) + amount
+    const amountCOP = toCOP(amount, currency, rates)
+    spentByCategory[t.category_id] = (spentByCategory[t.category_id] ?? 0) + amountCOP
+    if (matchesAccount) spentByAccount[t.account_id] = (spentByAccount[t.account_id] ?? 0) + amount
     for (const tag of t.tags ?? []) {
-      if (BANK_TAGS.includes(tag)) continue
-      spentByTag[tag] = (spentByTag[tag] ?? 0) + amount
+      if (accountNameTags.has(tag)) continue
+      spentByTag[tag] = (spentByTag[tag] ?? 0) + amountCOP
     }
   }
 
@@ -331,7 +362,7 @@ export default function GastosDiarios() {
                     <tr key={t.id}>
                       <td>{formatDate(t.occurred_at)}</td>
                       <td>{t.purpose}</td>
-                      <td>{formatCOP(t.amount)}</td>
+                      <td>{formatByCurrency(t.amount, t.currency)}</td>
                       <td>{t.categories?.name ?? '—'}</td>
                       <td>
                         <select
@@ -461,23 +492,29 @@ export default function GastosDiarios() {
         <Card title="Gasto real vs. presupuesto por cuenta" className="span-3">
           <div className="table-scroll">
           <table className="simple-table">
-            <thead><tr><th>Cuenta</th><th>Gastado este mes</th><th>Asignado este mes</th><th>% usado</th></tr></thead>
+            <thead><tr><th>Cuenta</th><th>Gastado este mes</th><th>Movido a otras cuentas</th><th>Asignado este mes</th><th>Ingresos este mes</th><th>% usado</th></tr></thead>
             <tbody>
               {hijas.map((h) => {
+                const currency = h.currency || 'COP'
                 const spent = spentByAccount[h.id] ?? 0
+                const movido = transferredOut[h.id] ?? 0
                 const allocated = allocations[h.id]
-                const pct = allocated ? Math.round((spent / allocated) * 100) : null
+                const income = incomeByAccount[h.id] ?? 0
+                const disponible = (allocated ?? 0) + income
+                const pct = disponible > 0 ? Math.round(((spent + movido) / disponible) * 100) : null
                 return (
                   <tr key={h.id}>
                     <td>{h.name}</td>
-                    <td>{formatCOP(spent)}</td>
-                    <td>{allocated != null ? formatCOP(allocated) : 'sin definir'}</td>
+                    <td>{formatByCurrency(spent, currency)}</td>
+                    <td>{movido > 0 ? formatByCurrency(movido, currency) : '—'}</td>
+                    <td>{allocated != null ? formatByCurrency(allocated, currency) : 'sin definir'}</td>
+                    <td>{income > 0 ? formatByCurrency(income, currency) : '—'}</td>
                     <td style={{ color: pct != null && pct > 100 ? 'var(--status-critical)' : 'inherit' }}>{pct != null ? `${pct}%` : '—'}</td>
                   </tr>
                 )
               })}
               {hijas.length === 0 && (
-                <tr><td colSpan={4} style={{ color: 'var(--text-muted)' }}>No hay cuentas hijas todavía.</td></tr>
+                <tr><td colSpan={6} style={{ color: 'var(--text-muted)' }}>No hay cuentas hijas todavía.</td></tr>
               )}
             </tbody>
           </table>
@@ -587,9 +624,9 @@ export default function GastosDiarios() {
                       <tr key={t.id}>
                         <td>{formatDate(t.occurred_at)}</td>
                         <td>{t.purpose}</td>
-                        <td>{formatCOP(t.amount)}</td>
+                        <td>{formatByCurrency(t.amount, t.currency)}</td>
                         <td>{t.categories?.name ?? '—'}</td>
-                        <td>{t.accounts?.name ?? (t.assignment_confirmed ? '— sin cuenta (moneda) —' : '— pendiente —')}</td>
+                        <td>{t.accounts?.name ?? (t.assignment_confirmed ? '— ignorado (sin cuenta) —' : '— pendiente —')}</td>
                         <td>{(t.tags ?? []).join(', ') || '—'}</td>
                         <td>
                           <button onClick={() => handleDeleteTx(t)} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button>
@@ -620,9 +657,9 @@ export default function GastosDiarios() {
                   <tr key={t.id}>
                     <td>{formatDate(t.occurred_at)}</td>
                     <td>{t.purpose}</td>
-                    <td>{formatCOP(t.amount)}</td>
+                    <td>{formatByCurrency(t.amount, t.currency)}</td>
                     <td>{t.categories?.name ?? '—'}</td>
-                    <td>{t.accounts?.name ?? (t.assignment_confirmed ? '— sin cuenta (moneda) —' : '— pendiente —')}</td>
+                    <td>{t.accounts?.name ?? (t.assignment_confirmed ? '— ignorado (sin cuenta) —' : '— pendiente —')}</td>
                     <td>
                       <button onClick={() => handleDeleteTx(t)} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button>
                     </td>
@@ -663,9 +700,10 @@ export default function GastosDiarios() {
               style={{ ...formInput, flex: '1 1 160px', minWidth: 0 }}
             />
             <input
-              type="number" placeholder="Monto" value={manualForm.amount}
+              type="number" placeholder={manualCurrency === 'COP' ? 'Monto' : `Monto (${manualCurrency})`}
+              value={manualForm.amount}
               onChange={(e) => setManualForm({ ...manualForm, amount: e.target.value })}
-              style={{ ...formInput, width: 120 }}
+              style={{ ...formInput, width: manualCurrency === 'COP' ? 120 : 150 }}
             />
             <select
               value={manualForm.categoryId}

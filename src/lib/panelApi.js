@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient.js'
-import { countPendingTransactions } from './transactionsApi.js'
+import { countPendingTransactions, isIgnoredRow } from './transactionsApi.js'
 import { getRates, toCOP } from './exchangeRatesApi.js'
 
 // Devuelve los últimos n meses (incluyendo year/month) ordenados de más
@@ -42,7 +42,7 @@ export async function fetchMonthlyTrend(accountIds, months, { convertToCOP = tru
         .gte('year', first.year).lte('year', last.year).in('account_id', accountIds),
       supabase.from('account_transfers').select('from_account_id, to_account_id, amount, transfer_date, currency')
         .gte('transfer_date', rangeStart).lt('transfer_date', rangeEnd),
-      supabase.from('transactions').select('account_id, amount, occurred_at, currency')
+      supabase.from('transactions').select('account_id, amount, occurred_at, currency, tags')
         .gte('occurred_at', rangeStart).lt('occurred_at', rangeEnd),
       convertToCOP ? getRates() : Promise.resolve([]),
     ])
@@ -76,6 +76,10 @@ export async function fetchMonthlyTrend(accountIds, months, { convertToCOP = tru
       if (d < monthStart || d >= nextStart) continue
       const amount = convert(Number(row.amount), row.currency)
       if (accountIdSet.has(row.account_id)) balanceTotal += amount
+      // Filas cuyo movimiento real ya está registrado en otro lado (traslado
+      // entre cuentas propias, o compra ya cargada a mano): contarlas acá sería
+      // contar el mismo movimiento dos veces.
+      if (isIgnoredRow(row.tags)) continue
       if (amount > 0) ingresos += amount
       else gastos += -amount
     }
@@ -132,7 +136,7 @@ export async function fetchAlerts() {
     supabase.from('savings_goals').select('id, name, current_amount, target_amount, target_date').eq('is_active', true).eq('kind', 'puntual').not('target_date', 'is', null),
     countPendingTransactions(),
     supabase.from('categories').select('id, name, monthly_budget'),
-    supabase.from('transactions').select('category_id, amount, occurred_at').gte('occurred_at', historyStart).lt('occurred_at', nextMonthStart).lt('amount', 0),
+    supabase.from('transactions').select('category_id, amount, occurred_at, tags').gte('occurred_at', historyStart).lt('occurred_at', nextMonthStart).lt('amount', 0),
   ])
   if (e1) throw e1
   if (e2) throw e2
@@ -146,6 +150,7 @@ export async function fetchAlerts() {
   const spentByCategory = {}
   const historyByCategory = {}
   for (const row of expenseRows) {
+    if (isIgnoredRow(row.tags)) continue
     const amount = -Number(row.amount)
     const rowMonthKey = row.occurred_at.slice(0, 7)
     if (rowMonthKey === currentMonthKey) {
