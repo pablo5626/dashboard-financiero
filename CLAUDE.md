@@ -85,8 +85,10 @@ authenticated," not "no data."
 wraps the raw Supabase queries for that domain — `accountsApi.js`,
 `allocationsApi.js`, `fixedExpensesApi.js`, `categoriesApi.js`,
 `transactionsApi.js` (CSV parsing + the bank-assignment engine),
-`debtsApi.js`, `savingsApi.js`, `panelApi.js` (cross-page aggregates:
-monthly trend, alerts), `exchangeRatesApi.js` (manual COP↔USD rate).
+`transfersApi.js` (account_transfers CRUD + `sumOutgoingByAccount`, the rule
+for what counts as budget used), `debtsApi.js`, `savingsApi.js`,
+`panelApi.js` (cross-page aggregates: monthly trend, alerts),
+`exchangeRatesApi.js` (manual exchange rates, one row per currency pair).
 Pages call these directly from `useEffect`/`useState` — there is no global
 store or data-fetching library; keep that pattern rather than introducing
 one. The common per-page shape is a `reload()` async function called once
@@ -426,10 +428,15 @@ Supabase, no sample data left anywhere:
   `tags` array, so without this filter the same amount would be
   double-counted under both; the exclusion set is derived from the hijas'
   names, the same source of truth the assignment engine matches against),
-  gasto real vs. presupuesto asignado (más ingresos) per cuenta hija, a "candidatos a gasto
+  a "Gasto real vs. presupuesto por cuenta" table per cuenta hija whose
+  columns mirror the Money math rules exactly (Gastado / Movido a otras
+  cuentas / Asignado / Ingresos / % usado, with the last one measuring
+  `(gastado + movido) / (asignado + ingresos)`), a "candidatos a gasto
   fijo" detector that flags a description repeated in ≥3 of the last 6
   months and offers to add it as a recurring fixed expense, a manual
-  expense form (`transactionsApi.createManualTransaction`) that brought
+  expense form (`transactionsApi.createManualTransaction`, which takes its
+  `currency` from the selected account so a gasto against arq is recorded in
+  USD/EUR — see the foreign-currency flow above) that brought
   forward the prompt's "Fase 3" manual-entry idea early, for testing —
   `monia_id` is `not null`/unique so manual rows get a synthetic
   `manual-<id>` id (see `generateLocalId` gotcha above) and
@@ -479,11 +486,21 @@ schema or UI.
 These were explicitly discussed and left out — don't "fix" them
 unprompted, they're deliberate cuts, not oversights:
 - `MonthlyAllocationSection.jsx`/`FixedExpensesSection.jsx` have zero
-  currency awareness by design (USD accounts are filtered out before
-  reaching them, not made to understand currency).
-- Debts, `fixed_expenses`, and `account_allocations` all have their own
-  `currency` column in the schema, but only `debts` (via the consolidated
-  total) and `accounts` actually branch on it anywhere in the UI today.
+  currency awareness by design (non-COP accounts — arq's USD and EUR
+  pockets — are filtered out before reaching them, not made to understand
+  currency). `listRecentExpenses` drops non-COP rows for the same reason:
+  it feeds the fixed-expense detector.
+- `fixed_expenses` carries a `currency` column that nothing ever reads —
+  `FixedExpensesSection` has no currency concept and its accounts are
+  filtered to COP before it renders. `account_allocations.currency` *is*
+  honored, but only in one place (`fetchBalancesForMonth`'s `matches` check,
+  `accountsApi.js:116`, which drops an allocation whose currency doesn't
+  match its account); nothing lets the user set it to anything but the
+  default. Individual debts branch on `currency` only through the
+  consolidated "Deuda total vs. Patrimonio" number, never per-debt in the UI.
+- A transfer's `consumes_budget` is chosen at creation and never editable
+  afterwards — to change it, delete the transfer and re-create it. Same for
+  every other field of a transfer; the row has no edit UI at all.
 - `generateAmortizationSchedule` only runs once per debt (guarded by "zero
   installments yet"); regenerating replaces unpaid installments and
   recomputes the remaining term as `term_months - cuotas ya pagadas`.
