@@ -14,6 +14,7 @@ import {
   listPendingTransactions, fetchSuggestionsForCategories, confirmAssignment,
   listTransactionsForMonth, listRecentExpenses, detectRecurringCandidates,
   searchTransactions, deleteTransaction, createManualTransaction, isIgnoredRow,
+  listPendingCurrencyTransactions, confirmCurrencyAmount,
 } from '../lib/transactionsApi.js'
 
 const now = new Date()
@@ -34,6 +35,7 @@ export default function GastosDiarios() {
   const [accounts, setAccounts] = useState([])
   const [categories, setCategories] = useState([])
   const [pending, setPending] = useState(null)
+  const [pendingCurrency, setPendingCurrency] = useState(null)
   const [suggestions, setSuggestions] = useState({})
   const [monthTransactions, setMonthTransactions] = useState(null)
   const [rates, setRates] = useState([])
@@ -45,6 +47,7 @@ export default function GastosDiarios() {
   const [importResult, setImportResult] = useState(null)
   const [confirmingId, setConfirmingId] = useState(null)
   const [selectedAccountByTx, setSelectedAccountByTx] = useState({})
+  const [amountByTx, setAmountByTx] = useState({})
   const [budgetCategoryId, setBudgetCategoryId] = useState('')
   const [budgetDraft, setBudgetDraft] = useState('')
   const [allocations, setAllocations] = useState({})
@@ -63,10 +66,11 @@ export default function GastosDiarios() {
 
   async function reload() {
     try {
-      const [accs, cats, pendingRows, monthRows, fixedRows, recent, currentRates] = await Promise.all([
+      const [accs, cats, pendingRows, currencyRows, monthRows, fixedRows, recent, currentRates] = await Promise.all([
         listAccounts(),
         listCategories(),
         listPendingTransactions(),
+        listPendingCurrencyTransactions(),
         listTransactionsForMonth(year, month),
         listFixedExpenses(),
         listRecentExpenses(PATTERN_MONTHS_BACK),
@@ -76,6 +80,7 @@ export default function GastosDiarios() {
       setAccounts(accs)
       setCategories(cats)
       setPending(pendingRows)
+      setPendingCurrency(currencyRows)
       setMonthTransactions(monthRows)
       setFixedExpenses(fixedRows)
       setRecentExpenses(recent)
@@ -160,6 +165,24 @@ export default function GastosDiarios() {
     setConfirmingId(tx.id)
     try {
       await confirmAssignment(tx.id, accountId, tx.category_id)
+      await reload()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setConfirmingId(null)
+    }
+  }
+
+  // El monto se teclea en la moneda de la cuenta (el que MonIA no exportó
+  // porque convierte todo a COP al guardar). Se respeta el signo original de
+  // la fila: un gasto sigue siendo negativo aunque el usuario escriba 51.31.
+  async function handleConfirmCurrency(tx) {
+    const raw = amountByTx[tx.id] ?? Math.abs(tx.amount)
+    const value = Math.abs(Number(raw))
+    if (!Number.isFinite(value) || value === 0) return
+    setConfirmingId(tx.id)
+    try {
+      await confirmCurrencyAmount(tx.id, Number(tx.source_amount) < 0 ? -value : value)
       await reload()
     } catch (err) {
       setError(err.message)
@@ -254,6 +277,11 @@ export default function GastosDiarios() {
   const spentByTag = {}
   const spentByAccount = {}
   const incomeByAccount = {}
+  // Cuenta cuántos de los movimientos sumados en spentByAccount todavía
+  // tienen monto estimado (currency_pending) — para avisar en la tabla de
+  // "Gasto real vs. presupuesto" que ese número puede afinarse confirmando
+  // la cola de arriba, en vez de dejarlo pasar por un total ya exacto.
+  const pendingByAccount = {}
   for (const t of monthTransactions ?? []) {
     if (isIgnoredRow(t.tags)) continue
     const currency = t.currency || 'COP'
@@ -265,7 +293,10 @@ export default function GastosDiarios() {
     const amount = -Number(t.amount)
     const amountCOP = toCOP(amount, currency, rates)
     spentByCategory[t.category_id] = (spentByCategory[t.category_id] ?? 0) + amountCOP
-    if (matchesAccount) spentByAccount[t.account_id] = (spentByAccount[t.account_id] ?? 0) + amount
+    if (matchesAccount) {
+      spentByAccount[t.account_id] = (spentByAccount[t.account_id] ?? 0) + amount
+      if (t.currency_pending) pendingByAccount[t.account_id] = (pendingByAccount[t.account_id] ?? 0) + 1
+    }
     for (const tag of t.tags ?? []) {
       if (accountNameTags.has(tag)) continue
       spentByTag[tag] = (spentByTag[tag] ?? 0) + amountCOP
@@ -402,6 +433,82 @@ export default function GastosDiarios() {
           </Card>
         )}
 
+        {pendingCurrency !== null && pendingCurrency.length > 0 && (
+          <Card title={`Compras en divisa por confirmar (${pendingCurrency.length})`} className="span-3">
+            <p style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', margin: '0 0 var(--space-1)' }}>
+              MonIA convierte a COP al guardar, así que el CSV no trae el monto original. Estos movimientos ya quedaron
+              asignados a su cuenta con un monto <strong>estimado</strong> con la tasa guardada en Cuentas — escribe el
+              monto real de la compra y confirma. Apenas lo escribas verás la tasa implícita que usó MonIA ese día,
+              para contrastarla con la tuya.
+            </p>
+            <div className="table-scroll">
+            <table className="simple-table">
+              <thead>
+                <tr><th>Fecha</th><th>Descripción</th><th>Cuenta</th><th>Monto en MonIA</th><th>Monto real</th><th>Tasa implícita</th><th></th></tr>
+              </thead>
+              <tbody>
+                {pendingCurrency.map((t) => {
+                  const currency = t.accounts?.currency || t.currency
+                  // Mientras el usuario no haya tocado el campo, `draft` ES el
+                  // estimado que ya se calculó dividiendo por la tasa guardada
+                  // — mostrar "monto MonIA ÷ draft" ahí solo repetiría esa
+                  // misma tasa disfrazada de "lo que usó MonIA". La tasa
+                  // implícita real solo existe una vez que el usuario escribió
+                  // el monto verdadero de la compra.
+                  const touched = Object.prototype.hasOwnProperty.call(amountByTx, t.id)
+                  const draft = amountByTx[t.id] ?? String(Math.abs(t.amount))
+                  const value = Math.abs(Number(draft))
+                  const sourceAmount = Math.abs(Number(t.source_amount))
+                  const impliedRate = touched && Number.isFinite(value) && value > 0 ? sourceAmount / value : null
+                  return (
+                    <tr key={t.id}>
+                      <td>{formatDate(t.occurred_at)}</td>
+                      <td>{t.purpose}</td>
+                      <td>{t.accounts?.name ?? '—'}</td>
+                      <td>{formatByCurrency(Number(t.source_amount), t.source_currency)}</td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={draft}
+                          onChange={(e) => setAmountByTx({ ...amountByTx, [t.id]: e.target.value })}
+                          style={{ ...cellInput, width: 100, display: 'inline-block' }}
+                        />
+                        <span style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', marginLeft: 6 }}>{currency}</span>
+                      </td>
+                      <td style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                        {impliedRate
+                          ? `${Math.round(impliedRate).toLocaleString('es-CO')} ${t.source_currency}/${currency}`
+                          : (touched ? '—' : 'escribe el monto real →')}
+                      </td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        <button
+                          onClick={() => handleConfirmCurrency(t)}
+                          disabled={!(value > 0) || confirmingId === t.id}
+                          style={{ color: 'var(--series-1)', fontWeight: 600, marginRight: 8 }}
+                        >
+                          Confirmar
+                        </button>
+                        <button onClick={() => handleDeleteTx(t)} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>
+                          Eliminar
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+            </div>
+            {pendingCurrency.some((t) => Number(t.amount) === 0) && (
+              <p style={{ font: 'var(--font-caption)', color: 'var(--status-warning)', marginTop: 'var(--space-1)' }}>
+                Alguna fila quedó en 0: no hay tasa configurada para ese par de monedas. Puedes escribir el monto igual, o
+                definir la tasa en Cuentas para que las próximas importaciones lleguen estimadas.
+              </p>
+            )}
+          </Card>
+        )}
+
         <Card title="Presupuesto por categoría" className="span-3">
           <p style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', margin: '0 0 var(--space-1)' }}>
             Tope mensual editable por categoría (mismo monto todos los meses hasta que lo cambies). Vacío = sin presupuesto definido, no genera alerta.
@@ -497,6 +604,7 @@ export default function GastosDiarios() {
               {hijas.map((h) => {
                 const currency = h.currency || 'COP'
                 const spent = spentByAccount[h.id] ?? 0
+                const pendingCount = pendingByAccount[h.id] ?? 0
                 const movido = transferredOut[h.id] ?? 0
                 const allocated = allocations[h.id]
                 const income = incomeByAccount[h.id] ?? 0
@@ -505,7 +613,17 @@ export default function GastosDiarios() {
                 return (
                   <tr key={h.id}>
                     <td>{h.name}</td>
-                    <td>{formatByCurrency(spent, currency)}</td>
+                    <td>
+                      {pendingCount > 0 && (
+                        <span
+                          title={`Incluye ${pendingCount} monto(s) estimado(s) — confírmalos en "Compras en divisa por confirmar"`}
+                          style={{ color: 'var(--status-warning)', marginRight: 4 }}
+                        >
+                          ≈
+                        </span>
+                      )}
+                      {formatByCurrency(spent, currency)}
+                    </td>
                     <td>{movido > 0 ? formatByCurrency(movido, currency) : '—'}</td>
                     <td>{allocated != null ? formatByCurrency(allocated, currency) : 'sin definir'}</td>
                     <td>{income > 0 ? formatByCurrency(income, currency) : '—'}</td>
@@ -657,7 +775,17 @@ export default function GastosDiarios() {
                   <tr key={t.id}>
                     <td>{formatDate(t.occurred_at)}</td>
                     <td>{t.purpose}</td>
-                    <td>{formatByCurrency(t.amount, t.currency)}</td>
+                    <td>
+                      {t.currency_pending && (
+                        <span
+                          title="Monto estimado con la tasa guardada — todavía no confirmado en Compras en divisa por confirmar"
+                          style={{ color: 'var(--status-warning)', marginRight: 4 }}
+                        >
+                          ≈
+                        </span>
+                      )}
+                      {formatByCurrency(t.amount, t.currency)}
+                    </td>
                     <td>{t.categories?.name ?? '—'}</td>
                     <td>{t.accounts?.name ?? (t.assignment_confirmed ? '— ignorado (sin cuenta) —' : '— pendiente —')}</td>
                     <td>

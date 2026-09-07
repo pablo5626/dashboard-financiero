@@ -28,11 +28,11 @@ en este orden, priorizando siempre el dato explícito sobre la especulación:
       - `traslado` (y `moneda`, alias histórico): un movimiento **entre
         cuentas propias** del usuario (mover plata de una cuenta a otra,
         comprar divisas); el movimiento vive en `account_transfers`.
-      - `ignorar`: la compra **ya se cargó a mano** como transacción,
-        típicamente porque fue en otra moneda — MonIA todavía no maneja
-        divisas y exporta esas compras en COP, así que el gasto real se carga
-        a mano en EUR/USD contra la cuenta de arq correspondiente y la fila
-        espejo del CSV se marca con este tag.
+      - `ignorar`: la compra **ya se cargó a mano** como transacción, así que
+        la fila espejo del CSV no debe contarse otra vez. Sigue siendo válido
+        para cualquier movimiento cargado a mano, pero **ya no es el flujo de
+        las compras en divisa**: esas se importan normal con el tag de la
+        cuenta y se corrigen en la cola (ver "Compras en divisa" abajo).
 
       A diferencia de un tag de cuenta no asignan ninguna cuenta — resuelven la
       fila a `account_id = null` de forma permanente y ya resuelta
@@ -72,3 +72,31 @@ en este orden, priorizando siempre el dato explícito sobre la especulación:
 Nunca implementar un cuarto nivel que auto-asigne "por probabilidad" o
 "porque es lo más frecuente" sin tag/moneda — eso rompe la regla explícita
 del usuario de "nunca especular" en el nivel 3.
+
+## Compras en divisa: conversión posterior a la asignación
+
+MonIA deja capturar el monto en la moneda de la compra (EUR 51.31) pero **al
+guardar lo convierte**, así que el CSV siempre llega en COP y el monto original
+se pierde. Por eso el punto 1c casi nunca se dispara en la práctica: una compra
+desde arq llega como una fila COP con el tag `arq` / `arq eur`.
+
+Una vez resuelta la cuenta (en cualquier nivel), si la moneda de la fila es
+distinta a la de la cuenta asignada, la fila **no se guarda tal cual** — sería
+peor que inútil, porque `fetchBalancesForMonth` y `getAccountFlowsForMonth`
+solo suman filas cuya moneda coincide con la de la cuenta, así que un gasto en
+COP contra `arq eur` se descartaría **en silencio**: existiría en la tabla pero
+no movería ni el saldo ni el "% usado". En su lugar (`convertToAccountCurrency`
+en `transactionsApi.js`):
+
+- `amount`/`currency` pasan a la moneda de la **cuenta**, estimados con la tasa
+  manual de `exchange_rates` vía `convertAmount`. Si no hay tasa para ese par
+  se guarda `0` en vez de inventar una conversión — misma filosofía que `toCOP`.
+- El dato original del CSV se conserva en `source_amount`/`source_currency`
+  (auditoría, y de ahí sale la tasa implícita que usó MonIA).
+- `currency_pending = true` deja la fila en la cola "Compras en divisa por
+  confirmar" de `GastosDiarios.jsx`, donde el usuario teclea el monto exacto.
+  Hasta ese momento el monto es una estimación, no un dato real — el flag es lo
+  que hace visible esa diferencia en vez de esconderla.
+
+Reimportar el mismo CSV no pisa un monto ya confirmado: la deduplicación por
+`monia_id` usa `ignoreDuplicates`, así que la fila ni se toca.

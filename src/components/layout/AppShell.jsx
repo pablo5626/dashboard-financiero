@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { IconPanel, IconAccounts, IconExpenses, IconDebts, IconGoals } from '../icons.jsx'
 import { useAuth } from '../../lib/AuthContext.jsx'
-import { countPendingTransactions } from '../../lib/transactionsApi.js'
+import { countPendingTransactions, countPendingCurrencyTransactions } from '../../lib/transactionsApi.js'
 import styles from './AppShell.module.css'
 
 const NAV_ITEMS = [
@@ -18,11 +18,14 @@ export default function AppShell({ children }) {
   const location = useLocation()
   const [pendingCount, setPendingCount] = useState(0)
 
-  // Recuerda que hay movimientos sin cuenta asignada sin importar por dónde
+  // Recuerda que hay movimientos por atender en Gastos sin importar por dónde
   // se entre a la app (no solo desde Panel general) — se refresca al volver
-  // de Gastos diarios, donde se confirman.
+  // de Gastos diarios, donde se resuelven. Suma las dos colas que se drenan
+  // ahí: sin cuenta asignada y compras en divisa con monto todavía estimado.
   useEffect(() => {
-    countPendingTransactions().then(setPendingCount).catch(() => {})
+    Promise.all([countPendingTransactions(), countPendingCurrencyTransactions()])
+      .then(([bank, currency]) => setPendingCount(bank + currency))
+      .catch(() => {})
   }, [location.pathname])
 
   return (

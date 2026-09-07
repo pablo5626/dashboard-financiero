@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient.js'
-import { countPendingTransactions, isIgnoredRow } from './transactionsApi.js'
+import { countPendingTransactions, countPendingCurrencyTransactions, isIgnoredRow } from './transactionsApi.js'
 import { getRates, toCOP } from './exchangeRatesApi.js'
 
 // Devuelve los últimos n meses (incluyendo year/month) ordenados de más
@@ -130,6 +130,7 @@ export async function fetchAlerts() {
   const [
     { data: fixedExpenses, error: e1 }, { data: debtInstallments, error: e2 }, { data: savingsGoals, error: e3 },
     pendingCount, { data: allCategories, error: e5 }, { data: expenseRows, error: e6 },
+    pendingCurrencyCount,
   ] = await Promise.all([
     supabase.from('fixed_expenses').select('id, name, amount, due_day').eq('is_active', true),
     supabase.from('debt_installments').select('id, due_date, amount, debts(creditor_name, is_active, direction)').eq('paid', false).lte('due_date', dueSoonCutoff),
@@ -137,6 +138,7 @@ export async function fetchAlerts() {
     countPendingTransactions(),
     supabase.from('categories').select('id, name, monthly_budget'),
     supabase.from('transactions').select('category_id, amount, occurred_at, tags').gte('occurred_at', historyStart).lt('occurred_at', nextMonthStart).lt('amount', 0),
+    countPendingCurrencyTransactions(),
   ])
   if (e1) throw e1
   if (e2) throw e2
@@ -223,6 +225,21 @@ export async function fetchAlerts() {
       amount: null,
       daysUntil: null,
       count: pendingCount,
+      href: '/gastos',
+    })
+  }
+
+  // Compras en divisa importadas con monto estimado: mientras no se confirmen,
+  // el saldo de la cuenta en USD/EUR está aproximado con la tasa manual.
+  if (pendingCurrencyCount > 0) {
+    alerts.push({
+      id: 'pending-currency',
+      kind: 'divisa_pendiente',
+      level: 'warning',
+      name: null,
+      amount: null,
+      daysUntil: null,
+      count: pendingCurrencyCount,
       href: '/gastos',
     })
   }

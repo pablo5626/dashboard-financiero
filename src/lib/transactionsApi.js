@@ -2,6 +2,7 @@ import Papa from 'papaparse'
 import { supabase } from './supabaseClient.js'
 import { listAccounts } from './accountsApi.js'
 import { listCategories } from './categoriesApi.js'
+import { getRates, convertAmount } from './exchangeRatesApi.js'
 
 // Tags de nivel 1 que marcan una fila del CSV que el dashboard NO debe contar,
 // porque el movimiento real ya está registrado en otro lado — ver
@@ -96,6 +97,32 @@ async function fetchSingleAccountHistoryByCategory(categoryIds) {
   return singleAccountByCategory
 }
 
+// MonIA deja capturar una compra en su moneda original pero al guardar la
+// convierte, así que el CSV siempre llega en COP y el monto real (ej. 51.31
+// EUR) se pierde. Cuando la cuenta que resolvió el motor tiene otra moneda,
+// guardar la fila tal cual sería peor que inútil: fetchBalancesForMonth y
+// getAccountFlowsForMonth solo suman filas cuya moneda coincide con la de la
+// cuenta, así que un gasto en COP contra "arq eur" se descarta EN SILENCIO.
+// Por eso la fila se guarda en la moneda de la CUENTA, con el monto estimado
+// a partir de la tasa manual de exchange_rates, y marcada `currency_pending`
+// para que el usuario teclee el monto exacto en la cola de Gastos. El COP
+// original se conserva en source_amount/source_currency como auditoría (y de
+// ahí sale la tasa implícita que usó MonIA).
+//
+// Si no hay tasa configurada para el par, convertAmount devuelve null y se
+// guarda 0 en vez de inventar una conversión — misma filosofía que toCOP; la
+// fila igual queda en la cola con el monto en COP visible como ancla.
+function convertToAccountCurrency(row, accountCurrency, rates) {
+  const converted = convertAmount(row.amount, row.currency, accountCurrency, rates)
+  return {
+    amount: converted === null ? 0 : Math.round(converted * 100) / 100,
+    currency: accountCurrency,
+    source_amount: row.amount,
+    source_currency: row.currency,
+    currency_pending: true,
+  }
+}
+
 // Importa las filas ya parseadas del CSV que caigan en year/month, aplicando
 // el motor de asignación de 3 niveles y deduplicando por monia_id vía el
 // unique constraint (user_id, monia_id) en Postgres — nunca solo en cliente.
@@ -103,10 +130,11 @@ export async function importTransactions(rows, year, month) {
   const monthRows = filterRowsByMonth(rows, year, month)
   if (monthRows.length === 0) return { imported: 0, skipped: 0, totalInMonth: 0 }
 
-  const [accounts, categories] = await Promise.all([listAccounts(), listCategories()])
+  const [accounts, categories, rates] = await Promise.all([listAccounts(), listCategories(), getRates()])
   const accountIdByLowerName = Object.fromEntries(
     accounts.filter((a) => a.kind === 'hija').map((a) => [a.name.toLowerCase(), a.id])
   )
+  const currencyByAccountId = Object.fromEntries(accounts.map((a) => [a.id, a.currency || 'COP']))
   const accountsByCurrency = {}
   for (const a of accounts.filter((a) => a.kind === 'hija')) {
     const cur = a.currency || 'COP'
@@ -150,12 +178,23 @@ export async function importTransactions(rows, year, month) {
       assignmentConfirmed = true
     }
 
+    // Moneda de la fila distinta a la de la cuenta asignada: compra en divisa
+    // que MonIA exportó convertida a COP (ver convertToAccountCurrency). Las
+    // filas ignoradas nunca llegan acá — resuelven a account_id = null antes.
+    const accountCurrency = accountId ? currencyByAccountId[accountId] : null
+    const currencyFix = accountCurrency && accountCurrency !== r.currency
+      ? convertToAccountCurrency(r, accountCurrency, rates)
+      : null
+
     return {
       monia_id: r.moniaId,
       occurred_at: r.occurredAt,
       purpose: r.purpose,
-      amount: r.amount,
-      currency: r.currency,
+      amount: currencyFix?.amount ?? r.amount,
+      currency: currencyFix?.currency ?? r.currency,
+      source_amount: currencyFix?.source_amount ?? null,
+      source_currency: currencyFix?.source_currency ?? null,
+      currency_pending: currencyFix?.currency_pending ?? false,
       category_id: category?.id ?? null,
       emoji: r.emoji,
       creator: r.creator,
@@ -231,6 +270,40 @@ export async function listPendingTransactions() {
     .order('occurred_at', { ascending: false })
   if (error) throw error
   return data
+}
+
+// Cola de "compras en divisa por confirmar": filas ya asignadas a una cuenta
+// no-COP cuyo monto todavía es la estimación calculada al importar. No se
+// scopea al mes activo (igual que listPendingTransactions): es una cola a
+// drenar, no una vista del mes.
+export async function listPendingCurrencyTransactions() {
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('*, categories(name), accounts(name, currency)')
+    .eq('currency_pending', true)
+    .order('occurred_at', { ascending: false })
+  if (error) throw error
+  return data
+}
+
+export async function countPendingCurrencyTransactions() {
+  const { count, error } = await supabase
+    .from('transactions')
+    .select('*', { count: 'exact', head: true })
+    .eq('currency_pending', true)
+  if (error) throw error
+  return count ?? 0
+}
+
+// El usuario confirma el monto real en la moneda de la cuenta (el que MonIA no
+// exportó). source_amount/source_currency se conservan: son la auditoría de qué
+// dijo el CSV y con qué tasa implícita convirtió MonIA.
+export async function confirmCurrencyAmount(transactionId, amount) {
+  const { error } = await supabase
+    .from('transactions')
+    .update({ amount, currency_pending: false })
+    .eq('id', transactionId)
+  if (error) throw error
 }
 
 // Sugerencias de cuenta por categoría, ordenadas por frecuencia de

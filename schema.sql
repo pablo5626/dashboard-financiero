@@ -140,12 +140,22 @@ create table transactions (
   assignment_confirmed boolean not null default false,
   origin text not null default 'csv_import' check (origin in ('csv_import', 'manual')),
   loan_reviewed boolean not null default false, -- true una vez que una fila de categoría "Préstamo" (dinero prestado saliente) fue vinculada a un registro en `debts` o descartada explícitamente — evita volver a sugerirla en cada importación
+  -- Compras en divisa exportadas en COP: MonIA deja cargar el monto en su
+  -- moneda original pero al guardar lo convierte, así que el CSV llega en COP
+  -- y el monto real (ej. 51.31 EUR) se pierde. Cuando la cuenta asignada tiene
+  -- otra moneda, `amount`/`currency` quedan en la moneda de la CUENTA (estimados
+  -- con la tasa manual de `exchange_rates`) y estas columnas guardan el dato
+  -- original del CSV para auditoría y para que el usuario teclee el monto exacto.
+  source_amount numeric,                        -- monto tal cual venía en el CSV
+  source_currency text,                         -- su moneda de origen (típicamente 'COP')
+  currency_pending boolean not null default false, -- true = `amount` todavía es la estimación, falta confirmarlo
   created_at timestamptz not null default now(),
   unique (user_id, monia_id)
 );
 
 create index idx_transactions_date on transactions (user_id, occurred_at);
 create index idx_transactions_pending on transactions (user_id) where account_id is null;
+create index idx_transactions_currency_pending on transactions (user_id) where currency_pending;
 create index idx_transactions_category on transactions (user_id, category_id);
 
 -- Aprendizaje incremental: frecuencia categoría(+tag) -> cuenta, alimentada

@@ -17,6 +17,13 @@ directamente en el panel de Supabase sin reflejarlo en el archivo.
 - **`transactions.account_id` es nullable a propósito**: representa el estado
   "pendiente de banco" del motor de asignación (ver `motor-asignacion.md`). No
   se reemplaza por una cuenta ficticia tipo "Sin asignar".
+- **`transactions.source_amount` / `source_currency` / `currency_pending`**
+  existen solo para las compras en divisa que MonIA exporta convertidas a COP
+  (ver `motor-asignacion.md`). `amount`/`currency` siguen siendo la verdad
+  canónica —siempre en la moneda de la cuenta— y `source_*` es la fila original
+  del CSV, guardada como auditoría; `currency_pending` marca que `amount` es
+  todavía una estimación hecha con la tasa manual y falta que el usuario
+  confirme el monto real.
 - **Deduplicación por `monia_id`** (el campo `id` del CSV de MonIA) vía
   `unique (user_id, monia_id)` en Postgres — la idempotencia de reimportar el
   mismo CSV se garantiza en la base de datos, nunca solo en el cliente.

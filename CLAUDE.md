@@ -87,8 +87,8 @@ are `kind = 'hija'` even though they sit out the monthly madre→hijas ritual.
 2. Load the month's **"Saldos iniciales"** (by hand, or via the iPhone
    Shortcut).
 3. **During the month, in Gastos** — import the MonIA CSV with the month/year
-   picker (re-importing is safe: it dedups on `monia_id`) and drain the
-   "Pendientes de banco" queue.
+   picker (re-importing is safe: it dedups on `monia_id`) and drain the two
+   queues: "Pendientes de banco" and "Compras en divisa por confirmar".
 4. **Closing check, in Panel** — read the alerts, and confirm each hija's
    "% usado" reconciles against its balance (`disponible − usado = saldo`, see
    Money math). That identity failing is the fastest signal something was
@@ -99,7 +99,7 @@ are `kind = 'hija'` even though they sit out the monthly madre→hijas ritual.
 | Situación | Qué hace el usuario | Tag en MonIA |
 |---|---|---|
 | Gasto normal desde una hija COP | Nada: lo trae el CSV | El nombre de la cuenta (`dale`, `nequi`, `pibank`…) |
-| Compra desde arq en USD/EUR | La carga a mano en la app, en su moneda, contra Arq / Arq EUR | `ignorar` en la fila espejo del CSV |
+| Compra desde arq en USD/EUR | Nada al capturar: la trae el CSV (en COP, convertida por MonIA) y luego confirma el monto real en euros/dólares en la cola "Compras en divisa por confirmar" | `arq` / `arq eur` |
 | Mover plata entre cuentas propias | La registra como transferencia en la app, decidiendo el checkbox de presupuesto | `traslado`, solo si además aparece en el CSV |
 | Comprar divisas (COP→USD, USD→EUR…) | Usa "Cambio de divisa", que sugiere el monto con la tasa guardada | `traslado` (o `moneda`, alias viejo) |
 | Ingreso que cae fuera del reparto mensual | Nada especial: entra como transacción positiva y amplía el disponible solo | El nombre de la cuenta |
@@ -107,12 +107,13 @@ are `kind = 'hija'` even though they sit out the monthly madre→hijas ritual.
 
 Three rules behind that table, in the order they're most often forgotten:
 **a transfer is never a gasto** (moving money doesn't consume it — the
-consolidated views count the purchase once, where it happened); **`ignorar`
-exists only because MonIA can't record foreign currencies yet**, so the expense
-is entered by hand in EUR/USD and the CSV's COP mirror row must not be booked
-twice; and **the budget checkbox on a transfer** distinguishes "moving money to
-spend it from the other account" (consumes the source's budget) from "just
-rebalancing pockets" (doesn't).
+consolidated views count the purchase once, where it happened); **MonIA
+converts a foreign-currency purchase to COP when it saves it**, so the CSV can
+never carry the original EUR/USD amount and the import has to reconstruct it
+(see the arq flow below) — `ignorar` still exists, but only for movements
+genuinely already entered by hand; and **the budget checkbox on a transfer**
+distinguishes "moving money to spend it from the other account" (consumes the
+source's budget) from "just rebalancing pockets" (doesn't).
 
 ## Architecture
 
@@ -157,8 +158,10 @@ The layout follows iOS HIG conventions adapted to web (safe-area insets,
 44px touch targets, no hamburger menu) — see the `ios-hig-design` project
 skill and `.claude/rules/diseno-ui.md` before changing it. `AppShell` also
 shows a small numeric badge on the "Gastos" nav item (sidebar and tab bar)
-when there are unassigned ("pendiente de banco") transactions, refetched
-on every route change via `countPendingTransactions()`.
+counting both queues drained there — unassigned ("pendiente de banco")
+transactions plus foreign-currency purchases whose amount is still estimated —
+refetched on every route change via `countPendingTransactions()` +
+`countPendingCurrencyTransactions()`.
 
 **Design tokens**: all color/typography/spacing values are CSS custom
 properties defined once in `src/index.css` (categorical/sequential/status
@@ -325,7 +328,10 @@ never speculation; tag wins if a row somehow has both), (2) a category with
 banco") for manual confirmation in `GastosDiarios.jsx`, which also feeds
 `category_account_stats` to improve future suggestion ordering. Never add
 a 4th, frequency/probability-based auto-assignment level — this is an
-explicit, repeatedly-reinforced user rule. There is **no fixed list of valid
+explicit, repeatedly-reinforced user rule. Once the account is resolved (at
+any level), a **currency reconciliation step** runs: a row whose currency
+differs from its account's is converted into the account's currency and
+queued for confirmation — see the arq flow below. There is **no fixed list of valid
 tags**: the vocabulary *is* the set of active hija account names (`dale`,
 `nequi`, … plus `arq` / `arq eur`), so creating an account enables its tag on
 its own. The old hardcoded `BANK_TAGS` constant was deleted precisely because
@@ -341,7 +347,9 @@ resolves the row to `account_id = null` on purpose (`assignment_level = 1`,
 behavior: `traslado` (and `moneda`, its historical alias) is a movement between
 the user's own accounts — Dale → arq, buying foreign currency — that lives in
 `account_transfers`; `ignorar` is a purchase already entered by hand as a
-transaction (see the foreign-currency flow below). Because it's marked
+transaction. `ignorar` used to be mandatory for every arq purchase; it isn't
+any more (see the foreign-currency flow below), but it stays valid for anything
+genuinely entered by hand. Because it's marked
 `assignment_confirmed = true` rather than needing the default `false`, it never
 shows up in "pendiente de banco" or its badge/alert count — both
 `countPendingTransactions` and `listPendingTransactions` filter on
@@ -356,16 +364,30 @@ the exported helper `isIgnoredRow(tags)` in `fetchMonthlyTrend`,
 is the easy part to forget (each of those queries had to add `tags` to its
 `select`).
 
-**Foreign-currency purchases (the arq flow)**: MonIA does not handle currencies
-yet — a purchase made in euros from arq is exported to the CSV in COP. So the
-expense is entered **by hand, in its own currency**: pick the arq account in
-`GastosDiarios.jsx`'s manual form and `createManualTransaction` takes the
-`currency` from that account (there is deliberately no separate currency
-picker — a EUR amount saved as COP would be silently dropped from the balance
-by `fetchBalancesForMonth`'s currency check). Then the mirror row in MonIA gets
-the `ignorar` tag so the CSV import doesn't book it a second time. Net effect:
-arq's balance drops in euros, and Panel General counts the gasto converted to
-COP at the stored COP↔EUR rate.
+**Foreign-currency purchases (the arq flow)**: MonIA *lets you type* the amount
+in the currency of the purchase (EUR 51.31), but **converts it to COP when it
+saves**, so the CSV always arrives in COP and the original amount is gone —
+the `currency` column is COP on every row in practice, which is why the
+assignment engine's currency rule (level 1c) almost never fires. The purchase is
+therefore imported normally with the account's tag (`arq` / `arq eur`) and the
+foreign amount is reconstructed at import time by `convertToAccountCurrency`
+(`transactionsApi.js`): whenever the resolved account's currency differs from
+the row's, `amount`/`currency` are rewritten into the **account's** currency
+(estimated with the manual rate from `exchange_rates` via `convertAmount`, or
+`0` when no rate is configured for that pair — same "don't invent a conversion"
+rule as `toCOP`), the CSV's original figures are kept in `source_amount`/
+`source_currency` for audit, and `currency_pending = true` puts the row in the
+"Compras en divisa por confirmar" queue in `GastosDiarios.jsx`, where the user
+types the exact 51.31 and confirms. Re-importing the same CSV never clobbers a
+confirmed amount — the `monia_id` dedup uses `ignoreDuplicates`.
+
+Storing the row as-is is not a neutral alternative: because
+`fetchBalancesForMonth` and `getAccountFlowsForMonth` only sum rows whose
+currency matches the account's, a COP row on a EUR account is **silently
+dropped** — present in the table, invisible in the balance and the "% usado".
+That was a latent bug the `ignorar` workaround happened to avoid. The manual
+form still exists and still takes its `currency` from the selected account (see
+`createManualTransaction`), but it's no longer the required path for arq.
 
 **Alerts system** (`panelApi.fetchAlerts`, rendered in `PanelGeneral.jsx`'s
 "Alertas" card): surfaces fixed expenses and debt installments due within
@@ -374,7 +396,9 @@ past it), pending "sin cuenta asignada" transactions, categories that
 exceeded their `monthly_budget` (`categories.monthly_budget`, a flat
 monthly cap edited from a "Presupuesto por categoría" card in
 `GastosDiarios.jsx` — not month-by-month, just one number that applies
-every month until changed), and a `'anomalia_categoria'` alert when a
+every month until changed), `'divisa_pendiente'` for foreign-currency
+purchases still carrying an estimated amount (`currency_pending`), and a
+`'anomalia_categoria'` alert when a
 category's spend this month exceeds 1.5× its trailing-6-month average
 (reuses the same widened query `fetchAlerts` already runs for the budget
 check, no new Supabase call). Every alert carries an `href` so it renders
@@ -471,7 +495,11 @@ Supabase, no sample data left anywhere:
   above).
 - **`GastosDiarios.jsx`**: MonIA CSV import (month/year picker, dedup via
   `monia_id`), the bank-assignment engine above, a "Pendientes de banco"
-  confirmation table with historical-frequency suggestions, per-category
+  confirmation table with historical-frequency suggestions, a "Compras en
+  divisa por confirmar" queue right below it (rows whose amount is still the
+  estimate produced at import — shows MonIA's original COP figure, an editable
+  amount in the account's currency, and the implied rate MonIA used, which is a
+  free real-market datapoint to check the manual rate against), per-category
   monthly budgets, spend-by-category and spend-by-tag bar charts (the
   spend-by-tag chart excludes tags that name an account — a transaction
   typically carries both an account tag and a descriptive tag in the same

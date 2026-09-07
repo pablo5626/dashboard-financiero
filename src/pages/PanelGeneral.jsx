@@ -44,6 +44,10 @@ function alertText(a) {
       return a.count === 1
         ? '1 movimiento sin cuenta asignada — confírmalo en Gastos diarios'
         : `${a.count} movimientos sin cuenta asignada — confírmalos en Gastos diarios`
+    case 'divisa_pendiente':
+      return a.count === 1
+        ? '1 compra en divisa con monto estimado — confírmalo en Gastos diarios'
+        : `${a.count} compras en divisa con monto estimado — confírmalos en Gastos diarios`
     case 'presupuesto_categoria':
       return `"${a.name}" superó su presupuesto — ${formatCOP(a.amount)} de ${formatCOP(a.budget)}`
     case 'anomalia_categoria':
