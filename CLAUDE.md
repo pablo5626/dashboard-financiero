@@ -341,7 +341,9 @@ differs from its account's is converted into the account's currency and
 queued for confirmation — see the arq flow below. There is **no fixed list of valid
 tags**: the vocabulary *is* the set of active hija account names (`dale`,
 `nequi`, … plus `arq` / `arq eur`), so creating an account enables its tag on
-its own. The old hardcoded `BANK_TAGS` constant was deleted precisely because
+its own. MonIA can't type spaces into a tag, so a multi-word name has to go in
+as `arq_eur` — see the footnote on the situations table above for the
+underscore-to-space normalization that keeps that matching the account name. The old hardcoded `BANK_TAGS` constant was deleted precisely because
 it drifted — it gated assignment *and* the spend-by-tag chart exclusion, so a
 purchase tagged `arq` silently fell through to "pendiente" and would have
 double-counted in that chart.
@@ -395,6 +397,18 @@ dropped** — present in the table, invisible in the balance and the "% usado".
 That was a latent bug the `ignorar` workaround happened to avoid. The manual
 form still exists and still takes its `currency` from the selected account (see
 `createManualTransaction`), but it's no longer the required path for arq.
+
+Every `currency_pending` row is marked with a small `≈` (in `GastosDiarios.jsx`)
+wherever its amount surfaces outside the confirmation queue — next to the
+amount in "Movimientos" and next to "Gastado este mes" in the per-account
+budget table (with a tooltip and, for the latter, a count of how many pending
+rows are baked into that total) — so an estimate is never visually
+indistinguishable from a confirmed amount. In the queue itself, the "tasa
+implícita" column stays blank (`escribe el monto real →`) until the user
+actually edits the field: the pre-filled draft value **is** the estimate that
+was computed by dividing by the manual rate, so dividing back would just
+echo that same rate relabeled as "what MonIA used" — showing a fabricated
+number instead of admitting nothing real is known yet.
 
 **Alerts system** (`panelApi.fetchAlerts`, rendered in `PanelGeneral.jsx`'s
 "Alertas" card): surfaces fixed expenses and debt installments due within
@@ -505,8 +519,10 @@ Supabase, no sample data left anywhere:
   confirmation table with historical-frequency suggestions, a "Compras en
   divisa por confirmar" queue right below it (rows whose amount is still the
   estimate produced at import — shows MonIA's original COP figure, an editable
-  amount in the account's currency, and the implied rate MonIA used, which is a
-  free real-market datapoint to check the manual rate against), per-category
+  amount in the account's currency, and — once that field is edited — the
+  implied rate MonIA used, a free real-market datapoint to check the manual
+  rate against; a `≈` marks any such estimate wherever it surfaces elsewhere
+  on this page, see the arq flow above), per-category
   monthly budgets, spend-by-category and spend-by-tag bar charts (the
   spend-by-tag chart excludes tags that name an account — a transaction
   typically carries both an account tag and a descriptive tag in the same
