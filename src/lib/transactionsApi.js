@@ -39,7 +39,13 @@ export function parseMonIACSV(csvText) {
       emoji: row.emoji?.trim() || null,
       creator: row.creator?.trim() || null,
       creatorName: row.creator_name?.trim() || null,
-      tags: (row.tags || '').split(';').map((t) => t.trim().toLowerCase()).filter(Boolean),
+      // MonIA no deja escribir espacios al crear un tag, así que un tag de
+      // más de una palabra (ej. el nombre de la cuenta "Arq EUR") queda
+      // forzosamente como "arq_eur" en el CSV. El motor de asignación
+      // compara contra accounts.name.toLowerCase() (que sí tiene el espacio),
+      // así que sin normalizar acá "arq_eur" nunca calzaría con "arq eur" y
+      // la fila caería a pendiente de banco en vez de asignarse.
+      tags: (row.tags || '').split(';').map((t) => t.trim().toLowerCase().replace(/_/g, ' ')).filter(Boolean),
       sourceTimezone: row.timezone?.trim() || null,
     }))
     .filter((r) => r.moniaId && r.occurredAt && !Number.isNaN(r.amount))

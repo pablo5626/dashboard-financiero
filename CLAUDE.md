@@ -99,11 +99,18 @@ are `kind = 'hija'` even though they sit out the monthly madre→hijas ritual.
 | Situación | Qué hace el usuario | Tag en MonIA |
 |---|---|---|
 | Gasto normal desde una hija COP | Nada: lo trae el CSV | El nombre de la cuenta (`dale`, `nequi`, `pibank`…) |
-| Compra desde arq en USD/EUR | Nada al capturar: la trae el CSV (en COP, convertida por MonIA) y luego confirma el monto real en euros/dólares en la cola "Compras en divisa por confirmar" | `arq` / `arq eur` |
+| Compra desde arq en USD/EUR | Nada al capturar: la trae el CSV (en COP, convertida por MonIA) y luego confirma el monto real en euros/dólares en la cola "Compras en divisa por confirmar" | `arq` / `arq_eur`¹ |
 | Mover plata entre cuentas propias | La registra como transferencia en la app, decidiendo el checkbox de presupuesto | `traslado`, solo si además aparece en el CSV |
 | Comprar divisas (COP→USD, USD→EUR…) | Usa "Cambio de divisa", que sugiere el monto con la tasa guardada | `traslado` (o `moneda`, alias viejo) |
 | Ingreso que cae fuera del reparto mensual | Nada especial: entra como transacción positiva y amplía el disponible solo | El nombre de la cuenta |
 | No sabe de qué cuenta salió | Lo confirma en "Pendientes de banco" | Ninguno |
+
+¹ MonIA's tag input doesn't accept spaces, so a multi-word account name has to
+be typed as `arq_eur` on the phone. `parseMonIACSV` normalizes underscore to
+space on every tag right after lowercasing it, so it still matches
+`accounts.name.toLowerCase()` ("arq eur") — without that normalization the tag
+silently fails to match and the row falls through to "pendiente de banco"
+instead of landing on arq EUR. Applies to any multi-word tag, not just this one.
 
 Three rules behind that table, in the order they're most often forgotten:
 **a transfer is never a gasto** (moving money doesn't consume it — the

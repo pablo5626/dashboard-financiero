@@ -21,6 +21,15 @@ en este orden, priorizando siempre el dato explícito sobre la especulación:
       desactualice. Ese mismo conjunto de nombres es el que se excluye del
       gráfico "gasto por tag" en `GastosDiarios.jsx`, para no contar dos veces
       la misma compra (que suele traer además un tag descriptivo).
+
+      **MonIA no deja escribir espacios al crear un tag**, así que un nombre
+      de cuenta de más de una palabra (`arq eur`) hay que teclearlo en el
+      teléfono como `arq_eur`. `parseMonIACSV` normaliza guion bajo → espacio
+      al parsear cada tag (antes de guardarlo en `transactions.tags`),
+      precisamente para que siga calzando contra `accounts.name.toLowerCase()`
+      — sin esa normalización, `arq_eur` no matchea `"arq eur"` y la fila cae
+      a pendiente de banco en vez de asignarse. Aplica igual a cualquier tag
+      descriptivo de más de una palabra, no solo a nombres de cuenta.
    b. **Tags de fila ignorada** (`IGNORED_TAGS` en `transactionsApi.js`):
       marcan una fila del CSV cuyo movimiento real **ya está registrado en
       otro lado**, así que el dashboard no debe contarla. Dos motivos, mismo
