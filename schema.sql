@@ -101,7 +101,17 @@ create table account_transfers (
   consumes_budget boolean not null default true,
   transfer_date date not null default current_date,
   note text,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Clave de idempotencia opcional para escrituras directas por REST (ej. el
+  -- Shortcut de iOS de "Transferencia rápida", ver .claude/rules/shortcuts-ios.md):
+  -- a diferencia de transactions.monia_id, account_transfers no tenía ninguna
+  -- protección contra duplicados. El Shortcut genera una key nueva por toque
+  -- real y hace el insert con ?on_conflict=user_id,idempotency_key +
+  -- Prefer: resolution=ignore-duplicates, así un reintento de red o un
+  -- disparo accidental (ej. Back Tap) no crea una fila repetida. Nula para
+  -- transferencias creadas desde la app, que no la necesitan.
+  idempotency_key text,
+  unique (user_id, idempotency_key)
 );
 
 -- ----------------------------------------------------------------------------

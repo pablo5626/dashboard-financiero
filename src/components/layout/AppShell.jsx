@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { IconPanel, IconAccounts, IconExpenses, IconDebts, IconGoals } from '../icons.jsx'
 import { useAuth } from '../../lib/AuthContext.jsx'
 import { countPendingTransactions, countPendingCurrencyTransactions } from '../../lib/transactionsApi.js'
+import QuickCaptureFAB from '../QuickCaptureFAB.jsx'
 import styles from './AppShell.module.css'
 
 const NAV_ITEMS = [
@@ -22,11 +23,15 @@ export default function AppShell({ children }) {
   // se entre a la app (no solo desde Panel general) — se refresca al volver
   // de Gastos diarios, donde se resuelven. Suma las dos colas que se drenan
   // ahí: sin cuenta asignada y compras en divisa con monto todavía estimado.
-  useEffect(() => {
+  // También la usa QuickCaptureFAB tras guardar, en vez de recargar la
+  // página completa que esté montada debajo.
+  const refreshPendingCount = useCallback(() => {
     Promise.all([countPendingTransactions(), countPendingCurrencyTransactions()])
       .then(([bank, currency]) => setPendingCount(bank + currency))
       .catch(() => {})
-  }, [location.pathname])
+  }, [])
+
+  useEffect(() => { refreshPendingCount() }, [location.pathname, refreshPendingCount])
 
   return (
     <div className={styles.shell}>
@@ -71,6 +76,8 @@ export default function AppShell({ children }) {
           </NavLink>
         ))}
       </nav>
+
+      <QuickCaptureFAB onSaved={refreshPendingCount} />
     </div>
   )
 }

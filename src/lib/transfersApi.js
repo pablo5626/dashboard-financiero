@@ -27,7 +27,7 @@ export function sumOutgoingByAccount(transfers, accounts) {
 }
 
 export async function createTransfers(rows) {
-  const payload = rows.map(({ fromAccountId, toAccountId, amount, currency, toAmount, toCurrency, transferDate, note, consumesBudget }) => ({
+  const payload = rows.map(({ fromAccountId, toAccountId, amount, currency, toAmount, toCurrency, transferDate, note, consumesBudget, idempotencyKey }) => ({
     from_account_id: fromAccountId,
     to_account_id: toAccountId,
     amount,
@@ -37,6 +37,7 @@ export async function createTransfers(rows) {
     consumes_budget: consumesBudget ?? true,
     transfer_date: transferDate,
     note: note ?? null,
+    idempotency_key: idempotencyKey ?? null,
   }))
   const { error } = await supabase.from('account_transfers').insert(payload)
   if (error) throw error

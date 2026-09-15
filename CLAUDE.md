@@ -623,6 +623,18 @@ unprompted, they're deliberate cuts, not oversights:
   `Prefer: resolution=merge-duplicates`) and insert into `account_transfers`
   (madre → hija, no upsert — see the duplicate-transfer risk above), using
   `apikey` + `Authorization: Bearer <access_token>` headers throughout.
+- Two more Shortcuts follow this same login→insert pattern for real-time
+  capture outside the monthly ritual — "Gasto rápido" (2 prompts: amount,
+  account) and "Transferencia rápida" (3 prompts: amount, origen, destino,
+  `consumes_budget` always `true`) — spec'd in full (exact REST calls,
+  headers, JSON bodies) in `.claude/rules/shortcuts-ios.md`. The transfer
+  one relies on `account_transfers.idempotency_key` (added to `schema.sql`
+  specifically for this) to survive a Back Tap misfire or network retry
+  without duplicating a real transfer, since `account_transfers` otherwise
+  has no dedup at all (see the risk above). A `QuickCaptureFAB` button in
+  `AppShell.jsx` covers the same three actions from inside the app, for
+  when picking account/category explicitly (or a cross-currency arq
+  transfer) matters more than raw speed.
 
 ## Importable external-agent config detected
 

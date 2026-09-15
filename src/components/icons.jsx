@@ -45,3 +45,19 @@ export function IconGoals(props) {
     </svg>
   )
 }
+
+export function IconPlus(props) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M12 4v16M4 12h16" />
+    </svg>
+  )
+}
+
+export function IconClose(props) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M5 5l14 14M19 5L5 19" />
+    </svg>
+  )
+}
