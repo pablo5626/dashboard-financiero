@@ -30,6 +30,16 @@ en este orden, priorizando siempre el dato explícito sobre la especulación:
       — sin esa normalización, `arq_eur` no matchea `"arq eur"` y la fila cae
       a pendiente de banco en vez de asignarse. Aplica igual a cualquier tag
       descriptivo de más de una palabra, no solo a nombres de cuenta.
+
+      Los tags de una transacción ya guardada (importada o manual) también se
+      pueden editar directamente desde las tablas de `GastosDiarios.jsx`
+      ("Movimientos" y "Buscar movimientos"), vía `updateTransactionTags` en
+      `transactionsApi.js` — no hace falta re-importar el CSV con el tag
+      corregido en MonIA. La edición aplica la misma normalización
+      (`normalizeTag`, guion bajo → espacio + minúsculas) que el import, así
+      que un tag tipeado a mano sigue calzando contra nombres de cuenta igual
+      que uno importado, y escribir a mano `ignorar`/`traslado`/`moneda` desde
+      esta UI tiene el mismo efecto que traerlo del CSV (ver punto b).
    b. **Tags de fila ignorada** (`IGNORED_TAGS` en `transactionsApi.js`):
       marcan una fila del CSV cuyo movimiento real **ya está registrado en
       otro lado**, así que el dashboard no debe contarla. Dos motivos, mismo

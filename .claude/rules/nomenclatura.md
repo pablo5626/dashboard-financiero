@@ -30,3 +30,11 @@ Tanto `categories` como `accounts` son catálogos editables en Supabase (no
 `enum`/`CHECK` rígidos) porque el usuario pidió que todo sea 100%
 personalizable — pero el conjunto inicial a precargar es exactamente el de la
 tabla del prompt, no el que aparece en el CSV.
+
+`categories` tiene UI completa de alta/edición/archivado en la card
+"Categorías" de `GastosDiarios.jsx` (`categoriesApi.js`:
+`createCategory`/`updateCategory`/`archiveCategory`) — ya no hace falta entrar
+a Supabase a mano para esto, igual que `accounts` en `Cuentas.jsx`. Esto no
+cambia la regla de fondo: una categoría nueva solo se agrega cuando el usuario
+lo pide explícitamente, nunca para absorber una variante de nombre del CSV de
+MonIA.

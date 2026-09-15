@@ -136,7 +136,7 @@ export async function fetchAlerts() {
     supabase.from('debt_installments').select('id, due_date, amount, debts(creditor_name, is_active, direction)').eq('paid', false).lte('due_date', dueSoonCutoff),
     supabase.from('savings_goals').select('id, name, current_amount, target_amount, target_date').eq('is_active', true).eq('kind', 'puntual').not('target_date', 'is', null),
     countPendingTransactions(),
-    supabase.from('categories').select('id, name, monthly_budget'),
+    supabase.from('categories').select('id, name, monthly_budget').eq('is_active', true),
     supabase.from('transactions').select('category_id, amount, occurred_at, tags').gte('occurred_at', historyStart).lt('occurred_at', nextMonthStart).lt('amount', 0),
     countPendingCurrencyTransactions(),
   ])

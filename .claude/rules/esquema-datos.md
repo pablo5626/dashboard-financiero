@@ -55,6 +55,15 @@ directamente en el panel de Supabase sin reflejarlo en el archivo.
   **y por tag** (columna `tag` nullable): una fila agrega por categoría sola,
   otra fila específica por categoría+tag, para que el orden de sugerencias
   use el tag cuando exista.
+- **`purpose_category_stats`** es el mismo tipo de aprendizaje incremental un
+  nivel antes: descripción (`purpose`, normalizada con `normalizePurpose`) →
+  categoría + tag, alimentada tanto por `createManualTransaction` como por
+  `importTransactions` (`src/lib/transactionsApi.js`) cada vez que una fila
+  guarda una categoría resuelta. Solo se usa para precargar (nunca
+  autoguardar) categoría/tag en los formularios de carga manual
+  (`GastosDiarios.jsx`, `QuickCaptureFAB.jsx`) cuando el usuario repite una
+  descripción ya vista — matching por texto exacto normalizado, sin fuzzy
+  matching por ahora.
 - Los bloques de `insert` de valores iniciales (cuentas, categorías) están
   comentados en `schema.sql` a propósito — se ejecutan una vez, ya
   autenticado, para que `auth.uid()` resuelva al usuario real.

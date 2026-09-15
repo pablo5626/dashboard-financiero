@@ -17,8 +17,12 @@
 - **`src/lib/supabaseClient.js`** es el único punto de creación del cliente
   de Supabase — no instanciar `createClient` en otros archivos.
 - Estructura de carpetas: `src/pages/` (una por sección), `src/components/ui/`
-  (piezas genéricas: Card, StatTile), `src/components/layout/` (AppShell,
-  navegación), `src/lib/` (cliente Supabase, formato, datos de ejemplo).
-- Mientras una sección no esté conectada a Supabase, sus datos de ejemplo
-  viven en `src/lib/sampleData.js` — no hardcodear datos de muestra dentro de
-  los componentes de página.
+  (piezas genéricas: Card, ConfirmDialog), `src/components/layout/` (AppShell,
+  navegación), `src/components/` a nivel raíz (`QuickCaptureFAB.jsx`, `icons.jsx`
+  — componentes globales que no pertenecen a una sola página), `src/lib/`
+  (cliente Supabase, formato, un módulo `*Api.js` por dominio de datos).
+- No queda ningún dato de muestra en el proyecto — `src/lib/sampleData.js`
+  se eliminó una vez que las 5 secciones quedaron conectadas a Supabase
+  (ver `CLAUDE.md`). Si algún día se agrega una sección nueva antes de tener
+  su tabla lista, sus datos de ejemplo van en un archivo dedicado bajo
+  `src/lib/`, nunca hardcodeados dentro de un componente de página.

@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
-import { IconPlus, IconClose } from './icons.jsx'
+import { useEffect, useRef, useState } from 'react'
+import { IconPlus, IconClose, IconMic } from './icons.jsx'
 import { listAccounts } from '../lib/accountsApi.js'
 import { listCategories } from '../lib/categoriesApi.js'
-import { createManualTransaction } from '../lib/transactionsApi.js'
+import { createManualTransaction, suggestCategoryForPurpose } from '../lib/transactionsApi.js'
 import { createTransfers } from '../lib/transfersApi.js'
+import { supabase } from '../lib/supabaseClient.js'
 import styles from './QuickCaptureFAB.module.css'
 
 // No-criptográfico a propósito: crypto.randomUUID() no existe fuera de
@@ -12,6 +13,21 @@ import styles from './QuickCaptureFAB.module.css'
 // doble-toque de "Guardar" en la propia hoja, no hace falta unicidad fuerte.
 function generateIdempotencyKey() {
   return `fab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+// undefined en navegadores sin soporte (ej. Firefox de escritorio) -- el
+// botón de micrófono directamente no se renderiza en ese caso.
+const SpeechRecognitionCtor =
+  typeof window !== 'undefined' ? window.SpeechRecognition || window.webkitSpeechRecognition : undefined
+
+// Matchea categoryName/accountName devueltos por Claude contra los arrays
+// categories/accounts ya cargados, tolerando diferencias de acento/mayúscula.
+function normalizeName(name) {
+  return (name || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .trim()
 }
 
 const today = () => new Date().toISOString().slice(0, 10)
@@ -46,6 +62,10 @@ export default function QuickCaptureFAB({ onSaved }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(false)
+  const [voiceStatus, setVoiceStatus] = useState('idle') // 'idle' | 'listening' | 'processing'
+  const [voiceError, setVoiceError] = useState(null)
+  const [purposeSuggestion, setPurposeSuggestion] = useState(false)
+  const recognitionRef = useRef(null)
 
   useEffect(() => {
     if (!open || accounts.length > 0) return
@@ -57,12 +77,31 @@ export default function QuickCaptureFAB({ onSaved }) {
     setForm({ ...emptyForm, mode: mode ?? form.mode })
     setShowMore(false)
     setError(null)
+    setPurposeSuggestion(false)
   }
 
   function close() {
+    recognitionRef.current?.abort()
+    setVoiceStatus('idle')
+    setVoiceError(null)
     setOpen(false)
     setSuccess(false)
     reset('gasto')
+  }
+
+  // Sugiere categoría+tag aprendidos de purpose_category_stats al salir del
+  // campo Descripción — nunca pisa una elección que el usuario ya hizo, y no
+  // compite con el prefill de voz (handleVoiceResult tiene su propio flujo).
+  async function handlePurposeBlur() {
+    if (!form.purpose.trim() || form.categoryId || form.tag) return
+    try {
+      const suggestion = await suggestCategoryForPurpose(form.purpose)
+      if (!suggestion) return
+      setForm((prev) => ({ ...prev, categoryId: suggestion.categoryId, tag: suggestion.tag ?? prev.tag }))
+      setPurposeSuggestion(true)
+    } catch {
+      // Silencioso: es solo una sugerencia, no debe bloquear la carga manual.
+    }
   }
 
   function currencyOf(id) {
@@ -124,6 +163,66 @@ export default function QuickCaptureFAB({ onSaved }) {
     }
   }
 
+  async function handleVoiceResult(transcript) {
+    if (!transcript.trim()) {
+      setVoiceStatus('idle')
+      setVoiceError('No se entendió nada, intenta de nuevo')
+      return
+    }
+    setVoiceStatus('processing')
+    setVoiceError(null)
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke('voice-parse', {
+        body: { text: transcript },
+      })
+      if (invokeError) throw invokeError
+      if (!data?.ok) throw new Error(data?.error || 'no se pudo interpretar')
+
+      const result = data.result
+      const account = accounts.find((a) => normalizeName(a.name) === normalizeName(result.accountName))
+      const category = categories.find((c) => normalizeName(c.name) === normalizeName(result.categoryName))
+
+      setForm({
+        ...emptyForm,
+        mode: result.mode,
+        amount: String(result.amount),
+        accountId: account?.id || '',
+        categoryId: category?.id || '',
+        purpose: result.purpose || '',
+        tag: result.tag || '',
+      })
+      setShowMore(true)
+    } catch (err) {
+      setVoiceError(err.message)
+    } finally {
+      setVoiceStatus((s) => (s === 'processing' ? 'idle' : s))
+    }
+  }
+
+  function startVoiceCapture() {
+    if (!SpeechRecognitionCtor) {
+      setVoiceError('Este navegador no soporta entrada por voz')
+      return
+    }
+    if (voiceStatus === 'listening') {
+      recognitionRef.current?.stop()
+      return
+    }
+    setVoiceError(null)
+    const recognition = new SpeechRecognitionCtor()
+    recognition.lang = 'es-CO'
+    recognition.interimResults = false
+    recognition.onstart = () => setVoiceStatus('listening')
+    recognition.onerror = (e) => {
+      setVoiceStatus('idle')
+      setVoiceError(e.error === 'not-allowed' ? 'Permiso de micrófono denegado' : 'Error al escuchar')
+    }
+    recognition.onend = () => setVoiceStatus((s) => (s === 'listening' ? 'idle' : s))
+    recognition.onresult = (e) => handleVoiceResult(e.results[0][0].transcript)
+    recognitionRef.current = recognition
+    recognition.start()
+  }
+
   return (
     <>
       <button
@@ -164,11 +263,26 @@ export default function QuickCaptureFAB({ onSaved }) {
                   ))}
                 </div>
 
-                <input
-                  type="number" inputMode="decimal" autoFocus placeholder="Monto"
-                  value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })}
-                  className={styles.amountInput}
-                />
+                <div className={styles.amountRow}>
+                  <input
+                    type="number" inputMode="decimal" autoFocus placeholder="Monto"
+                    value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                    className={styles.amountInput}
+                  />
+                  {form.mode !== 'transferencia' && SpeechRecognitionCtor && (
+                    <button
+                      type="button"
+                      className={voiceStatus === 'listening' ? `${styles.micButton} ${styles.micListening}` : styles.micButton}
+                      disabled={voiceStatus === 'processing'}
+                      onClick={startVoiceCapture}
+                      aria-label="Registrar por voz"
+                    >
+                      <IconMic width={20} height={20} />
+                    </button>
+                  )}
+                </div>
+                {voiceStatus === 'processing' && <p className={styles.voiceHint}>Interpretando…</p>}
+                {voiceError && <p className={styles.error}>{voiceError}</p>}
 
                 {form.mode === 'transferencia' ? (
                   <>
@@ -242,11 +356,13 @@ export default function QuickCaptureFAB({ onSaved }) {
                       <>
                         <input
                           placeholder="Descripción (opcional)" value={form.purpose}
-                          onChange={(e) => setForm({ ...form, purpose: e.target.value })}
+                          onChange={(e) => { setForm({ ...form, purpose: e.target.value }); setPurposeSuggestion(false) }}
+                          onBlur={handlePurposeBlur}
                           className={styles.textInput}
                         />
                         <select
-                          value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })}
+                          value={form.categoryId}
+                          onChange={(e) => { setForm({ ...form, categoryId: e.target.value }); setPurposeSuggestion(false) }}
                           className={styles.textInput}
                         >
                           <option value="">Sin categoría</option>
@@ -257,6 +373,9 @@ export default function QuickCaptureFAB({ onSaved }) {
                           onChange={(e) => setForm({ ...form, tag: e.target.value })}
                           className={styles.textInput}
                         />
+                        {purposeSuggestion && (
+                          <p className={styles.voiceHint}>Sugerido de tu historial — podés cambiarlo antes de guardar.</p>
+                        )}
                       </>
                     )}
                     {form.mode === 'transferencia' && (

@@ -124,6 +124,7 @@ create table categories (
   emoji text,
   is_ambiguous boolean not null default true,   -- false = 100% inequívoca (ej. Suscripciones)
   monthly_budget numeric,                        -- tope mensual editable, mismo monto todos los meses hasta que se cambie (null = sin presupuesto definido)
+  is_active boolean not null default true,       -- archivado (soft delete, igual que accounts.is_active)
   created_at timestamptz not null default now(),
   unique (user_id, name)
 );
@@ -179,6 +180,21 @@ create table category_account_stats (
   confirm_count int not null default 0,
   last_confirmed_at timestamptz,
   unique (user_id, category_id, tag, account_id)
+);
+
+-- Aprendizaje incremental: descripción (purpose) -> categoría + tag,
+-- alimentada cada vez que se guarda un movimiento (manual o importado) con
+-- categoría resuelta. Nunca autoasigna: solo se usa para sugerir un prefill
+-- editable en los formularios de carga manual.
+create table purpose_category_stats (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) default auth.uid(),
+  purpose_key text not null,                    -- purpose normalizado (normalizePurpose)
+  category_id uuid not null references categories(id),
+  tag text,                                      -- null = sin tag aprendido para este par
+  confirm_count int not null default 0,
+  last_confirmed_at timestamptz,
+  unique (user_id, purpose_key, category_id, tag)
 );
 
 -- ----------------------------------------------------------------------------
@@ -286,6 +302,7 @@ begin
   for t in select unnest(array[
     'accounts', 'exchange_rates', 'account_allocations', 'monthly_initial_balances',
     'account_transfers', 'categories', 'transactions', 'category_account_stats',
+    'purpose_category_stats',
     'fixed_expenses', 'fixed_expense_month_status', 'debts', 'debt_installments',
     'savings_goals', 'savings_contributions'
   ])

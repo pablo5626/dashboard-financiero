@@ -21,6 +21,23 @@ export function isIgnoredRow(tags) {
   return (tags ?? []).some((t) => IGNORED_TAGS.includes(t))
 }
 
+// MonIA no deja escribir espacios al crear un tag, así que un nombre de
+// cuenta de más de una palabra (ej. "Arq EUR") llega como "arq_eur". Se
+// normaliza guion bajo -> espacio para que siga calzando contra
+// accounts.name.toLowerCase() — ver .claude/rules/motor-asignacion.md.
+// Usado tanto al importar el CSV como al editar tags a mano desde la UI,
+// para que un tag tipeado a mano se comporte igual que uno importado.
+export function normalizeTag(tag) {
+  return tag.trim().toLowerCase().replace(/_/g, ' ')
+}
+
+// Misma idea que normalizeTag pero para el texto de descripción (purpose),
+// usada para matchear una descripción repetida contra sí misma en
+// purpose_category_stats y en detectRecurringCandidates.
+export function normalizePurpose(purpose) {
+  return purpose.trim().toLowerCase()
+}
+
 // Parsea el CSV exportado de MonIA (columnas: date, purpose, amount,
 // currency, category, emoji, creator, creator_name, tags, timezone, id) a
 // un shape intermedio en camelCase, sin tocar Supabase todavía.
@@ -45,7 +62,7 @@ export function parseMonIACSV(csvText) {
       // compara contra accounts.name.toLowerCase() (que sí tiene el espacio),
       // así que sin normalizar acá "arq_eur" nunca calzaría con "arq eur" y
       // la fila caería a pendiente de banco en vez de asignarse.
-      tags: (row.tags || '').split(';').map((t) => t.trim().toLowerCase().replace(/_/g, ' ')).filter(Boolean),
+      tags: (row.tags || '').split(';').map(normalizeTag).filter(Boolean),
       sourceTimezone: row.timezone?.trim() || null,
     }))
     .filter((r) => r.moniaId && r.occurredAt && !Number.isNaN(r.amount))
@@ -217,8 +234,16 @@ export async function importTransactions(rows, year, month) {
   const { data, error } = await supabase
     .from('transactions')
     .upsert(payload, { onConflict: 'user_id,monia_id', ignoreDuplicates: true })
-    .select('id')
+    .select('id, monia_id')
   if (error) throw error
+
+  // Solo aprender de las filas realmente nuevas — reimportar el mismo CSV no
+  // debe inflar los contadores de purpose_category_stats.
+  const newMoniaIds = new Set(data.map((r) => r.monia_id))
+  const newRowsWithCategory = payload.filter((r) => newMoniaIds.has(r.monia_id) && r.category_id)
+  await recordPurposeCategoryStats(
+    newRowsWithCategory.map((r) => ({ purposeKey: normalizePurpose(r.purpose), categoryId: r.category_id, tag: r.tags?.[0] ?? null }))
+  )
 
   return { imported: data.length, skipped: payload.length - data.length, totalInMonth: monthRows.length }
 }
@@ -239,6 +264,84 @@ function generateLocalId() {
 // cuentas de arq, y evita que un monto en euros quede marcado como pesos (en
 // cuyo caso fetchBalancesForMonth lo descartaría en silencio por no coincidir
 // con la moneda de la cuenta).
+// Aprendizaje incremental "descripción -> categoría + tag" (purpose_category_stats),
+// alimentado tanto por movimientos manuales como por la importación de CSV.
+// Agrupa duplicados dentro del mismo llamado y hace un solo select + un solo
+// upsert bulk, para no disparar una query por fila al importar un CSV grande.
+async function recordPurposeCategoryStats(observations) {
+  const withCategory = observations.filter((o) => o.categoryId)
+  if (withCategory.length === 0) return
+
+  const statKey = (purposeKey, categoryId, tag) => [purposeKey, categoryId, tag ?? ''].join('::')
+
+  const grouped = {}
+  for (const o of withCategory) {
+    const key = statKey(o.purposeKey, o.categoryId, o.tag)
+    if (!grouped[key]) grouped[key] = { purposeKey: o.purposeKey, categoryId: o.categoryId, tag: o.tag ?? null, count: 0 }
+    grouped[key].count++
+  }
+  const groups = Object.values(grouped)
+  const purposeKeys = [...new Set(groups.map((g) => g.purposeKey))]
+
+  const { data: existing, error: fetchError } = await supabase
+    .from('purpose_category_stats')
+    .select('purpose_key, category_id, tag, confirm_count')
+    .in('purpose_key', purposeKeys)
+  if (fetchError) throw fetchError
+
+  const existingCounts = {}
+  for (const row of existing) existingCounts[statKey(row.purpose_key, row.category_id, row.tag)] = row.confirm_count
+
+  const upsertRows = groups.map((g) => ({
+    purpose_key: g.purposeKey,
+    category_id: g.categoryId,
+    tag: g.tag,
+    confirm_count: (existingCounts[statKey(g.purposeKey, g.categoryId, g.tag)] ?? 0) + g.count,
+    last_confirmed_at: new Date().toISOString(),
+  }))
+  const { error: upsertError } = await supabase
+    .from('purpose_category_stats')
+    .upsert(upsertRows, { onConflict: 'user_id,purpose_key,category_id,tag' })
+  if (upsertError) throw upsertError
+}
+
+// Sugerencia de categoría+tag para una descripción, según lo aprendido en
+// purpose_category_stats — nunca autoasigna, solo se usa para precargar un
+// formulario de carga manual que el usuario revisa antes de guardar.
+export async function suggestCategoryForPurpose(purpose) {
+  const key = normalizePurpose(purpose)
+  if (!key) return null
+  const { data, error } = await supabase
+    .from('purpose_category_stats')
+    .select('category_id, tag, confirm_count')
+    .eq('purpose_key', key)
+    .order('confirm_count', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) throw error
+  return data ? { categoryId: data.category_id, tag: data.tag } : null
+}
+
+// Aprendizaje retroactivo, para correr una sola vez (o cuando se quiera
+// reforzar): recorre todas las transacciones ya guardadas con categoría
+// resuelta — de antes de que existiera este mecanismo — y las usa para
+// poblar purpose_category_stats. Sin esto, una descripción repetida muchas
+// veces en el historial (ej. "Cívica" -> Transporte/metro) no sugiere nada
+// hasta que se vuelva a guardar manualmente o se reimporte su CSV.
+export async function backfillPurposeCategoryStats() {
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('purpose, category_id, tags')
+    .not('category_id', 'is', null)
+  if (error) throw error
+
+  const observations = data
+    .filter((r) => !isIgnoredRow(r.tags))
+    .map((r) => ({ purposeKey: normalizePurpose(r.purpose), categoryId: r.category_id, tag: r.tags?.[0] ?? null }))
+  await recordPurposeCategoryStats(observations)
+  return observations.length
+}
+
 export async function createManualTransaction({ purpose, amount, occurredAt, categoryId, accountId, tags, currency }) {
   const { data, error } = await supabase.from('transactions').insert({
     monia_id: `manual-${generateLocalId()}`,
@@ -254,6 +357,9 @@ export async function createManualTransaction({ purpose, amount, occurredAt, cat
     origin: 'manual',
   }).select().single()
   if (error) throw error
+  if (categoryId) {
+    await recordPurposeCategoryStats([{ purposeKey: normalizePurpose(purpose), categoryId, tag: tags?.[0] ?? null }])
+  }
   return data
 }
 
@@ -309,6 +415,16 @@ export async function confirmCurrencyAmount(transactionId, amount) {
     .from('transactions')
     .update({ amount, currency_pending: false })
     .eq('id', transactionId)
+  if (error) throw error
+}
+
+// Edición de tags de una transacción ya guardada (importada o manual) — la
+// única forma de corregir/agregar tags hoy era re-importar el CSV con el tag
+// ya puesto en MonIA. Aplica la misma normalización que el import para que un
+// tag tipeado a mano matchee igual contra nombres de cuenta / IGNORED_TAGS.
+export async function updateTransactionTags(id, tags) {
+  const cleaned = [...new Set(tags.map(normalizeTag).filter(Boolean))]
+  const { error } = await supabase.from('transactions').update({ tags: cleaned }).eq('id', id)
   if (error) throw error
 }
 
@@ -470,14 +586,14 @@ export async function searchTransactions({ query, categoryId, accountId, tag, da
 export function detectRecurringCandidates(expenses, existingFixedNames, minMonths = 3) {
   const groups = {}
   for (const t of expenses) {
-    const key = t.purpose.trim().toLowerCase()
+    const key = normalizePurpose(t.purpose)
     if (!groups[key]) groups[key] = []
     groups[key].push(t)
   }
 
   const candidates = []
   for (const txs of Object.values(groups)) {
-    const key = txs[0].purpose.trim().toLowerCase()
+    const key = normalizePurpose(txs[0].purpose)
     if (existingFixedNames.has(key)) continue
     const monthsSeen = new Set(txs.map((t) => t.occurred_at.slice(0, 7))).size
     if (monthsSeen < minMonths) continue

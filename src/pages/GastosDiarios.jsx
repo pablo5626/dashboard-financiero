@@ -5,7 +5,7 @@ import ConfirmDialog from '../components/ui/ConfirmDialog.jsx'
 import { formatCOP, formatByCurrency } from '../lib/format.js'
 import { listAccounts } from '../lib/accountsApi.js'
 import { getRates, toCOP } from '../lib/exchangeRatesApi.js'
-import { listCategories, updateCategoryBudget } from '../lib/categoriesApi.js'
+import { listCategories, createCategory, updateCategory, archiveCategory } from '../lib/categoriesApi.js'
 import { getAllocationsForMonth } from '../lib/allocationsApi.js'
 import { getTransfersForMonth, sumOutgoingByAccount } from '../lib/transfersApi.js'
 import { listFixedExpenses, createFixedExpense } from '../lib/fixedExpensesApi.js'
@@ -14,7 +14,8 @@ import {
   listPendingTransactions, fetchSuggestionsForCategories, confirmAssignment,
   listTransactionsForMonth, listRecentExpenses, detectRecurringCandidates,
   searchTransactions, deleteTransaction, createManualTransaction, isIgnoredRow,
-  listPendingCurrencyTransactions, confirmCurrencyAmount,
+  listPendingCurrencyTransactions, confirmCurrencyAmount, updateTransactionTags,
+  suggestCategoryForPurpose, backfillPurposeCategoryStats,
 } from '../lib/transactionsApi.js'
 
 const now = new Date()
@@ -50,6 +51,15 @@ export default function GastosDiarios() {
   const [amountByTx, setAmountByTx] = useState({})
   const [budgetCategoryId, setBudgetCategoryId] = useState('')
   const [budgetDraft, setBudgetDraft] = useState('')
+  const [categoryDraft, setCategoryDraft] = useState({ name: '', emoji: '', isAmbiguous: true })
+  const [newCategory, setNewCategory] = useState({ name: '', emoji: '', isAmbiguous: true })
+  const [creatingCategory, setCreatingCategory] = useState(false)
+  const [savingCategory, setSavingCategory] = useState(false)
+  const [confirmArchiveCategory, setConfirmArchiveCategory] = useState(null) // { id, name } | null
+  const [backfilling, setBackfilling] = useState(false)
+  const [backfillResult, setBackfillResult] = useState(null)
+  const [tagsDraftByTx, setTagsDraftByTx] = useState({})
+  const [savingTagsId, setSavingTagsId] = useState(null)
   const [allocations, setAllocations] = useState({})
   const [transferredOut, setTransferredOut] = useState({})
   const [fixedExpenses, setFixedExpenses] = useState([])
@@ -63,6 +73,7 @@ export default function GastosDiarios() {
 
   const [manualForm, setManualForm] = useState(emptyManualForm)
   const [savingManual, setSavingManual] = useState(false)
+  const [manualSuggestion, setManualSuggestion] = useState(false)
 
   async function reload() {
     try {
@@ -151,11 +162,30 @@ export default function GastosDiarios() {
         tags: manualForm.tag.trim() ? [manualForm.tag.trim().toLowerCase()] : [],
       })
       setManualForm({ ...emptyManualForm, date: manualForm.date, type: manualForm.type })
+      setManualSuggestion(false)
       await reload()
     } catch (err) {
       setError(err.message)
     } finally {
       setSavingManual(false)
+    }
+  }
+
+  // Sugiere categoría+tag aprendidos de purpose_category_stats al salir del
+  // campo Descripción — nunca pisa una elección que el usuario ya hizo.
+  async function handleManualPurposeBlur() {
+    if (!manualForm.purpose.trim() || manualForm.categoryId || manualForm.tag) return
+    try {
+      const suggestion = await suggestCategoryForPurpose(manualForm.purpose)
+      if (!suggestion) return
+      setManualForm((prev) => ({
+        ...prev,
+        categoryId: suggestion.categoryId,
+        tag: suggestion.tag ?? prev.tag,
+      }))
+      setManualSuggestion(true)
+    } catch (err) {
+      setError(err.message)
     }
   }
 
@@ -191,13 +221,80 @@ export default function GastosDiarios() {
     }
   }
 
-  async function handleSaveBudget() {
-    if (!budgetCategoryId) return
+  async function handleSaveCategory() {
+    if (!budgetCategoryId || !categoryDraft.name.trim()) return
+    setSavingCategory(true)
     try {
-      await updateCategoryBudget(budgetCategoryId, budgetDraft === '' ? null : Number(budgetDraft))
+      await updateCategory(budgetCategoryId, {
+        name: categoryDraft.name.trim(),
+        emoji: categoryDraft.emoji.trim() || null,
+        is_ambiguous: categoryDraft.isAmbiguous,
+        monthly_budget: budgetDraft === '' ? null : Number(budgetDraft),
+      })
       await reload()
     } catch (err) {
       setError(err.message)
+    } finally {
+      setSavingCategory(false)
+    }
+  }
+
+  async function handleCreateCategory(e) {
+    e.preventDefault()
+    if (!newCategory.name.trim()) return
+    setCreatingCategory(true)
+    try {
+      await createCategory({ name: newCategory.name.trim(), emoji: newCategory.emoji.trim(), isAmbiguous: newCategory.isAmbiguous })
+      setNewCategory({ name: '', emoji: '', isAmbiguous: true })
+      await reload()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setCreatingCategory(false)
+    }
+  }
+
+  function handleArchiveCategory(id, name) {
+    setConfirmArchiveCategory({ id, name })
+  }
+
+  async function doArchiveCategory() {
+    const target = confirmArchiveCategory
+    setConfirmArchiveCategory(null)
+    try {
+      await archiveCategory(target.id)
+      setBudgetCategoryId('')
+      await reload()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  // Corrida única (o para reforzar) que aprende de todo el historial ya
+  // guardado, no solo de lo que se cargue de acá en adelante.
+  async function handleBackfillPurposeStats() {
+    setBackfilling(true)
+    setBackfillResult(null)
+    try {
+      const count = await backfillPurposeCategoryStats()
+      setBackfillResult(count)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBackfilling(false)
+    }
+  }
+
+  async function handleSaveTags(txId) {
+    const raw = tagsDraftByTx[txId] ?? ''
+    setSavingTagsId(txId)
+    try {
+      await updateTransactionTags(txId, raw.split(',').map((t) => t.trim()).filter(Boolean))
+      await reload()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSavingTagsId(null)
     }
   }
 
@@ -509,11 +606,25 @@ export default function GastosDiarios() {
           </Card>
         )}
 
-        <Card title="Presupuesto por categoría" className="span-3">
+        <Card title="Categorías" className="span-3">
           <p style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', margin: '0 0 var(--space-1)' }}>
-            Tope mensual editable por categoría (mismo monto todos los meses hasta que lo cambies). Vacío = sin presupuesto definido, no genera alerta.
+            Crea, renombra o archiva categorías del catálogo, y edita su presupuesto mensual (mismo monto
+            todos los meses hasta que lo cambies; vacío = sin presupuesto definido, no genera alerta).
             Gasto del mes mostrado es el de {MONTH_NAMES[month - 1]} {year}.
           </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', margin: '0 0 var(--space-2)' }}>
+            <button
+              type="button" onClick={handleBackfillPurposeStats} disabled={backfilling}
+              style={{ minHeight: 'var(--touch-target)', padding: '0 var(--space-2)', borderRadius: 10, border: '1px solid var(--border-hairline)', color: 'var(--text-secondary)' }}
+            >
+              {backfilling ? 'Aprendiendo…' : 'Aprender categoría/tag de tu historial'}
+            </button>
+            {backfillResult != null && (
+              <span style={{ font: 'var(--font-caption)', color: 'var(--text-muted)' }}>
+                Se analizaron {backfillResult} movimientos con categoría — las sugerencias en "Agregar movimiento manual" y el FAB ya lo reflejan.
+              </span>
+            )}
+          </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
             <select
               value={budgetCategoryId}
@@ -522,6 +633,7 @@ export default function GastosDiarios() {
                 setBudgetCategoryId(id)
                 const cat = categories.find((c) => c.id === id)
                 setBudgetDraft(cat?.monthly_budget != null ? String(cat.monthly_budget) : '')
+                setCategoryDraft({ name: cat?.name ?? '', emoji: cat?.emoji ?? '', isAmbiguous: cat?.is_ambiguous ?? true })
               }}
               style={{ ...formInput, flex: '1 1 200px', minWidth: 0 }}
             >
@@ -540,16 +652,44 @@ export default function GastosDiarios() {
                     Gastado este mes: {formatCOP(spent)}
                   </span>
                   <input
+                    placeholder="Nombre" value={categoryDraft.name}
+                    onChange={(e) => setCategoryDraft({ ...categoryDraft, name: e.target.value })}
+                    style={{ ...formInput, width: 160 }}
+                  />
+                  <input
+                    placeholder="Emoji" value={categoryDraft.emoji} maxLength={4}
+                    onChange={(e) => setCategoryDraft({ ...categoryDraft, emoji: e.target.value })}
+                    style={{ ...formInput, width: 64, textAlign: 'center' }}
+                  />
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, font: 'var(--font-caption)', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                    <input
+                      type="checkbox" checked={categoryDraft.isAmbiguous}
+                      onChange={(e) => setCategoryDraft({ ...categoryDraft, isAmbiguous: e.target.checked })}
+                    />
+                    Ambigua
+                  </label>
+                  <input
                     type="number" placeholder="Sin definir" value={budgetDraft}
                     onChange={(e) => setBudgetDraft(e.target.value)}
                     style={{ ...formInput, width: 130 }}
                   />
                   <button
-                    onClick={handleSaveBudget}
+                    onClick={handleSaveCategory} disabled={savingCategory}
                     style={{ minHeight: 'var(--touch-target)', padding: '0 var(--space-2)', borderRadius: 10, background: 'var(--series-1)', color: '#fff', fontWeight: 600 }}
                   >
                     Guardar
                   </button>
+                  <button
+                    onClick={() => handleArchiveCategory(currentCat.id, currentCat.name)}
+                    style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}
+                  >
+                    Archivar
+                  </button>
+                  {currentCat?.name.trim().toLowerCase() === 'préstamo' && (
+                    <p style={{ font: 'var(--font-caption)', color: 'var(--status-warning)', margin: 0, flexBasis: '100%' }}>
+                      Esta categoría alimenta la detección de préstamos en Deudas — cambiarle el nombre o archivarla desactiva esa función.
+                    </p>
+                  )}
                 </>
               )
             })()}
@@ -558,6 +698,33 @@ export default function GastosDiarios() {
               <p style={{ color: 'var(--text-muted)', margin: 0 }}>No hay categorías en el catálogo todavía.</p>
             )}
           </div>
+
+          <form onSubmit={handleCreateCategory} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 'var(--space-2)' }}>
+            <span style={{ font: 'var(--font-caption)', color: 'var(--text-muted)' }}>+ Nueva categoría:</span>
+            <input
+              placeholder="Nombre" value={newCategory.name}
+              onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })}
+              style={{ ...formInput, width: 160 }}
+            />
+            <input
+              placeholder="Emoji" value={newCategory.emoji} maxLength={4}
+              onChange={(e) => setNewCategory({ ...newCategory, emoji: e.target.value })}
+              style={{ ...formInput, width: 64, textAlign: 'center' }}
+            />
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, font: 'var(--font-caption)', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+              <input
+                type="checkbox" checked={newCategory.isAmbiguous}
+                onChange={(e) => setNewCategory({ ...newCategory, isAmbiguous: e.target.checked })}
+              />
+              Ambigua
+            </label>
+            <button
+              type="submit" disabled={creatingCategory}
+              style={{ minHeight: 'var(--touch-target)', padding: '0 var(--space-2)', borderRadius: 10, background: 'var(--series-1)', color: '#fff', fontWeight: 600 }}
+            >
+              Crear
+            </button>
+          </form>
         </Card>
 
         <Card title="Gasto por categoría">
@@ -745,7 +912,22 @@ export default function GastosDiarios() {
                         <td>{formatByCurrency(t.amount, t.currency)}</td>
                         <td>{t.categories?.name ?? '—'}</td>
                         <td>{t.accounts?.name ?? (t.assignment_confirmed ? '— ignorado (sin cuenta) —' : '— pendiente —')}</td>
-                        <td>{(t.tags ?? []).join(', ') || '—'}</td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                            <input
+                              style={{ ...cellInput, width: 130 }}
+                              placeholder="tag1, tag2…"
+                              value={tagsDraftByTx[t.id] ?? (t.tags ?? []).join(', ')}
+                              onChange={(e) => setTagsDraftByTx({ ...tagsDraftByTx, [t.id]: e.target.value })}
+                            />
+                            <button
+                              onClick={() => handleSaveTags(t.id)} disabled={savingTagsId === t.id}
+                              style={{ font: 'var(--font-caption)', whiteSpace: 'nowrap' }}
+                            >
+                              {savingTagsId === t.id ? '…' : 'Guardar'}
+                            </button>
+                          </div>
+                        </td>
                         <td>
                           <button onClick={() => handleDeleteTx(t)} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button>
                         </td>
@@ -768,7 +950,7 @@ export default function GastosDiarios() {
             <div className="table-scroll">
             <table className="simple-table">
               <thead>
-                <tr><th>Fecha</th><th>Descripción</th><th>Monto</th><th>Categoría</th><th>Cuenta</th><th></th></tr>
+                <tr><th>Fecha</th><th>Descripción</th><th>Monto</th><th>Categoría</th><th>Cuenta</th><th>Tags</th><th></th></tr>
               </thead>
               <tbody>
                 {monthTransactions.map((t) => (
@@ -789,12 +971,28 @@ export default function GastosDiarios() {
                     <td>{t.categories?.name ?? '—'}</td>
                     <td>{t.accounts?.name ?? (t.assignment_confirmed ? '— ignorado (sin cuenta) —' : '— pendiente —')}</td>
                     <td>
+                      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                        <input
+                          style={{ ...cellInput, width: 130 }}
+                          placeholder="tag1, tag2…"
+                          value={tagsDraftByTx[t.id] ?? (t.tags ?? []).join(', ')}
+                          onChange={(e) => setTagsDraftByTx({ ...tagsDraftByTx, [t.id]: e.target.value })}
+                        />
+                        <button
+                          onClick={() => handleSaveTags(t.id)} disabled={savingTagsId === t.id}
+                          style={{ font: 'var(--font-caption)', whiteSpace: 'nowrap' }}
+                        >
+                          {savingTagsId === t.id ? '…' : 'Guardar'}
+                        </button>
+                      </div>
+                    </td>
+                    <td>
                       <button onClick={() => handleDeleteTx(t)} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button>
                     </td>
                   </tr>
                 ))}
                 {monthTransactions.length === 0 && (
-                  <tr><td colSpan={6} style={{ color: 'var(--text-muted)' }}>No hay movimientos importados para este mes todavía.</td></tr>
+                  <tr><td colSpan={7} style={{ color: 'var(--text-muted)' }}>No hay movimientos importados para este mes todavía.</td></tr>
                 )}
               </tbody>
             </table>
@@ -824,7 +1022,8 @@ export default function GastosDiarios() {
             />
             <input
               placeholder="Descripción" value={manualForm.purpose}
-              onChange={(e) => setManualForm({ ...manualForm, purpose: e.target.value })}
+              onChange={(e) => { setManualForm({ ...manualForm, purpose: e.target.value }); setManualSuggestion(false) }}
+              onBlur={handleManualPurposeBlur}
               style={{ ...formInput, flex: '1 1 160px', minWidth: 0 }}
             />
             <input
@@ -835,7 +1034,7 @@ export default function GastosDiarios() {
             />
             <select
               value={manualForm.categoryId}
-              onChange={(e) => setManualForm({ ...manualForm, categoryId: e.target.value })}
+              onChange={(e) => { setManualForm({ ...manualForm, categoryId: e.target.value }); setManualSuggestion(false) }}
               style={{ ...formInput, flex: '1 1 150px', minWidth: 0 }}
             >
               <option value="">Sin categoría</option>
@@ -863,6 +1062,11 @@ export default function GastosDiarios() {
               {savingManual ? 'Guardando…' : manualForm.type === 'ingreso' ? 'Agregar ingreso' : 'Agregar gasto'}
             </button>
           </form>
+          {manualSuggestion && (
+            <p style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', margin: 'var(--space-1) 0 0' }}>
+              Categoría y tag sugeridos de tu historial — podés cambiarlos antes de guardar.
+            </p>
+          )}
         </Card>
       </div>
 
@@ -874,6 +1078,16 @@ export default function GastosDiarios() {
         destructive
         onConfirm={doDeleteTx}
         onCancel={() => setConfirmDeleteTx(null)}
+      />
+
+      <ConfirmDialog
+        open={!!confirmArchiveCategory}
+        title={`¿Archivar la categoría "${confirmArchiveCategory?.name}"?`}
+        message="Se archiva y deja de sugerirse; el historial de movimientos ya categorizados no se pierde."
+        confirmLabel="Archivar"
+        destructive
+        onConfirm={doArchiveCategory}
+        onCancel={() => setConfirmArchiveCategory(null)}
       />
     </div>
   )

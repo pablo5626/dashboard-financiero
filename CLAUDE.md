@@ -522,8 +522,11 @@ Supabase, no sample data left anywhere:
   amount in the account's currency, and — once that field is edited — the
   implied rate MonIA used, a free real-market datapoint to check the manual
   rate against; a `≈` marks any such estimate wherever it surfaces elsewhere
-  on this page, see the arq flow above), per-category
-  monthly budgets, spend-by-category and spend-by-tag bar charts (the
+  on this page, see the arq flow above), a "Categorías" card (create/rename/
+  emoji/`is_ambiguous`/monthly-budget/archive — full CRUD via
+  `categoriesApi.js`, replacing what used to be budget-only; archive is a
+  soft delete via `categories.is_active` since `category_account_stats`
+  references categories with no cascade), spend-by-category and spend-by-tag bar charts (the
   spend-by-tag chart excludes tags that name an account — a transaction
   typically carries both an account tag and a descriptive tag in the same
   `tags` array, so without this filter the same amount would be
@@ -549,7 +552,25 @@ Supabase, no sample data left anywhere:
   Every transaction table on this page (pendientes, búsqueda, movimientos
   del mes) has a delete action wired to `transactionsApi.deleteTransaction`
   — deleting one and reimporting the same CSV re-adds it, since the
-  `monia_id` dedup row is gone.
+  `monia_id` dedup row is gone. The "Movimientos" and "Buscar movimientos"
+  tables also have an editable Tags cell (`transactionsApi.updateTransactionTags`)
+  so a tag can be corrected/added after the fact instead of only at CSV-import
+  time — it applies the same `normalizeTag` normalization as the import, so a
+  hand-typed tag still matches account names/`IGNORED_TAGS` correctly.
+  **Learned category/tag suggestions**: `purpose_category_stats` (schema.sql)
+  incrementally learns "descripción (purpose, normalizada) → categoría + tag"
+  every time `createManualTransaction` or `importTransactions` saves a row
+  with a resolved category — same incremental-learning shape as
+  `category_account_stats`, one level earlier. `transactionsApi.suggestCategoryForPurpose`
+  is called on blur of the Descripción field in both this page's "Agregar
+  movimiento manual" form and `QuickCaptureFAB.jsx`'s manual-entry mode; it
+  only prefills category+tag when both are still empty (never overwrites an
+  explicit choice) and shows a small "sugerido de tu historial" caption so the
+  prefill is never silent. Because this only learns going forward,
+  `transactionsApi.backfillPurposeCategoryStats` (a button in the
+  "Categorías" card, "Aprender categoría/tag de tu historial") does a
+  one-time pass over every already-saved transaction with a category, so
+  history from before this feature existed also starts suggesting.
 - **`Deudas.jsx`**: debt CRUD (creditor, total/restante, tasa mensual
   opcional, plazo opcional), per-debt installment calendar with a French
   fixed-payment amortization generator (`generateAmortizationSchedule` in
@@ -634,7 +655,35 @@ unprompted, they're deliberate cuts, not oversights:
   has no dedup at all (see the risk above). A `QuickCaptureFAB` button in
   `AppShell.jsx` covers the same three actions from inside the app, for
   when picking account/category explicitly (or a cross-currency arq
-  transfer) matters more than raw speed.
+  transfer) matters more than raw speed. It also has a microphone button
+  (gasto/ingreso modes only, hidden if `window.SpeechRecognition` isn't
+  supported): the browser's Web Speech API transcribes speech to text, which
+  gets sent to the `voice-parse` Supabase Edge Function
+  (`supabase/functions/voice-parse/index.ts`) — a small Deno function with no
+  DB access that calls Claude Haiku 4.5 with the exact category/account list
+  and Colombian amount slang rules ("mil"/"lucas"=×1.000, "palo(s)"=×1.000.000)
+  and returns `{ mode, amount, categoryName, accountName, purpose, tag }`.
+  `QuickCaptureFAB.jsx` maps the returned names to ids via `normalizeName`
+  (accent/case-insensitive) and only ever **prefills** the form — same
+  "never guess and save" principle as the rest of the app, the user still has
+  to review "Más opciones" and tap "Guardar". Unlike `quick-capture` (used by
+  the iOS Shortcuts with no session), `voice-parse` is called from the
+  browser with the user's real session, so it's deliberately **not** listed
+  in `supabase/config.toml` and deploys with default JWT verification.
+- **Voice capture is written and deployed but not yet fully verified**: the
+  `voice-parse` function has been deployed
+  (`npx supabase functions deploy voice-parse --project-ref qxiqqozogggfynkanevt`)
+  but the `ANTHROPIC_API_KEY` secret (separate from any Claude Code
+  subscription — a billed key from console.anthropic.com) still needs to be
+  created and registered
+  (`npx supabase secrets set ANTHROPIC_API_KEY=sk-ant-xxxxx --project-ref qxiqqozogggfynkanevt`,
+  no redeploy needed afterward) before the mic button does anything but show
+  its "API key no configurada" error. The full round trip (mic → transcript →
+  Edge Function → prefilled form) has not been exercised end-to-end in a
+  real browser session yet — test on `npm run dev` at `localhost` first
+  (`SpeechRecognition` needs a secure context, so it won't fire over
+  `http://<lan-ip>:5173`; testing from a phone needs the deployed GitHub
+  Pages HTTPS URL instead).
 
 ## Importable external-agent config detected
 
