@@ -111,6 +111,7 @@
 }
 
 .amountInput {
+  flex: 1;
   min-height: var(--touch-target);
   border-radius: 10px;
   border: 1px solid var(--border-hairline);
@@ -215,4 +216,43 @@
 
 .submit:disabled {
   opacity: 0.5;
+}
+
+.amountRow {
+  display: flex;
+  gap: 6px;
+}
+
+.micButton {
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
+  border-radius: 10px;
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.micButton:disabled {
+  opacity: 0.5;
+}
+
+.micListening {
+  background: var(--status-critical);
+  border-color: var(--status-critical);
+  color: #fff;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.voiceHint {
+  font: var(--font-caption);
+  color: var(--text-muted);
+  margin: 0;
 }
