@@ -415,7 +415,7 @@ number instead of admitting nothing real is known yet.
 5 days (or overdue), savings goals within 30 days of their target date (or
 past it), pending "sin cuenta asignada" transactions, categories that
 exceeded their `monthly_budget` (`categories.monthly_budget`, a flat
-monthly cap edited from a "Presupuesto por categoría" card in
+monthly cap edited from the "Categorías" card in
 `GastosDiarios.jsx` — not month-by-month, just one number that applies
 every month until changed), `'divisa_pendiente'` for foreign-currency
 purchases still carrying an estimated amount (`currency_pending`), and a
@@ -436,6 +436,29 @@ pending target (or `null`), a `handle*` that sets it, a `do*` that performs
 the action and clears it, and one `<ConfirmDialog>` rendered near the end
 of the component. Copy this pattern for any new delete/destructive action
 instead of reaching for `window.confirm`.
+
+**Quick capture (FAB) + voice input**: `QuickCaptureFAB.jsx`, mounted in
+`AppShell.jsx` on all 5 pages, covers gasto/ingreso/transferencia without
+navigating to `GastosDiarios.jsx`/`Cuentas.jsx` — it calls
+`transactionsApi.createManualTransaction`/`transfersApi.createTransfers`
+directly, the same functions the full pages use. Its microphone button
+(gasto/ingreso modes only, hidden if `window.SpeechRecognition` isn't
+supported) sends a Web Speech API transcript to the `voice-parse` Supabase
+Edge Function (`supabase/functions/voice-parse/index.ts`) — a small Deno
+function with no DB access that calls Claude Haiku 4.5 with the exact
+category/account list and Colombian amount slang rules ("mil"/"lucas"=×1.000,
+"palo(s)"=×1.000.000) and returns
+`{ mode, amount, categoryName, accountName, purpose, tag }`; the component
+maps those names to ids via `normalizeName` (accent/case-insensitive) and
+only ever **prefills** the form — same "never guess and save" principle as
+the rest of the app, the user still has to review "Más opciones" and tap
+"Guardar". Unlike `quick-capture` (used by the iOS Shortcuts with no
+session), `voice-parse` is called from the browser with the user's real
+session, so it's deliberately **not** listed in `supabase/config.toml` and
+deploys with default JWT verification. Both this FAB and `GastosDiarios.jsx`'s
+manual-entry form also call `transactionsApi.suggestCategoryForPurpose` on
+blur of the description field — see `purpose_category_stats` under
+"Current state of the 5 sections" → `GastosDiarios.jsx`.
 
 **Every create/log action needs a matching delete**: transactions, savings
 contributions, transfers, accounts, debts (+ installments), fixed
@@ -655,21 +678,8 @@ unprompted, they're deliberate cuts, not oversights:
   has no dedup at all (see the risk above). A `QuickCaptureFAB` button in
   `AppShell.jsx` covers the same three actions from inside the app, for
   when picking account/category explicitly (or a cross-currency arq
-  transfer) matters more than raw speed. It also has a microphone button
-  (gasto/ingreso modes only, hidden if `window.SpeechRecognition` isn't
-  supported): the browser's Web Speech API transcribes speech to text, which
-  gets sent to the `voice-parse` Supabase Edge Function
-  (`supabase/functions/voice-parse/index.ts`) — a small Deno function with no
-  DB access that calls Claude Haiku 4.5 with the exact category/account list
-  and Colombian amount slang rules ("mil"/"lucas"=×1.000, "palo(s)"=×1.000.000)
-  and returns `{ mode, amount, categoryName, accountName, purpose, tag }`.
-  `QuickCaptureFAB.jsx` maps the returned names to ids via `normalizeName`
-  (accent/case-insensitive) and only ever **prefills** the form — same
-  "never guess and save" principle as the rest of the app, the user still has
-  to review "Más opciones" and tap "Guardar". Unlike `quick-capture` (used by
-  the iOS Shortcuts with no session), `voice-parse` is called from the
-  browser with the user's real session, so it's deliberately **not** listed
-  in `supabase/config.toml` and deploys with default JWT verification.
+  transfer) matters more than raw speed — see "Quick capture + voice input"
+  under Architecture for its mic button and learned-suggestion prefill.
 - **Voice capture is written and deployed but not yet fully verified**: the
   `voice-parse` function has been deployed
   (`npx supabase functions deploy voice-parse --project-ref qxiqqozogggfynkanevt`)
