@@ -161,6 +161,7 @@ Mixto: debe mostrar toda la información importante de un vistazo, pero organiza
 ## 🔭 Visión a largo plazo (no prioritaria, evaluar más adelante)
 - **Fase 3 (lejana)**: si el flujo con MonIA + CSV + Shortcut funciona bien, evaluar agregar un formulario de registro manual de gastos diarios directamente en la app (monto, categoría, tag, nota), para eventualmente **reemplazar MonIA por completo** y que este dashboard sea la única app de finanzas personales.
 - Esto no requiere cambios de diseño ahora: la tabla de transacciones en Supabase se construye desde el inicio de forma genérica (no atada solo a "importado de CSV"), así que soportar entrada manual en el futuro es solo agregar una pantalla, no rediseñar la base de datos.
+- **Actualización**: esta fase ya arrancó, antes de lo que este documento preveía — existe `Diario.jsx` (ruta `/diario`) como página nativa de carga rápida día a día, corriendo en **modo híbrido** junto con el import de CSV de MonIA (no lo reemplaza todavía). También hay un botón "+"/micrófono flotante (`QuickCaptureFAB.jsx`) disponible en todas las páginas para lo mismo. Ver "Current state of the 6 sections" en `CLAUDE.md` para el detalle actualizado de qué hace cada uno — este archivo queda como el registro de la intención original, no como el estado actual.
 
 ## 🚀 Próximos pasos
 1. Confirmar este prompt como versión final (o ajustar lo que falte).
