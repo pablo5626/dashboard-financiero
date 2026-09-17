@@ -6,8 +6,8 @@ export async function listCategories() {
   return data
 }
 
-export async function createCategory({ name, emoji, isAmbiguous = true }) {
-  const { error } = await supabase.from('categories').insert({ name, emoji: emoji || null, is_ambiguous: isAmbiguous })
+export async function createCategory({ name, emoji, color, isAmbiguous = true }) {
+  const { error } = await supabase.from('categories').insert({ name, emoji: emoji || null, color: color || null, is_ambiguous: isAmbiguous })
   if (error) throw error
 }
 

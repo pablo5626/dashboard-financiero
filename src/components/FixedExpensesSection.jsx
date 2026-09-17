@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import Card from './ui/Card.jsx'
 import ConfirmDialog from './ui/ConfirmDialog.jsx'
-import { formatCOP } from '../lib/format.js'
+import { formatByCurrency } from '../lib/format.js'
 import {
   listFixedExpenses, createFixedExpense, updateFixedExpense, archiveFixedExpense,
   getMonthStatuses, setPaidStatus,
@@ -22,6 +22,10 @@ export default function FixedExpensesSection({ accounts }) {
   const [editForm, setEditForm] = useState(emptyForm)
   const [confirmArchive, setConfirmArchive] = useState(null) // { id, name } | null
 
+  function currencyOf(accountId) {
+    return accounts.find((a) => a.id === accountId)?.currency || 'COP'
+  }
+
   async function reload() {
     try {
       const rows = await listFixedExpenses()
@@ -41,7 +45,7 @@ export default function FixedExpensesSection({ accounts }) {
     try {
       await createFixedExpense({
         name: form.name.trim(), amount: Number(form.amount), dueDay: Number(form.dueDay),
-        frequency: form.frequency, accountId: form.accountId || null,
+        frequency: form.frequency, accountId: form.accountId || null, currency: currencyOf(form.accountId),
       })
       setForm(emptyForm)
       await reload()
@@ -64,7 +68,7 @@ export default function FixedExpensesSection({ accounts }) {
     try {
       await updateFixedExpense(id, {
         name: editForm.name.trim(), amount: Number(editForm.amount), due_day: Number(editForm.dueDay),
-        frequency: editForm.frequency, account_id: editForm.accountId || null,
+        frequency: editForm.frequency, account_id: editForm.accountId || null, currency: currencyOf(editForm.accountId),
       })
       setEditingId(null)
       await reload()
@@ -143,7 +147,7 @@ export default function FixedExpensesSection({ accounts }) {
             return (
               <tr key={f.id}>
                 <td>{f.name}</td>
-                <td>{formatCOP(f.amount)}</td>
+                <td>{formatByCurrency(f.amount, f.currency)}</td>
                 <td>Día {f.due_day}</td>
                 <td>{f.frequency === 'anual' ? 'Anual' : 'Mensual'}</td>
                 <td>{f.accounts?.name ?? '—'}</td>

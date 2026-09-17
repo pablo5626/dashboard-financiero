@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
-import { IconPanel, IconAccounts, IconExpenses, IconDebts, IconGoals } from '../icons.jsx'
+import { IconPanel, IconAccounts, IconExpenses, IconDebts, IconGoals, IconDiary } from '../icons.jsx'
 import { useAuth } from '../../lib/AuthContext.jsx'
 import { countPendingTransactions, countPendingCurrencyTransactions } from '../../lib/transactionsApi.js'
 import QuickCaptureFAB from '../QuickCaptureFAB.jsx'
+import SettingsPanel from '../SettingsPanel.jsx'
+import SearchPanel from '../SearchPanel.jsx'
 import styles from './AppShell.module.css'
 
 const NAV_ITEMS = [
   { to: '/', label: 'Panel', Icon: IconPanel, end: true },
+  { to: '/diario', label: 'Diario', Icon: IconDiary },
   { to: '/cuentas', label: 'Cuentas', Icon: IconAccounts },
   { to: '/gastos', label: 'Gastos', Icon: IconExpenses },
   { to: '/deudas', label: 'Deudas', Icon: IconDebts },
@@ -18,17 +21,24 @@ export default function AppShell({ children }) {
   const { signOut } = useAuth()
   const location = useLocation()
   const [pendingCount, setPendingCount] = useState(0)
+  const [searchOpen, setSearchOpen] = useState(false)
 
   // Recuerda que hay movimientos por atender en Gastos sin importar por dónde
   // se entre a la app (no solo desde Panel general) — se refresca al volver
   // de Gastos diarios, donde se resuelven. Suma las dos colas que se drenan
   // ahí: sin cuenta asignada y compras en divisa con monto todavía estimado.
   // También la usa QuickCaptureFAB tras guardar, en vez de recargar la
-  // página completa que esté montada debajo.
+  // página completa que esté montada debajo. Además emite un evento global
+  // (`dashboard:transactions-changed`) — QuickCaptureFAB vive fuera del
+  // árbol de la página ruteada (son hermanos bajo AppShell, no padre/hijo),
+  // así que no hay forma de pasarle un reload() de Diario.jsx por props;
+  // esto le avisa a cualquier página montada que escuche que algo cambió,
+  // sin introducir un store global (ver Diario.jsx's "Movimientos de hoy").
   const refreshPendingCount = useCallback(() => {
     Promise.all([countPendingTransactions(), countPendingCurrencyTransactions()])
       .then(([bank, currency]) => setPendingCount(bank + currency))
       .catch(() => {})
+    window.dispatchEvent(new Event('dashboard:transactions-changed'))
   }, [])
 
   useEffect(() => { refreshPendingCount() }, [location.pathname, refreshPendingCount])
@@ -77,7 +87,9 @@ export default function AppShell({ children }) {
         ))}
       </nav>
 
-      <QuickCaptureFAB onSaved={refreshPendingCount} />
+      <QuickCaptureFAB onSaved={refreshPendingCount} onOpenSearch={() => setSearchOpen(true)} />
+      <SettingsPanel />
+      <SearchPanel open={searchOpen} onClose={() => setSearchOpen(false)} />
     </div>
   )
 }

@@ -7,27 +7,13 @@ import MonthlyInitialBalancesSection from '../components/MonthlyInitialBalancesS
 import TransferHistorySection from '../components/TransferHistorySection.jsx'
 import CurrencyExchangeSection from '../components/CurrencyExchangeSection.jsx'
 import { formatCOP, formatByCurrency, CURRENCIES } from '../lib/format.js'
-import { listAccounts, createAccount, updateAccount, archiveAccount, fetchBalancesForMonth } from '../lib/accountsApi.js'
+import { listAccounts, createAccount, updateAccount, archiveAccount, fetchBalancesForMonth, setCurrencyGroup } from '../lib/accountsApi.js'
 import { getRates, setRate } from '../lib/exchangeRatesApi.js'
 import { getAccountFlowsForMonth } from '../lib/transactionsApi.js'
 
 const now = new Date()
 const YEAR = now.getFullYear()
 const MONTH = now.getMonth() + 1
-
-// Pares de tasa manual soportados: COP<->USD y COP<->EUR alimentan los
-// totales consolidados (Panel General, Deudas) vía toCOP; USD<->EUR es un
-// par directo aparte, sin pasar por COP, para que un cambio de divisa entre
-// esas dos monedas use su propia tasa exacta. Una fila (base, quote, rate)
-// siempre significa "1 quote = rate base" (igual que COP/USD), así que acá
-// significa "1 EUR = rate USD" — si el usuario da una tasa "de dólar a
-// euro" (cuántos euros salen de 1 dólar), hay que guardar su recíproco
-// (1 / tasa), no el valor tal cual.
-const RATE_PAIRS = [
-  { base: 'COP', quote: 'USD' },
-  { base: 'COP', quote: 'EUR' },
-  { base: 'USD', quote: 'EUR' },
-]
 
 export default function Cuentas() {
   const [accounts, setAccounts] = useState(null)
@@ -41,6 +27,8 @@ export default function Cuentas() {
   const [editingId, setEditingId] = useState(null)
   const [editName, setEditName] = useState('')
   const [editCurrency, setEditCurrency] = useState('COP')
+  const [editGroupWith, setEditGroupWith] = useState('')
+  const [activePocket, setActivePocket] = useState({}) // groupKey -> accountId
   const [newName, setNewName] = useState('')
   const [newCurrency, setNewCurrency] = useState('COP')
   const [creating, setCreating] = useState(false)
@@ -73,7 +61,19 @@ export default function Cuentas() {
   const madre = accounts?.find((a) => a.kind === 'madre')
   const hijas = accounts?.filter((a) => a.kind === 'hija') ?? []
   const hijasCop = hijas.filter((h) => (h.currency || 'COP') === 'COP')
-  const accountsCop = (accounts ?? []).filter((a) => (a.currency || 'COP') === 'COP')
+
+  // Agrupa cuentas ligadas por currency_group_id (ej. Arq EUR -> Arq) para
+  // mostrarlas como una sola tarjeta con selector de moneda, en vez de una
+  // tarjeta por fila — son cuentas separadas de verdad, esto es solo
+  // agrupación visual (ver setCurrencyGroup en accountsApi.js).
+  const groupsByKey = {}
+  const groupOrder = []
+  for (const h of hijas) {
+    const key = h.currency_group_id ?? h.id
+    if (!groupsByKey[key]) { groupsByKey[key] = []; groupOrder.push(key) }
+    groupsByKey[key].push(h)
+  }
+  const accountGroups = groupOrder.map((key) => groupsByKey[key])
 
   async function handleCreate(e) {
     e.preventDefault()
@@ -95,6 +95,7 @@ export default function Cuentas() {
     if (!editName.trim()) return
     try {
       await updateAccount(id, { name: editName.trim(), currency: editCurrency })
+      await setCurrencyGroup(id, editGroupWith || null)
       setEditingId(null)
       await reload()
     } catch (err) {
@@ -117,6 +118,11 @@ export default function Cuentas() {
     }
   }
 
+  // Una fila (base, quote, rate) siempre significa "1 quote = rate base"
+  // (ej. base='COP', quote='USD' -> "1 USD = rate COP"). Para el par
+  // USD/EUR eso significa "1 EUR = rate USD" — si el usuario da una tasa
+  // "de dólar a euro" (cuántos euros salen de 1 dólar), hay que guardar su
+  // recíproco (1 / tasa), no el valor tal cual. Esto ya mordió una vez.
   async function handleSaveRate(e, base, quote) {
     e.preventDefault()
     const pairKey = `${base}_${quote}`
@@ -132,6 +138,35 @@ export default function Cuentas() {
     } finally {
       setSavingRatePair(null)
     }
+  }
+
+  // Fila compacta de tasa de cambio, para renderizar contextualmente dentro
+  // de la tarjeta de la cuenta que usa esa moneda, en vez de una tarjeta
+  // "Tasa de cambio" aparte y desconectada.
+  function renderRateRow(base, quote) {
+    const pairKey = `${base}_${quote}`
+    const existing = rates.find((r) => r.base_currency === base && r.quote_currency === quote)
+    return (
+      <div key={pairKey} style={{ marginTop: 8 }}>
+        <div style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', marginBottom: 4 }}>
+          {existing ? `1 ${quote} = ${formatByCurrency(existing.rate, base)}` : `1 ${quote} = ? ${base} (sin configurar)`}
+        </div>
+        <form onSubmit={(e) => handleSaveRate(e, base, quote)} style={{ display: 'flex', gap: 6 }}>
+          <input
+            type="number" placeholder={`Ej. ${base === 'COP' ? '4000' : '1.1'}`}
+            value={rateInputs[pairKey] ?? ''}
+            onChange={(e) => setRateInputs({ ...rateInputs, [pairKey]: e.target.value })}
+            style={{ flex: 1, minWidth: 0, minHeight: 32, borderRadius: 8, border: '1px solid var(--border-hairline)', padding: '0 8px', font: 'var(--font-caption)' }}
+          />
+          <button
+            type="submit" disabled={savingRatePair === pairKey}
+            style={{ minHeight: 32, padding: '0 10px', borderRadius: 8, background: 'var(--series-1)', color: '#fff', fontWeight: 600, font: 'var(--font-caption)', opacity: savingRatePair === pairKey ? 0.6 : 1 }}
+          >
+            Guardar
+          </button>
+        </form>
+      </div>
+    )
   }
 
   if (error) {
@@ -159,32 +194,42 @@ export default function Cuentas() {
         </Card>
       )}
 
+      {hijas.some((a) => (a.currency || 'COP') !== 'COP' && !rates.some((r) => r.base_currency === 'COP' && r.quote_currency === (a.currency || 'COP'))) && (
+        <p style={{ font: 'var(--font-caption)', color: 'var(--status-warning)', margin: '0 0 var(--space-2)' }}>
+          Hay cuentas cuyos saldos no se están sumando en Panel General ni Deudas hasta que definas su tasa hacia COP (editá la cuenta correspondiente más abajo).
+        </p>
+      )}
+
       <div className="grid-auto">
-        {hijas.map((h) => {
-          const currency = h.currency || 'COP'
-          const bal = balances[h.id] ?? 0
-          const alloc = allocated[h.id]
-          const spentAmt = spent[h.id] ?? 0
+        {accountGroups.map((group) => {
+          const groupKey = group[0].currency_group_id ?? group[0].id
+          const activeId = activePocket[groupKey] ?? group[0].id
+          const active = group.find((a) => a.id === activeId) ?? group[0]
+          const currency = active.currency || 'COP'
+          const bal = balances[active.id] ?? 0
+          const alloc = allocated[active.id]
+          const spentAmt = spent[active.id] ?? 0
           // La plata que entra a la cuenta fuera del reparto mensual de la
           // madre amplía lo disponible: gastarla no es sobregirar el
           // presupuesto. account_allocations queda intacta, siempre significa
           // "lo que la madre repartió".
-          const incomeAmt = income[h.id] ?? 0
+          const incomeAmt = income[active.id] ?? 0
           const disponible = (alloc ?? 0) + incomeAmt
           // Lo transferido a otra cuenta también consume el presupuesto: si la
           // plata salió de acá para gastarse desde arq, no sigue disponible.
-          const movidoAmt = transferredOut[h.id] ?? 0
+          const movidoAmt = transferredOut[active.id] ?? 0
           const usado = spentAmt + movidoAmt
           const pct = disponible > 0 ? Math.round((usado / disponible) * 100) : null
-          const isEditing = editingId === h.id
+          const isEditing = editingId === active.id
+          const nonCopCurrencies = [...new Set(group.map((m) => m.currency || 'COP').filter((c) => c !== 'COP'))]
 
           return (
-            <Card key={h.id}>
+            <Card key={groupKey}>
               {isEditing ? (
-                <div style={{ display: 'flex', gap: 4, marginBottom: 'var(--space-1)' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 'var(--space-1)' }}>
                   <input
                     autoFocus value={editName} onChange={(e) => setEditName(e.target.value)}
-                    style={{ flex: 1, minHeight: 32, borderRadius: 6, border: '1px solid var(--border-hairline)', padding: '0 6px' }}
+                    style={{ flex: 1, minWidth: 100, minHeight: 32, borderRadius: 6, border: '1px solid var(--border-hairline)', padding: '0 6px' }}
                   />
                   <select
                     value={editCurrency} onChange={(e) => setEditCurrency(e.target.value)}
@@ -192,19 +237,48 @@ export default function Cuentas() {
                   >
                     {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
                   </select>
-                  <button onClick={() => handleRenameSave(h.id)} style={{ color: 'var(--series-1)', fontWeight: 600 }}>Guardar</button>
+                  <select
+                    value={editGroupWith} onChange={(e) => setEditGroupWith(e.target.value)}
+                    title="Mostrarla junto a otra cuenta como si fueran distintas monedas de lo mismo (ej. Arq EUR con Arq)"
+                    style={{ minHeight: 32, borderRadius: 6, border: '1px solid var(--border-hairline)', flexBasis: '100%' }}
+                  >
+                    <option value="">Cuenta independiente</option>
+                    {hijas.filter((h) => h.id !== active.id && (h.currency_group_id ?? h.id) !== groupKey).map((h) => (
+                      <option key={h.id} value={h.id}>Es otra moneda de {h.name}</option>
+                    ))}
+                  </select>
+                  <button onClick={() => handleRenameSave(active.id)} style={{ color: 'var(--series-1)', fontWeight: 600 }}>Guardar</button>
                   <button onClick={() => setEditingId(null)} style={{ color: 'var(--text-muted)' }}>Cancelar</button>
                 </div>
               ) : (
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-1)' }}>
                   <h2 style={{ font: 'var(--font-headline)', margin: 0 }}>
-                    {h.name}
-                    {currency !== 'COP' && <span style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', fontWeight: 400, marginLeft: 6 }}>{currency}</span>}
+                    {group.length > 1 ? group[0].name : active.name}
+                    {group.length === 1 && currency !== 'COP' && <span style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', fontWeight: 400, marginLeft: 6 }}>{currency}</span>}
                   </h2>
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={() => { setEditingId(h.id); setEditName(h.name); setEditCurrency(currency) }} style={{ font: 'var(--font-caption)', color: 'var(--text-muted)' }}>Editar</button>
-                    <button onClick={() => handleArchive(h.id, h.name)} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button>
+                    <button onClick={() => { setEditingId(active.id); setEditName(active.name); setEditCurrency(currency); setEditGroupWith(active.currency_group_id ?? '') }} style={{ font: 'var(--font-caption)', color: 'var(--text-muted)' }}>Editar</button>
+                    <button onClick={() => handleArchive(active.id, active.name)} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button>
                   </div>
+                </div>
+              )}
+
+              {group.length > 1 && (
+                <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                  {group.map((m) => (
+                    <button
+                      key={m.id} type="button"
+                      onClick={() => setActivePocket({ ...activePocket, [groupKey]: m.id })}
+                      style={{
+                        minHeight: 28, padding: '0 10px', borderRadius: 14, font: 'var(--font-caption)', fontWeight: 600,
+                        border: m.id === active.id ? 'none' : '1px solid var(--border-hairline)',
+                        background: m.id === active.id ? 'var(--series-1)' : 'transparent',
+                        color: m.id === active.id ? '#fff' : 'var(--text-secondary)',
+                      }}
+                    >
+                      {m.currency || 'COP'}
+                    </button>
+                  ))}
                 </div>
               )}
 
@@ -228,6 +302,13 @@ export default function Cuentas() {
                     {movidoAmt > 0 && ` — ${formatByCurrency(movidoAmt, currency)} movidos a otras cuentas`}
                   </div>
                 </>
+              )}
+
+              {nonCopCurrencies.length > 0 && (
+                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border-hairline)' }}>
+                  {nonCopCurrencies.map((c) => renderRateRow('COP', c))}
+                  {nonCopCurrencies.includes('USD') && nonCopCurrencies.includes('EUR') && renderRateRow('USD', 'EUR')}
+                </div>
               )}
             </Card>
           )
@@ -256,41 +337,6 @@ export default function Cuentas() {
           </form>
         </Card>
 
-        <Card title="Tasa de cambio">
-          {(accounts ?? []).some((a) => (a.currency || 'COP') !== 'COP' && !rates.some((r) => r.base_currency === 'COP' && r.quote_currency === (a.currency || 'COP'))) && (
-            <p style={{ font: 'var(--font-caption)', color: 'var(--status-warning)', margin: '0 0 8px' }}>
-              Hay cuentas cuyos saldos no se están sumando en Panel General ni Deudas hasta que definas su tasa hacia COP.
-            </p>
-          )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-            {RATE_PAIRS.map(({ base, quote }) => {
-              const pairKey = `${base}_${quote}`
-              const existing = rates.find((r) => r.base_currency === base && r.quote_currency === quote)
-              return (
-                <div key={pairKey}>
-                  <div style={{ font: 'var(--font-subheadline)', marginBottom: 4 }}>
-                    {existing ? `1 ${quote} = ${formatByCurrency(existing.rate, base)}` : `1 ${quote} = ? ${base} (sin configurar)`}
-                  </div>
-                  <form onSubmit={(e) => handleSaveRate(e, base, quote)} style={{ display: 'flex', gap: 8 }}>
-                    <input
-                      type="number" placeholder={`Ej. ${base === 'COP' ? '4000' : '1.1'}`}
-                      value={rateInputs[pairKey] ?? ''}
-                      onChange={(e) => setRateInputs({ ...rateInputs, [pairKey]: e.target.value })}
-                      style={{ flex: 1, minWidth: 0, minHeight: 'var(--touch-target)', borderRadius: 10, border: '1px solid var(--border-hairline)', padding: '0 var(--space-1)' }}
-                    />
-                    <button
-                      type="submit" disabled={savingRatePair === pairKey}
-                      style={{ minHeight: 'var(--touch-target)', padding: '0 var(--space-2)', borderRadius: 10, background: 'var(--series-1)', color: '#fff', fontWeight: 600, opacity: savingRatePair === pairKey ? 0.6 : 1 }}
-                    >
-                      Guardar
-                    </button>
-                  </form>
-                </div>
-              )
-            })}
-          </div>
-        </Card>
-
         <MonthlyAllocationSection hijas={hijasCop} madre={madre} year={YEAR} month={MONTH} onSaved={reload} />
 
         <MonthlyInitialBalancesSection accounts={accounts} year={YEAR} month={MONTH} onSaved={reload} />
@@ -299,7 +345,7 @@ export default function Cuentas() {
 
         <TransferHistorySection accounts={accounts} year={YEAR} month={MONTH} onSaved={reload} />
 
-        <FixedExpensesSection accounts={accountsCop} />
+        <FixedExpensesSection accounts={accounts ?? []} />
       </div>
 
       <ConfirmDialog

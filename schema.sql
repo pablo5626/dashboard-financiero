@@ -15,6 +15,7 @@ create table accounts (
   parent_account_id uuid references accounts(id),  -- hijas apuntan a la madre
   is_fixed_expenses_account boolean not null default false,
   currency text not null default 'COP',        -- moneda nativa de la cuenta (COP o USD)
+  currency_group_id uuid references accounts(id),  -- si no es null, apunta a la cuenta "primaria" del mismo conjunto (ej. Arq EUR -> Arq): son cuentas separadas de verdad (cada una con su propia moneda/saldo/transacciones), pero Cuentas.jsx las muestra como una sola tarjeta con selector de moneda
   is_active boolean not null default true,
   sort_order int not null default 0,
   created_at timestamptz not null default now()
@@ -122,6 +123,7 @@ create table categories (
   user_id uuid not null references auth.users(id) default auth.uid(),
   name text not null,
   emoji text,
+  color text,                                    -- hex elegido por el usuario para esta categoría (ej. en la grilla de Diario.jsx); null = color automático por hash del nombre
   is_ambiguous boolean not null default true,   -- false = 100% inequívoca (ej. Suscripciones)
   monthly_budget numeric,                        -- tope mensual editable, mismo monto todos los meses hasta que se cambie (null = sin presupuesto definido)
   is_active boolean not null default true,       -- archivado (soft delete, igual que accounts.is_active)

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import Card from './ui/Card.jsx'
 import ConfirmDialog from './ui/ConfirmDialog.jsx'
 import { formatByCurrency } from '../lib/format.js'
-import { getTransfersForMonth, createTransfers, deleteTransfer } from '../lib/transfersApi.js'
+import { getTransfersForMonth, createTransfers, deleteTransfer, updateConsumesBudget } from '../lib/transfersApi.js'
 
 const emptyForm = { fromAccountId: '', toAccountId: '', amount: '', toAmount: '', note: '', consumesBudget: true }
 
@@ -12,6 +12,7 @@ export default function TransferHistorySection({ accounts, year, month, onSaved 
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(null) // { id } | null
+  const [savingConsumesId, setSavingConsumesId] = useState(null)
 
   async function reload() {
     try {
@@ -70,6 +71,19 @@ export default function TransferHistorySection({ accounts, year, month, onSaved 
     }
   }
 
+  async function handleToggleConsumesBudget(t) {
+    setSavingConsumesId(t.id)
+    try {
+      await updateConsumesBudget(t.id, !(t.consumes_budget !== false))
+      await reload()
+      onSaved?.()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSavingConsumesId(null)
+    }
+  }
+
   async function doDelete() {
     const target = confirmDelete
     setConfirmDelete(null)
@@ -103,7 +117,18 @@ export default function TransferHistorySection({ accounts, year, month, onSaved 
                     : formatByCurrency(t.amount, t.currency)}
                 </td>
                 <td style={{ color: 'var(--text-muted)' }}>
-                  {[t.note, t.consumes_budget === false ? 'no descuenta presupuesto' : null].filter(Boolean).join(' · ') || '—'}
+                  {t.from_account_id !== madreId && t.to_account_id !== madreId ? (
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <input
+                        type="checkbox"
+                        checked={t.consumes_budget !== false}
+                        disabled={savingConsumesId === t.id}
+                        onChange={() => handleToggleConsumesBudget(t)}
+                        style={{ width: 16, height: 16 }}
+                      />
+                      {t.note ? `${t.note} · ` : ''}Descuenta presupuesto
+                    </label>
+                  ) : (t.note || '—')}
                 </td>
                 <td>
                   <button onClick={() => setConfirmDelete({ id: t.id })} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button>

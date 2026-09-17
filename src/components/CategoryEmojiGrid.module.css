@@ -1,0 +1,68 @@
+/* Fila horizontal deslizable de panelitos verticales (no una grilla que
+   envuelve) — pedido explícito para que se sienta como el selector de
+   categorías de MonIA, y para que quepan todas sin importar cuántas haya. */
+.grid {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  width: 68px;
+  min-height: var(--touch-target);
+  padding: var(--space-1) 4px;
+  border-radius: 12px;
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-1);
+  color: var(--text-secondary);
+}
+
+.selected {
+  border-color: var(--series-1);
+  background: color-mix(in srgb, var(--series-1) 14%, var(--surface-1));
+  color: var(--series-1);
+}
+
+.glyph {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+}
+
+/* Círculo de color de fondo — cuando la categoría tiene un color elegido a
+   mano (categories.color) o, sin emoji cargado, el color automático por
+   hash del nombre (seriesForName). */
+.circle {
+  border-radius: 50%;
+}
+
+/* Sin emoji cargado: se muestra la inicial en vez de un glifo vacío/roto. */
+.letter {
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.name {
+  font: var(--font-caption);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.empty {
+  color: var(--text-muted);
+  font: var(--font-footnote);
+}

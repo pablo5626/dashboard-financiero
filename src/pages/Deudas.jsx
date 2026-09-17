@@ -3,7 +3,7 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Toolti
 import Card from '../components/ui/Card.jsx'
 import ConfirmDialog from '../components/ui/ConfirmDialog.jsx'
 import StatTile from '../components/ui/StatTile.jsx'
-import { formatCOP } from '../lib/format.js'
+import { formatCOP, formatByCurrency, CURRENCIES } from '../lib/format.js'
 import { listAccounts, fetchBalancesForMonth } from '../lib/accountsApi.js'
 import { getRates, toCOP } from '../lib/exchangeRatesApi.js'
 import { listCategories } from '../lib/categoriesApi.js'
@@ -21,7 +21,7 @@ const MONTH = now.getMonth() + 1
 
 const emptyDebtForm = {
   creditorName: '', totalAmount: '', remainingAmount: '', interestRate: '', monthlyPayment: '', termMonths: '', startDate: '',
-  counterpartyRelationship: '', contactInfo: '', expectedPaymentDate: '', notes: '',
+  counterpartyRelationship: '', contactInfo: '', expectedPaymentDate: '', notes: '', currency: 'COP',
 }
 
 const RELATIONSHIP_OPTIONS = [
@@ -142,6 +142,7 @@ export default function Deudas() {
         expectedPaymentDate: form.expectedPaymentDate || null,
         notes: form.notes || null,
         sourceTransactionId: prefillSourceTxId,
+        currency: form.currency,
       })
       if (prefillSourceTxId) await markLoanTransactionReviewed(prefillSourceTxId)
       setForm(emptyDebtForm)
@@ -161,6 +162,7 @@ export default function Deudas() {
       totalAmount: Math.abs(Number(tx.amount)),
       remainingAmount: Math.abs(Number(tx.amount)),
       startDate: tx.occurred_at.slice(0, 10),
+      currency: tx.currency || 'COP',
     })
     setPrefillSourceTxId(tx.id)
   }
@@ -187,7 +189,8 @@ export default function Deudas() {
 
   async function handleEditSave(id) {
     try {
-      await updateDebt(id, {
+      const original = debts.find((d) => d.id === id)
+      const fields = {
         creditor_name: editForm.creditorName.trim(),
         total_amount: Number(editForm.totalAmount),
         remaining_amount: Number(editForm.remainingAmount),
@@ -199,9 +202,24 @@ export default function Deudas() {
         contact_info: editForm.contactInfo || null,
         expected_payment_date: editForm.expectedPaymentDate || null,
         notes: editForm.notes || null,
-      })
+      }
+      await updateDebt(id, fields)
       setEditingId(null)
       await reload()
+
+      // Reconciliación automática: si esta edición desincronizó el saldo (o
+      // cambió el monto total, que hoy no deja ninguna señal de drift
+      // persistida) contra el cronograma ya generado, dispara el mismo flujo
+      // de "Regenerar cuotas pendientes" — con su mismo ConfirmDialog si hay
+      // cuotas pendientes de por medio, en vez de exigir un click aparte.
+      const merged = { ...original, ...fields }
+      const synced = merged.schedule_synced_remaining_amount
+      const remainingDrifted = synced != null && Math.abs(Number(merged.remaining_amount) - Number(synced)) > 1
+      const totalChanged = Number(original.total_amount) !== Number(fields.total_amount)
+      if (synced != null && (remainingDrifted || totalChanged) && merged.interest_rate != null && merged.term_months) {
+        const debtInstallments = installments.filter((i) => i.debt_id === id)
+        handleRegenerateSchedule(merged, debtInstallments)
+      }
     } catch (err) {
       setError(err.message)
     }
@@ -418,7 +436,7 @@ export default function Deudas() {
                   <tr key={tx.id}>
                     <td>{tx.occurred_at.slice(0, 10)}</td>
                     <td>{tx.purpose}</td>
-                    <td>{formatCOP(-Number(tx.amount))}</td>
+                    <td>{formatByCurrency(-Number(tx.amount), tx.currency)}</td>
                     <td style={{ display: 'flex', gap: 8 }}>
                       <button onClick={() => handlePrefillFromCandidate(tx)} style={{ font: 'var(--font-caption)', color: 'var(--series-1)', fontWeight: 600 }}>Precargar</button>
                       <button onClick={() => handleDismissCandidate(tx.id)} style={{ font: 'var(--font-caption)', color: 'var(--text-muted)' }}>Ignorar</button>
@@ -472,6 +490,9 @@ export default function Deudas() {
                   <input placeholder={d.direction === 'me_deben' ? 'Nombre de la persona' : 'Acreedor'} value={editForm.creditorName} onChange={(e) => setEditForm({ ...editForm, creditorName: e.target.value })} style={{ ...formInput, flex: '1 1 160px' }} />
                   <input type="number" placeholder="Monto total" value={editForm.totalAmount} onChange={(e) => setEditForm({ ...editForm, totalAmount: e.target.value })} style={{ ...formInput, width: 130 }} />
                   <input type="number" placeholder="Restante" value={editForm.remainingAmount} onChange={(e) => setEditForm({ ...editForm, remainingAmount: e.target.value })} style={{ ...formInput, width: 130 }} />
+                  <span style={{ ...formInput, width: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }} title="La moneda no se puede editar — los montos no se convierten automáticamente. Borrá y recreá la deuda si hace falta cambiarla.">
+                    {d.currency || 'COP'}
+                  </span>
                   {d.direction === 'me_deben' ? (
                     <>
                       <select value={editForm.counterpartyRelationship} onChange={(e) => setEditForm({ ...editForm, counterpartyRelationship: e.target.value })} style={{ ...formInput, width: 150 }}>
@@ -502,10 +523,10 @@ export default function Deudas() {
                 </div>
               )}
 
-              <div style={{ font: 'var(--font-title)', marginBottom: 4 }}>{formatCOP(d.remaining_amount)} restantes</div>
+              <div style={{ font: 'var(--font-title)', marginBottom: 4 }}>{formatByCurrency(d.remaining_amount, d.currency)} restantes</div>
               <div style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', marginBottom: 8 }}>
-                de {formatCOP(d.total_amount)}
-                {d.monthly_payment ? ` — cuota mensual ${formatCOP(d.monthly_payment)}` : ''}
+                de {formatByCurrency(d.total_amount, d.currency)}
+                {d.monthly_payment ? ` — cuota mensual ${formatByCurrency(d.monthly_payment, d.currency)}` : ''}
                 {d.interest_rate ? ` — tasa ${d.interest_rate}% mensual` : ''}
                 {d.term_months ? ` — plazo ${d.term_months} cuotas` : ''}
                 {payoff ? ` — proyección de pago: ${payoff}` : ''}
@@ -526,7 +547,7 @@ export default function Deudas() {
 
               {isScheduleStale && (
                 <p style={{ font: 'var(--font-caption)', color: 'var(--status-warning)', margin: '0 0 var(--space-2)' }}>
-                  El saldo restante cambió por fuera del registro de cuotas ({formatCOP(scheduleDrift)}) — el cronograma puede estar desactualizado. Usa "Regenerar cuotas pendientes" si quieres que lo refleje.
+                  El saldo restante cambió por fuera del registro de cuotas ({formatByCurrency(scheduleDrift, d.currency)}) — el cronograma puede estar desactualizado. Usa "Regenerar cuotas pendientes" si quieres que lo refleje.
                 </p>
               )}
 
@@ -540,7 +561,7 @@ export default function Deudas() {
                       {debtInstallments.map((i) => (
                         <tr key={i.id}>
                           <td>{i.due_date}</td>
-                          <td>{formatCOP(i.amount)}</td>
+                          <td>{formatByCurrency(i.amount, d.currency)}</td>
                           <td>{i.account_id ? (accounts.find((a) => a.id === i.account_id)?.name ?? '—') : 'Pendiente de banco'}</td>
                           <td><button onClick={() => handleDeleteInstallment(i, d)} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button></td>
                         </tr>
@@ -610,7 +631,7 @@ export default function Deudas() {
                       {debtInstallments.map((i) => (
                         <tr key={i.id}>
                           <td>{i.due_date}</td>
-                          <td>{formatCOP(i.amount)}</td>
+                          <td>{formatByCurrency(i.amount, d.currency)}</td>
                           <td>
                             <button onClick={() => handleToggleInstallment(i, d)} style={{ color: i.paid ? 'var(--status-good)' : 'var(--status-warning)', fontWeight: 600 }}>
                               {i.paid ? 'Pagada' : 'Pendiente'}
@@ -661,6 +682,9 @@ export default function Deudas() {
             <input placeholder={activeDirection === 'me_deben' ? 'Nombre de la persona' : 'Acreedor'} value={form.creditorName} onChange={(e) => setForm({ ...form, creditorName: e.target.value })} style={{ ...formInput, flex: '1 1 160px' }} />
             <input type="number" placeholder={activeDirection === 'me_deben' ? 'Monto prestado' : 'Monto total'} value={form.totalAmount} onChange={(e) => setForm({ ...form, totalAmount: e.target.value })} style={{ ...formInput, width: 130 }} />
             <input type="number" placeholder="Restante" value={form.remainingAmount} onChange={(e) => setForm({ ...form, remainingAmount: e.target.value })} style={{ ...formInput, width: 130 }} />
+            <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })} style={{ ...formInput, width: 90 }}>
+              {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
             {activeDirection === 'me_deben' ? (
               <>
                 <select value={form.counterpartyRelationship} onChange={(e) => setForm({ ...form, counterpartyRelationship: e.target.value })} style={{ ...formInput, width: 150 }}>

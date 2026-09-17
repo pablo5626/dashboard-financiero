@@ -1,0 +1,203 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 100;
+}
+
+@media (min-width: 768px) {
+  .backdrop {
+    align-items: center;
+    padding: var(--space-2);
+  }
+}
+
+.panel {
+  background: var(--surface-raised);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  padding: var(--space-3) var(--space-2) calc(var(--space-3) + env(safe-area-inset-bottom));
+  width: 100%;
+  max-width: 640px;
+  max-height: 85dvh;
+  overflow-y: auto;
+}
+
+@media (min-width: 768px) {
+  .panel {
+    border-radius: var(--radius-card);
+    padding: var(--space-3);
+  }
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-1);
+}
+
+.title {
+  font: var(--font-headline);
+  margin: 0;
+}
+
+.closeButton {
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.hint {
+  font: var(--font-caption);
+  color: var(--text-muted);
+  margin: 0 0 var(--space-1);
+}
+
+.error {
+  color: var(--status-critical);
+  font: var(--font-footnote);
+  margin: 0 0 var(--space-1);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: var(--space-2);
+}
+
+.input {
+  min-height: var(--touch-target);
+  border-radius: 10px;
+  border: 1px solid var(--border-hairline);
+  padding: 0 var(--space-1);
+  font: var(--font-body);
+  background: var(--surface-1);
+  color: var(--text-primary);
+}
+
+.dateRow {
+  display: flex;
+  gap: 8px;
+}
+
+.dateRow > .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.formActions {
+  display: flex;
+  gap: 8px;
+}
+
+.searchButton {
+  min-height: var(--touch-target);
+  padding: 0 var(--space-2);
+  border-radius: 10px;
+  background: var(--series-1);
+  color: #fff;
+  font-weight: 600;
+}
+
+.searchButton:disabled {
+  opacity: 0.6;
+}
+
+.clearButton {
+  min-height: var(--touch-target);
+  padding: 0 var(--space-1);
+  color: var(--text-muted);
+  font: var(--font-caption);
+}
+
+.results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.resultRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.resultInfo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.resultPurpose {
+  font: var(--font-subheadline);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.resultMeta {
+  font: var(--font-caption);
+  color: var(--text-muted);
+}
+
+.tagsRow {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  margin-top: 2px;
+}
+
+.tagsInput {
+  flex: 1;
+  min-width: 0;
+  min-height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--border-hairline);
+  padding: 0 8px;
+  font: var(--font-caption);
+  background: var(--surface-1);
+  color: var(--text-primary);
+}
+
+.tagsSave {
+  font: var(--font-caption);
+  white-space: nowrap;
+  padding: 0 6px;
+}
+
+.resultRight {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.resultAmount {
+  font: var(--font-subheadline);
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.deleteButton {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

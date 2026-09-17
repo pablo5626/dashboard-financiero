@@ -8,7 +8,7 @@ export async function listDebts() {
 
 export async function createDebt({
   creditorName, totalAmount, remainingAmount, interestRate, monthlyPayment, termMonths, startDate,
-  direction, counterpartyRelationship, contactInfo, expectedPaymentDate, notes, sourceTransactionId,
+  direction, counterpartyRelationship, contactInfo, expectedPaymentDate, notes, sourceTransactionId, currency,
 }) {
   const { data, error } = await supabase.from('debts').insert({
     creditor_name: creditorName,
@@ -24,6 +24,7 @@ export async function createDebt({
     expected_payment_date: expectedPaymentDate || null,
     notes: notes || null,
     source_transaction_id: sourceTransactionId || null,
+    currency: currency || 'COP',
   }).select().single()
   if (error) throw error
   return data

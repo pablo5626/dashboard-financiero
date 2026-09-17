@@ -1,4 +1,34 @@
-.fab {
+/* Clúster inferior izquierdo: "+" (carga manual) y buscar, en una píldora
+   -- y el micrófono como botón grande propio a la derecha, siempre visible
+   en todas las páginas (no escondido dentro de la hoja de "+"), inspirado
+   en el layout de MonIA. */
+.fabCluster {
+  position: fixed;
+  left: var(--space-2);
+  bottom: calc(64px + env(safe-area-inset-bottom) + var(--space-2));
+  display: flex;
+  gap: 8px;
+  z-index: 40;
+}
+
+.fabSecondary {
+  width: 48px;
+  height: 48px;
+  border-radius: 24px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-hairline);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+.fabSecondary:active {
+  transform: scale(0.94);
+}
+
+.fabMic {
   position: fixed;
   right: var(--space-2);
   bottom: calc(64px + env(safe-area-inset-bottom) + var(--space-2));
@@ -14,12 +44,20 @@
   z-index: 40;
 }
 
-.fab:active {
+.fabMic:active {
   transform: scale(0.94);
 }
 
+.fabMic:disabled {
+  opacity: 0.6;
+}
+
 @media (min-width: 768px) {
-  .fab {
+  .fabCluster {
+    bottom: var(--space-3);
+    left: var(--space-3);
+  }
+  .fabMic {
     bottom: var(--space-3);
     right: var(--space-3);
   }
@@ -223,22 +261,6 @@
   gap: 6px;
 }
 
-.micButton {
-  min-width: var(--touch-target);
-  min-height: var(--touch-target);
-  border-radius: 10px;
-  border: 1px solid var(--border-hairline);
-  background: var(--surface-1);
-  color: var(--text-secondary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.micButton:disabled {
-  opacity: 0.5;
-}
-
 .micListening {
   background: var(--status-critical);
   border-color: var(--status-critical);
@@ -255,4 +277,69 @@
   font: var(--font-caption);
   color: var(--text-muted);
   margin: 0;
+}
+
+/* Descripción/Monto grandes y sin chrome, como en la referencia de MonIA —
+   son los primeros campos que se ven, en vez de estar escondidos en "Más
+   opciones". */
+.bigInput {
+  border: none;
+  background: transparent;
+  font: var(--font-title);
+  padding: 8px 2px;
+  color: var(--text-primary);
+}
+
+.bigInput + .bigInput {
+  border-top: 1px solid var(--border-hairline);
+}
+
+.bigInput::placeholder {
+  color: var(--text-muted);
+}
+
+.hintCaption {
+  font: var(--font-caption);
+  color: var(--status-warning);
+  margin: 0;
+}
+
+.bottomRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.tagToggle {
+  width: var(--touch-target);
+  height: var(--touch-target);
+  flex-shrink: 0;
+  border-radius: 10px;
+  border: 1px solid var(--border-hairline);
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
+.tagToggleActive {
+  background: var(--series-1);
+  border-color: var(--series-1);
+  color: #fff;
+}
+
+.dateInput {
+  min-height: var(--touch-target);
+  border-radius: 10px;
+  border: 1px solid var(--border-hairline);
+  padding: 0 8px;
+  font: var(--font-caption);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  flex-shrink: 0;
+  width: 132px;
+}
+
+.submitInline {
+  flex: 1;
+  margin-top: 0;
 }

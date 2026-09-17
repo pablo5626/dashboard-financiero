@@ -5,7 +5,7 @@ import ConfirmDialog from '../components/ui/ConfirmDialog.jsx'
 import { formatCOP, formatByCurrency } from '../lib/format.js'
 import { listAccounts } from '../lib/accountsApi.js'
 import { getRates, toCOP } from '../lib/exchangeRatesApi.js'
-import { listCategories, createCategory, updateCategory, archiveCategory } from '../lib/categoriesApi.js'
+import { listCategories } from '../lib/categoriesApi.js'
 import { getAllocationsForMonth } from '../lib/allocationsApi.js'
 import { getTransfersForMonth, sumOutgoingByAccount } from '../lib/transfersApi.js'
 import { listFixedExpenses, createFixedExpense } from '../lib/fixedExpensesApi.js'
@@ -13,9 +13,8 @@ import {
   parseMonIACSV, filterRowsByMonth, importTransactions,
   listPendingTransactions, fetchSuggestionsForCategories, confirmAssignment,
   listTransactionsForMonth, listRecentExpenses, detectRecurringCandidates,
-  searchTransactions, deleteTransaction, createManualTransaction, isIgnoredRow,
+  deleteTransaction, isIgnoredRow,
   listPendingCurrencyTransactions, confirmCurrencyAmount, updateTransactionTags,
-  suggestCategoryForPurpose, backfillPurposeCategoryStats,
 } from '../lib/transactionsApi.js'
 
 const now = new Date()
@@ -23,7 +22,6 @@ const now = new Date()
 const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
 const PATTERN_MONTHS_BACK = 6
 const CHART_COLORS = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)', 'var(--series-5)', 'var(--series-6)', 'var(--series-7)', 'var(--series-8)']
-const emptyManualForm = { date: new Date().toISOString().slice(0, 10), type: 'gasto', purpose: '', amount: '', categoryId: '', accountId: '', tag: '' }
 
 function formatDate(iso) {
   return new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', timeZone: 'UTC' })
@@ -49,15 +47,6 @@ export default function GastosDiarios() {
   const [confirmingId, setConfirmingId] = useState(null)
   const [selectedAccountByTx, setSelectedAccountByTx] = useState({})
   const [amountByTx, setAmountByTx] = useState({})
-  const [budgetCategoryId, setBudgetCategoryId] = useState('')
-  const [budgetDraft, setBudgetDraft] = useState('')
-  const [categoryDraft, setCategoryDraft] = useState({ name: '', emoji: '', isAmbiguous: true })
-  const [newCategory, setNewCategory] = useState({ name: '', emoji: '', isAmbiguous: true })
-  const [creatingCategory, setCreatingCategory] = useState(false)
-  const [savingCategory, setSavingCategory] = useState(false)
-  const [confirmArchiveCategory, setConfirmArchiveCategory] = useState(null) // { id, name } | null
-  const [backfilling, setBackfilling] = useState(false)
-  const [backfillResult, setBackfillResult] = useState(null)
   const [tagsDraftByTx, setTagsDraftByTx] = useState({})
   const [savingTagsId, setSavingTagsId] = useState(null)
   const [allocations, setAllocations] = useState({})
@@ -66,14 +55,7 @@ export default function GastosDiarios() {
   const [recentExpenses, setRecentExpenses] = useState([])
   const [addingCandidate, setAddingCandidate] = useState(null)
 
-  const [searchFilters, setSearchFilters] = useState({ query: '', categoryId: '', accountId: '', tag: '', dateFrom: '', dateTo: '' })
-  const [searchResults, setSearchResults] = useState(null)
-  const [searching, setSearching] = useState(false)
   const [confirmDeleteTx, setConfirmDeleteTx] = useState(null) // { id, purpose } | null
-
-  const [manualForm, setManualForm] = useState(emptyManualForm)
-  const [savingManual, setSavingManual] = useState(false)
-  const [manualSuggestion, setManualSuggestion] = useState(false)
 
   async function reload() {
     try {
@@ -107,11 +89,6 @@ export default function GastosDiarios() {
 
   const hijas = accounts.filter((a) => a.kind === 'hija')
 
-  // La moneda del movimiento manual la manda la cuenta elegida (COP si quedó
-  // "pendiente de banco"): así un gasto contra arq se guarda en USD/EUR y sí
-  // mueve su saldo, en vez de quedar marcado COP y descartarse en silencio.
-  const manualCurrency = accounts.find((a) => a.id === manualForm.accountId)?.currency || 'COP'
-
   function handleFileChange(e) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -141,51 +118,6 @@ export default function GastosDiarios() {
       setError(err.message)
     } finally {
       setImporting(false)
-    }
-  }
-
-  async function handleAddManual(e) {
-    e.preventDefault()
-    if (!manualForm.purpose.trim() || !manualForm.amount) return
-    setSavingManual(true)
-    try {
-      const signedAmount = manualForm.type === 'ingreso'
-        ? Math.abs(Number(manualForm.amount))
-        : -Math.abs(Number(manualForm.amount))
-      await createManualTransaction({
-        purpose: manualForm.purpose.trim(),
-        amount: signedAmount,
-        occurredAt: `${manualForm.date}T12:00:00Z`,
-        categoryId: manualForm.categoryId || null,
-        accountId: manualForm.accountId || null,
-        currency: manualCurrency,
-        tags: manualForm.tag.trim() ? [manualForm.tag.trim().toLowerCase()] : [],
-      })
-      setManualForm({ ...emptyManualForm, date: manualForm.date, type: manualForm.type })
-      setManualSuggestion(false)
-      await reload()
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setSavingManual(false)
-    }
-  }
-
-  // Sugiere categoría+tag aprendidos de purpose_category_stats al salir del
-  // campo Descripción — nunca pisa una elección que el usuario ya hizo.
-  async function handleManualPurposeBlur() {
-    if (!manualForm.purpose.trim() || manualForm.categoryId || manualForm.tag) return
-    try {
-      const suggestion = await suggestCategoryForPurpose(manualForm.purpose)
-      if (!suggestion) return
-      setManualForm((prev) => ({
-        ...prev,
-        categoryId: suggestion.categoryId,
-        tag: suggestion.tag ?? prev.tag,
-      }))
-      setManualSuggestion(true)
-    } catch (err) {
-      setError(err.message)
     }
   }
 
@@ -221,70 +153,6 @@ export default function GastosDiarios() {
     }
   }
 
-  async function handleSaveCategory() {
-    if (!budgetCategoryId || !categoryDraft.name.trim()) return
-    setSavingCategory(true)
-    try {
-      await updateCategory(budgetCategoryId, {
-        name: categoryDraft.name.trim(),
-        emoji: categoryDraft.emoji.trim() || null,
-        is_ambiguous: categoryDraft.isAmbiguous,
-        monthly_budget: budgetDraft === '' ? null : Number(budgetDraft),
-      })
-      await reload()
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setSavingCategory(false)
-    }
-  }
-
-  async function handleCreateCategory(e) {
-    e.preventDefault()
-    if (!newCategory.name.trim()) return
-    setCreatingCategory(true)
-    try {
-      await createCategory({ name: newCategory.name.trim(), emoji: newCategory.emoji.trim(), isAmbiguous: newCategory.isAmbiguous })
-      setNewCategory({ name: '', emoji: '', isAmbiguous: true })
-      await reload()
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setCreatingCategory(false)
-    }
-  }
-
-  function handleArchiveCategory(id, name) {
-    setConfirmArchiveCategory({ id, name })
-  }
-
-  async function doArchiveCategory() {
-    const target = confirmArchiveCategory
-    setConfirmArchiveCategory(null)
-    try {
-      await archiveCategory(target.id)
-      setBudgetCategoryId('')
-      await reload()
-    } catch (err) {
-      setError(err.message)
-    }
-  }
-
-  // Corrida única (o para reforzar) que aprende de todo el historial ya
-  // guardado, no solo de lo que se cargue de acá en adelante.
-  async function handleBackfillPurposeStats() {
-    setBackfilling(true)
-    setBackfillResult(null)
-    try {
-      const count = await backfillPurposeCategoryStats()
-      setBackfillResult(count)
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setBackfilling(false)
-    }
-  }
-
   async function handleSaveTags(txId) {
     const raw = tagsDraftByTx[txId] ?? ''
     setSavingTagsId(txId)
@@ -316,30 +184,6 @@ export default function GastosDiarios() {
     }
   }
 
-  async function handleSearch(e) {
-    e.preventDefault()
-    setSearching(true)
-    try {
-      setSearchResults(await searchTransactions({
-        query: searchFilters.query,
-        categoryId: searchFilters.categoryId || null,
-        accountId: searchFilters.accountId || null,
-        tag: searchFilters.tag,
-        dateFrom: searchFilters.dateFrom || null,
-        dateTo: searchFilters.dateTo || null,
-      }))
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setSearching(false)
-    }
-  }
-
-  function handleClearSearch() {
-    setSearchFilters({ query: '', categoryId: '', accountId: '', tag: '', dateFrom: '', dateTo: '' })
-    setSearchResults(null)
-  }
-
   function handleDeleteTx(tx) {
     setConfirmDeleteTx({ id: tx.id, purpose: tx.purpose })
   }
@@ -349,7 +193,6 @@ export default function GastosDiarios() {
     setConfirmDeleteTx(null)
     try {
       await deleteTransaction(target.id)
-      setSearchResults((prev) => prev?.filter((t) => t.id !== target.id) ?? prev)
       await reload()
     } catch (err) {
       setError(err.message)
@@ -410,6 +253,13 @@ export default function GastosDiarios() {
     .sort((a, b) => b.value - a.value)
     .slice(0, 10)
 
+  // Ambas comparten la misma altura (la del más alto de los dos) — antes
+  // cada una calculaba su alto según su propia cantidad de filas, así que
+  // la más corta quedaba con espacio vacío al compartir fila en el grid con
+  // la más alta (CSS Grid estira ambas tarjetas a la misma altura por
+  // default, pero el gráfico adentro se quedaba con su alto fijo chico).
+  const twoColChartHeight = Math.max(120, categoryChartData.length * 28, tagChartData.length * 28)
+
   const existingFixedNames = new Set(fixedExpenses.map((f) => f.name.trim().toLowerCase()))
   const recurringCandidates = detectRecurringCandidates(recentExpenses, existingFixedNames)
 
@@ -418,54 +268,6 @@ export default function GastosDiarios() {
       <h1 className="page-title">Gastos diarios</h1>
 
       <div className="grid-auto">
-        <Card title="Importar CSV de MonIA" className="span-3">
-          <p style={{ font: 'var(--font-subheadline)', color: 'var(--text-secondary)', margin: '0 0 var(--space-2)' }}>
-            Sube el CSV exportado de MonIA y elige el mes/año a importar. Los movimientos ya guardados
-            (por su `id` de MonIA) se detectan y se omiten automáticamente.
-          </p>
-
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 'var(--space-2)' }}>
-            <select value={month} onChange={(e) => setMonth(Number(e.target.value))} style={formInput}>
-              {MONTH_NAMES.map((name, i) => <option key={name} value={i + 1}>{name}</option>)}
-            </select>
-            <input
-              type="number" value={year} onChange={(e) => setYear(Number(e.target.value))}
-              style={{ ...formInput, width: 90 }}
-            />
-            <label style={{
-              minHeight: 'var(--touch-target)', display: 'inline-flex', alignItems: 'center', padding: '0 var(--space-2)',
-              borderRadius: 10, background: 'var(--series-1)', color: '#fff', fontWeight: 600, cursor: 'pointer',
-            }}>
-              Elegir archivo CSV
-              <input type="file" accept=".csv" onChange={handleFileChange} style={{ display: 'none' }} />
-            </label>
-            {csvFileName && <span style={{ font: 'var(--font-caption)', color: 'var(--text-muted)' }}>{csvFileName}</span>}
-          </div>
-
-          {csvRows && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <p style={{ font: 'var(--font-subheadline)', margin: 0 }}>
-                {matchingCount} movimiento(s) encontrados para {MONTH_NAMES[month - 1]} {year} en el archivo.
-              </p>
-              <button
-                onClick={handleImport} disabled={importing || matchingCount === 0}
-                style={{
-                  minHeight: 'var(--touch-target)', padding: '0 var(--space-2)', borderRadius: 10,
-                  background: 'var(--series-3)', color: '#fff', fontWeight: 600, opacity: importing ? 0.6 : 1,
-                }}
-              >
-                {importing ? 'Importando…' : 'Importar'}
-              </button>
-            </div>
-          )}
-
-          {importResult && (
-            <p style={{ font: 'var(--font-subheadline)', color: 'var(--status-good)', marginTop: 'var(--space-1)' }}>
-              {importResult.imported} movimiento(s) nuevo(s) importado(s), {importResult.skipped} ya existían y se omitieron.
-            </p>
-          )}
-        </Card>
-
         {pending === null ? (
           <Card title="Pendientes de banco" className="span-3"><p style={{ color: 'var(--text-muted)' }}>Cargando…</p></Card>
         ) : pending.length > 0 && (
@@ -606,132 +408,11 @@ export default function GastosDiarios() {
           </Card>
         )}
 
-        <Card title="Categorías" className="span-3">
-          <p style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', margin: '0 0 var(--space-1)' }}>
-            Crea, renombra o archiva categorías del catálogo, y edita su presupuesto mensual (mismo monto
-            todos los meses hasta que lo cambies; vacío = sin presupuesto definido, no genera alerta).
-            Gasto del mes mostrado es el de {MONTH_NAMES[month - 1]} {year}.
-          </p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', margin: '0 0 var(--space-2)' }}>
-            <button
-              type="button" onClick={handleBackfillPurposeStats} disabled={backfilling}
-              style={{ minHeight: 'var(--touch-target)', padding: '0 var(--space-2)', borderRadius: 10, border: '1px solid var(--border-hairline)', color: 'var(--text-secondary)' }}
-            >
-              {backfilling ? 'Aprendiendo…' : 'Aprender categoría/tag de tu historial'}
-            </button>
-            {backfillResult != null && (
-              <span style={{ font: 'var(--font-caption)', color: 'var(--text-muted)' }}>
-                Se analizaron {backfillResult} movimientos con categoría — las sugerencias en "Agregar movimiento manual" y el FAB ya lo reflejan.
-              </span>
-            )}
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-            <select
-              value={budgetCategoryId}
-              onChange={(e) => {
-                const id = e.target.value
-                setBudgetCategoryId(id)
-                const cat = categories.find((c) => c.id === id)
-                setBudgetDraft(cat?.monthly_budget != null ? String(cat.monthly_budget) : '')
-                setCategoryDraft({ name: cat?.name ?? '', emoji: cat?.emoji ?? '', isAmbiguous: cat?.is_ambiguous ?? true })
-              }}
-              style={{ ...formInput, flex: '1 1 200px', minWidth: 0 }}
-            >
-              <option value="">Selecciona una categoría…</option>
-              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-
-            {budgetCategoryId && (() => {
-              const spent = spentByCategory[budgetCategoryId] ?? 0
-              const currentCat = categories.find((c) => c.id === budgetCategoryId)
-              const budget = currentCat?.monthly_budget != null ? Number(currentCat.monthly_budget) : null
-              const over = budget != null && spent > budget
-              return (
-                <>
-                  <span style={{ font: 'var(--font-subheadline)', color: over ? 'var(--status-critical)' : 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-                    Gastado este mes: {formatCOP(spent)}
-                  </span>
-                  <input
-                    placeholder="Nombre" value={categoryDraft.name}
-                    onChange={(e) => setCategoryDraft({ ...categoryDraft, name: e.target.value })}
-                    style={{ ...formInput, width: 160 }}
-                  />
-                  <input
-                    placeholder="Emoji" value={categoryDraft.emoji} maxLength={4}
-                    onChange={(e) => setCategoryDraft({ ...categoryDraft, emoji: e.target.value })}
-                    style={{ ...formInput, width: 64, textAlign: 'center' }}
-                  />
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, font: 'var(--font-caption)', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-                    <input
-                      type="checkbox" checked={categoryDraft.isAmbiguous}
-                      onChange={(e) => setCategoryDraft({ ...categoryDraft, isAmbiguous: e.target.checked })}
-                    />
-                    Ambigua
-                  </label>
-                  <input
-                    type="number" placeholder="Sin definir" value={budgetDraft}
-                    onChange={(e) => setBudgetDraft(e.target.value)}
-                    style={{ ...formInput, width: 130 }}
-                  />
-                  <button
-                    onClick={handleSaveCategory} disabled={savingCategory}
-                    style={{ minHeight: 'var(--touch-target)', padding: '0 var(--space-2)', borderRadius: 10, background: 'var(--series-1)', color: '#fff', fontWeight: 600 }}
-                  >
-                    Guardar
-                  </button>
-                  <button
-                    onClick={() => handleArchiveCategory(currentCat.id, currentCat.name)}
-                    style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}
-                  >
-                    Archivar
-                  </button>
-                  {currentCat?.name.trim().toLowerCase() === 'préstamo' && (
-                    <p style={{ font: 'var(--font-caption)', color: 'var(--status-warning)', margin: 0, flexBasis: '100%' }}>
-                      Esta categoría alimenta la detección de préstamos en Deudas — cambiarle el nombre o archivarla desactiva esa función.
-                    </p>
-                  )}
-                </>
-              )
-            })()}
-
-            {categories.length === 0 && (
-              <p style={{ color: 'var(--text-muted)', margin: 0 }}>No hay categorías en el catálogo todavía.</p>
-            )}
-          </div>
-
-          <form onSubmit={handleCreateCategory} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 'var(--space-2)' }}>
-            <span style={{ font: 'var(--font-caption)', color: 'var(--text-muted)' }}>+ Nueva categoría:</span>
-            <input
-              placeholder="Nombre" value={newCategory.name}
-              onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })}
-              style={{ ...formInput, width: 160 }}
-            />
-            <input
-              placeholder="Emoji" value={newCategory.emoji} maxLength={4}
-              onChange={(e) => setNewCategory({ ...newCategory, emoji: e.target.value })}
-              style={{ ...formInput, width: 64, textAlign: 'center' }}
-            />
-            <label style={{ display: 'flex', alignItems: 'center', gap: 4, font: 'var(--font-caption)', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-              <input
-                type="checkbox" checked={newCategory.isAmbiguous}
-                onChange={(e) => setNewCategory({ ...newCategory, isAmbiguous: e.target.checked })}
-              />
-              Ambigua
-            </label>
-            <button
-              type="submit" disabled={creatingCategory}
-              style={{ minHeight: 'var(--touch-target)', padding: '0 var(--space-2)', borderRadius: 10, background: 'var(--series-1)', color: '#fff', fontWeight: 600 }}
-            >
-              Crear
-            </button>
-          </form>
-        </Card>
-
         <Card title="Gasto por categoría">
           {categoryChartData.length === 0 ? (
             <p style={{ color: 'var(--text-muted)' }}>Sin gastos categorizados este mes.</p>
           ) : (
-            <ResponsiveContainer width="100%" height={Math.max(120, categoryChartData.length * 28)}>
+            <ResponsiveContainer width="100%" height={twoColChartHeight}>
               <BarChart data={categoryChartData} layout="vertical" margin={{ left: 8 }}>
                 <CartesianGrid horizontal={false} stroke="var(--gridline)" />
                 <XAxis type="number" hide />
@@ -749,7 +430,7 @@ export default function GastosDiarios() {
           {tagChartData.length === 0 ? (
             <p style={{ color: 'var(--text-muted)' }}>Sin tags registrados este mes.</p>
           ) : (
-            <ResponsiveContainer width="100%" height={Math.max(120, tagChartData.length * 28)}>
+            <ResponsiveContainer width="100%" height={twoColChartHeight}>
               <BarChart data={tagChartData} layout="vertical" margin={{ left: 8 }}>
                 <CartesianGrid horizontal={false} stroke="var(--gridline)" />
                 <XAxis type="number" hide />
@@ -837,112 +518,6 @@ export default function GastosDiarios() {
           </Card>
         )}
 
-        <Card title="Buscar movimientos" className="span-3">
-          <p style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', margin: '0 0 var(--space-1)' }}>
-            Busca en todo el histórico, no solo en el mes activo arriba — ej. "todos los Rappi de este año".
-          </p>
-          <form onSubmit={handleSearch} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 'var(--space-2)' }}>
-            <input
-              placeholder="Descripción contiene…" value={searchFilters.query}
-              onChange={(e) => setSearchFilters({ ...searchFilters, query: e.target.value })}
-              style={{ ...formInput, flex: '2 1 180px', minWidth: 0 }}
-            />
-            <select
-              value={searchFilters.categoryId}
-              onChange={(e) => setSearchFilters({ ...searchFilters, categoryId: e.target.value })}
-              style={{ ...formInput, flex: '1 1 150px', minWidth: 0 }}
-            >
-              <option value="">Todas las categorías</option>
-              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-            <select
-              value={searchFilters.accountId}
-              onChange={(e) => setSearchFilters({ ...searchFilters, accountId: e.target.value })}
-              style={{ ...formInput, flex: '1 1 150px', minWidth: 0 }}
-            >
-              <option value="">Todas las cuentas</option>
-              <option value="pending">Pendiente de banco</option>
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>{a.kind === 'madre' ? `${a.name} (madre)` : a.name}</option>
-              ))}
-            </select>
-            <input
-              placeholder="Tag (ej. rappi)" value={searchFilters.tag}
-              onChange={(e) => setSearchFilters({ ...searchFilters, tag: e.target.value })}
-              style={{ ...formInput, flex: '1 1 120px', minWidth: 0 }}
-            />
-            <input
-              type="date" value={searchFilters.dateFrom}
-              onChange={(e) => setSearchFilters({ ...searchFilters, dateFrom: e.target.value })}
-              style={{ ...formInput, flex: '1 1 140px', minWidth: 0 }}
-            />
-            <input
-              type="date" value={searchFilters.dateTo}
-              onChange={(e) => setSearchFilters({ ...searchFilters, dateTo: e.target.value })}
-              style={{ ...formInput, flex: '1 1 140px', minWidth: 0 }}
-            />
-            <button
-              type="submit" disabled={searching}
-              style={{ minHeight: 'var(--touch-target)', padding: '0 var(--space-2)', borderRadius: 10, background: 'var(--series-1)', color: '#fff', fontWeight: 600, opacity: searching ? 0.6 : 1 }}
-            >
-              {searching ? 'Buscando…' : 'Buscar'}
-            </button>
-            {searchResults !== null && (
-              <button type="button" onClick={handleClearSearch} style={{ font: 'var(--font-caption)', color: 'var(--text-muted)' }}>
-                Limpiar
-              </button>
-            )}
-          </form>
-
-          {searchResults !== null && (
-            <>
-              <p style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', margin: '0 0 var(--space-1)' }}>
-                {searchResults.length} resultado(s){searchResults.length === 200 ? ' — mostrando los 200 más recientes, refina la búsqueda para ver más' : ''}.
-              </p>
-              <div className="table-scroll">
-                <table className="simple-table">
-                  <thead>
-                    <tr><th>Fecha</th><th>Descripción</th><th>Monto</th><th>Categoría</th><th>Cuenta</th><th>Tags</th><th></th></tr>
-                  </thead>
-                  <tbody>
-                    {searchResults.map((t) => (
-                      <tr key={t.id}>
-                        <td>{formatDate(t.occurred_at)}</td>
-                        <td>{t.purpose}</td>
-                        <td>{formatByCurrency(t.amount, t.currency)}</td>
-                        <td>{t.categories?.name ?? '—'}</td>
-                        <td>{t.accounts?.name ?? (t.assignment_confirmed ? '— ignorado (sin cuenta) —' : '— pendiente —')}</td>
-                        <td>
-                          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                            <input
-                              style={{ ...cellInput, width: 130 }}
-                              placeholder="tag1, tag2…"
-                              value={tagsDraftByTx[t.id] ?? (t.tags ?? []).join(', ')}
-                              onChange={(e) => setTagsDraftByTx({ ...tagsDraftByTx, [t.id]: e.target.value })}
-                            />
-                            <button
-                              onClick={() => handleSaveTags(t.id)} disabled={savingTagsId === t.id}
-                              style={{ font: 'var(--font-caption)', whiteSpace: 'nowrap' }}
-                            >
-                              {savingTagsId === t.id ? '…' : 'Guardar'}
-                            </button>
-                          </div>
-                        </td>
-                        <td>
-                          <button onClick={() => handleDeleteTx(t)} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button>
-                        </td>
-                      </tr>
-                    ))}
-                    {searchResults.length === 0 && (
-                      <tr><td colSpan={7} style={{ color: 'var(--text-muted)' }}>Sin resultados para esos filtros.</td></tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
-        </Card>
-
         <Card title={`Movimientos — ${MONTH_NAMES[month - 1]} ${year}`} className="span-3">
           {monthTransactions === null ? (
             <p style={{ color: 'var(--text-muted)' }}>Cargando…</p>
@@ -1000,71 +575,50 @@ export default function GastosDiarios() {
           )}
         </Card>
 
-        <Card title="Agregar movimiento manual" className="span-3">
-          <p style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', margin: '0 0 var(--space-1)' }}>
-            Para pruebas, gastos o ingresos puntuales que no vienen del CSV de MonIA (ej. plata que le
-            llegó a una cuenta hija o a la madre fuera del CSV) — se guarda igual que uno importado, con
-            origen "manual".
+        <Card title="Importar CSV de MonIA" className="span-3">
+          <p style={{ font: 'var(--font-subheadline)', color: 'var(--text-secondary)', margin: '0 0 var(--space-2)' }}>
+            Sube el CSV exportado de MonIA y elige el mes/año a importar. Los movimientos ya guardados
+            (por su `id` de MonIA) se detectan y se omiten automáticamente.
           </p>
-          <form onSubmit={handleAddManual} style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            <select
-              value={manualForm.type}
-              onChange={(e) => setManualForm({ ...manualForm, type: e.target.value, accountId: '' })}
-              style={{ ...formInput, width: 110 }}
-            >
-              <option value="gasto">Gasto</option>
-              <option value="ingreso">Ingreso</option>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 'var(--space-2)' }}>
+            <select value={month} onChange={(e) => setMonth(Number(e.target.value))} style={formInput}>
+              {MONTH_NAMES.map((name, i) => <option key={name} value={i + 1}>{name}</option>)}
             </select>
             <input
-              type="date" value={manualForm.date}
-              onChange={(e) => setManualForm({ ...manualForm, date: e.target.value })}
-              style={formInput}
+              type="number" value={year} onChange={(e) => setYear(Number(e.target.value))}
+              style={{ ...formInput, width: 90 }}
             />
-            <input
-              placeholder="Descripción" value={manualForm.purpose}
-              onChange={(e) => { setManualForm({ ...manualForm, purpose: e.target.value }); setManualSuggestion(false) }}
-              onBlur={handleManualPurposeBlur}
-              style={{ ...formInput, flex: '1 1 160px', minWidth: 0 }}
-            />
-            <input
-              type="number" placeholder={manualCurrency === 'COP' ? 'Monto' : `Monto (${manualCurrency})`}
-              value={manualForm.amount}
-              onChange={(e) => setManualForm({ ...manualForm, amount: e.target.value })}
-              style={{ ...formInput, width: manualCurrency === 'COP' ? 120 : 150 }}
-            />
-            <select
-              value={manualForm.categoryId}
-              onChange={(e) => { setManualForm({ ...manualForm, categoryId: e.target.value }); setManualSuggestion(false) }}
-              style={{ ...formInput, flex: '1 1 150px', minWidth: 0 }}
-            >
-              <option value="">Sin categoría</option>
-              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-            <select
-              value={manualForm.accountId}
-              onChange={(e) => setManualForm({ ...manualForm, accountId: e.target.value })}
-              style={{ ...formInput, flex: '1 1 150px', minWidth: 0 }}
-            >
-              <option value="">Pendiente de banco</option>
-              {(manualForm.type === 'ingreso' ? accounts : hijas).map((a) => (
-                <option key={a.id} value={a.id}>{a.kind === 'madre' ? `${a.name} (madre)` : a.name}</option>
-              ))}
-            </select>
-            <input
-              placeholder="Tag (opcional)" value={manualForm.tag}
-              onChange={(e) => setManualForm({ ...manualForm, tag: e.target.value })}
-              style={{ ...formInput, width: 130 }}
-            />
-            <button
-              type="submit" disabled={savingManual}
-              style={{ minHeight: 'var(--touch-target)', padding: '0 var(--space-2)', borderRadius: 10, background: 'var(--series-1)', color: '#fff', fontWeight: 600, opacity: savingManual ? 0.6 : 1 }}
-            >
-              {savingManual ? 'Guardando…' : manualForm.type === 'ingreso' ? 'Agregar ingreso' : 'Agregar gasto'}
-            </button>
-          </form>
-          {manualSuggestion && (
-            <p style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', margin: 'var(--space-1) 0 0' }}>
-              Categoría y tag sugeridos de tu historial — podés cambiarlos antes de guardar.
+            <label style={{
+              minHeight: 'var(--touch-target)', display: 'inline-flex', alignItems: 'center', padding: '0 var(--space-2)',
+              borderRadius: 10, background: 'var(--series-1)', color: '#fff', fontWeight: 600, cursor: 'pointer',
+            }}>
+              Elegir archivo CSV
+              <input type="file" accept=".csv" onChange={handleFileChange} style={{ display: 'none' }} />
+            </label>
+            {csvFileName && <span style={{ font: 'var(--font-caption)', color: 'var(--text-muted)' }}>{csvFileName}</span>}
+          </div>
+
+          {csvRows && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <p style={{ font: 'var(--font-subheadline)', margin: 0 }}>
+                {matchingCount} movimiento(s) encontrados para {MONTH_NAMES[month - 1]} {year} en el archivo.
+              </p>
+              <button
+                onClick={handleImport} disabled={importing || matchingCount === 0}
+                style={{
+                  minHeight: 'var(--touch-target)', padding: '0 var(--space-2)', borderRadius: 10,
+                  background: 'var(--series-3)', color: '#fff', fontWeight: 600, opacity: importing ? 0.6 : 1,
+                }}
+              >
+                {importing ? 'Importando…' : 'Importar'}
+              </button>
+            </div>
+          )}
+
+          {importResult && (
+            <p style={{ font: 'var(--font-subheadline)', color: 'var(--status-good)', marginTop: 'var(--space-1)' }}>
+              {importResult.imported} movimiento(s) nuevo(s) importado(s), {importResult.skipped} ya existían y se omitieron.
             </p>
           )}
         </Card>
@@ -1078,16 +632,6 @@ export default function GastosDiarios() {
         destructive
         onConfirm={doDeleteTx}
         onCancel={() => setConfirmDeleteTx(null)}
-      />
-
-      <ConfirmDialog
-        open={!!confirmArchiveCategory}
-        title={`¿Archivar la categoría "${confirmArchiveCategory?.name}"?`}
-        message="Se archiva y deja de sugerirse; el historial de movimientos ya categorizados no se pierde."
-        confirmLabel="Archivar"
-        destructive
-        onConfirm={doArchiveCategory}
-        onCancel={() => setConfirmArchiveCategory(null)}
       />
     </div>
   )

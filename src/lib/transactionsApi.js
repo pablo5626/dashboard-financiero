@@ -31,6 +31,20 @@ export function normalizeTag(tag) {
   return tag.trim().toLowerCase().replace(/_/g, ' ')
 }
 
+// Un tag que coincide con IGNORED_TAGS o con el nombre de una cuenta hija
+// activa no rompe nada técnicamente, pero para una fila cargada a mano con
+// cuenta ya explícita ese vocabulario no cumple ningún propósito de
+// asignación (eso solo importa para filas de CSV sin cuenta) — silenciosamente
+// sacaría la fila del gráfico "gasto por tag" o la marcaría como movimiento
+// ya contabilizado en otro lado (isIgnoredRow). Solo se usa para avisar, no
+// para bloquear.
+export function isReservedTag(tag, accounts) {
+  const normalized = normalizeTag(tag)
+  if (!normalized) return false
+  if (IGNORED_TAGS.includes(normalized)) return true
+  return accounts.some((a) => a.kind === 'hija' && a.name.toLowerCase() === normalized)
+}
+
 // Misma idea que normalizeTag pero para el texto de descripción (purpose),
 // usada para matchear una descripción repetida contra sí misma en
 // purpose_category_stats y en detectRecurringCandidates.
@@ -342,6 +356,55 @@ export async function backfillPurposeCategoryStats() {
   return observations.length
 }
 
+// Descripciones recientes para mostrar como chips tocables en la carga
+// rápida del día (Diario.jsx) — a diferencia de suggestCategoryForPurpose
+// (que sugiere en silencio al perder el foco), esto es una lista visible
+// para elegir de un toque. Trae las últimas 200 filas y deduplica client-side
+// por descripción normalizada, conservando la ocurrencia más reciente (con
+// mayúsculas reales, ya que purpose_category_stats solo guarda la versión en
+// minúscula). Una sola consulta al montar la página, sin re-consultar por
+// cada tecla que el usuario escriba.
+export async function listRecentPurposes(limit = 40) {
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('purpose, category_id, tags, occurred_at')
+    .order('occurred_at', { ascending: false })
+    .limit(200)
+  if (error) throw error
+
+  const seen = new Set()
+  const result = []
+  for (const row of data) {
+    if (!row.purpose?.trim()) continue
+    const key = normalizePurpose(row.purpose)
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push({ purpose: row.purpose, categoryId: row.category_id, tag: row.tags?.[0] ?? null })
+    if (result.length >= limit) break
+  }
+  return result
+}
+
+// Conteo de uso por categoría (últimos 90 días, gastos no ignorados) para
+// que Diario.jsx pueda mostrar las categorías más usadas primero en la
+// grilla, en vez de forzar solo el orden alfabético fijo.
+export async function listCategoryUsageCounts(daysBack = 90) {
+  const start = new Date(Date.now() - daysBack * 86400000).toISOString().slice(0, 10)
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('category_id, tags')
+    .gte('occurred_at', start)
+    .not('category_id', 'is', null)
+  if (error) throw error
+
+  const counts = {}
+  for (const row of data) {
+    if (isIgnoredRow(row.tags)) continue
+    counts[row.category_id] = (counts[row.category_id] ?? 0) + 1
+  }
+  return counts
+}
+
 export async function createManualTransaction({ purpose, amount, occurredAt, categoryId, accountId, tags, currency }) {
   const { data, error } = await supabase.from('transactions').insert({
     monia_id: `manual-${generateLocalId()}`,
@@ -426,6 +489,25 @@ export async function updateTransactionTags(id, tags) {
   const cleaned = [...new Set(tags.map(normalizeTag).filter(Boolean))]
   const { error } = await supabase.from('transactions').update({ tags: cleaned }).eq('id', id)
   if (error) throw error
+}
+
+// Edición genérica de una transacción ya guardada (usada por la fila
+// editable de "Movimientos de hoy" en Diario.jsx) — a diferencia de
+// updateTransactionTags, cubre monto/categoría/cuenta/descripción/tags
+// juntos en un solo update. Cada campo es opcional: solo se manda al
+// update el que venga definido, mismo patrón "passthrough" que
+// categoriesApi.updateCategory.
+export async function updateTransaction(id, { purpose, amount, categoryId, accountId, currency, tags } = {}) {
+  const fields = {}
+  if (purpose !== undefined) fields.purpose = purpose
+  if (amount !== undefined) fields.amount = amount
+  if (categoryId !== undefined) fields.category_id = categoryId || null
+  if (accountId !== undefined) fields.account_id = accountId || null
+  if (currency !== undefined) fields.currency = currency
+  if (tags !== undefined) fields.tags = [...new Set(tags.map(normalizeTag).filter(Boolean))]
+  const { data, error } = await supabase.from('transactions').update(fields).eq('id', id).select().single()
+  if (error) throw error
+  return data
 }
 
 // Sugerencias de cuenta por categoría, ordenadas por frecuencia de
@@ -536,6 +618,42 @@ export async function listTransactionsForMonth(year, month) {
   return data
 }
 
+// Movimientos de un solo día (Diario.jsx, que se abre muchas veces al día
+// específicamente para ver "hoy") — un rango de un día en vez de reusar
+// listTransactionsForMonth filtrado client-side, para no traer el mes entero
+// cada vez que se monta esta página. `dateStr` debe venir en el mismo
+// formato/zona horaria que occurredAt al guardar (ver Diario.jsx: today()
+// usa la fecha calendario en UTC, igual que QuickCaptureFAB), para que un
+// movimiento recién guardado siempre caiga dentro del rango que se consulta.
+export async function listTransactionsForDay(dateStr) {
+  const start = dateStr
+  const next = new Date(`${dateStr}T00:00:00Z`)
+  next.setUTCDate(next.getUTCDate() + 1)
+  const end = next.toISOString().slice(0, 10)
+
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('*, categories(name), accounts(name)')
+    .gte('occurred_at', start).lt('occurred_at', end)
+    .order('occurred_at', { ascending: false })
+  if (error) throw error
+  return data
+}
+
+// Rango de fechas liviano (sin joins) para agregados client-side, ej. la
+// tendencia de los últimos N días en Diario.jsx — a diferencia de
+// listTransactionsForDay/listTransactionsForMonth, que traen la fila
+// completa con categories(name)/accounts(name) para listarla en una tabla.
+export async function listTransactionsForRange(startDateStr, endDateStrExclusive) {
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('occurred_at, amount, currency, tags')
+    .gte('occurred_at', startDateStr).lt('occurred_at', endDateStrExclusive)
+    .order('occurred_at', { ascending: true })
+  if (error) throw error
+  return data
+}
+
 // Gastos (amount < 0) de los últimos monthsBack meses (incluyendo el actual),
 // para detección de patrones — no incluye ingresos, que no aplican a "gasto
 // fijo recurrente". Solo filas en COP: el detector promedia montos y
@@ -621,7 +739,7 @@ export async function listUnreviewedLoanTransactions(categoryId) {
   if (!categoryId) return []
   const { data, error } = await supabase
     .from('transactions')
-    .select('id, purpose, amount, occurred_at')
+    .select('id, purpose, amount, occurred_at, currency')
     .eq('category_id', categoryId)
     .eq('loan_reviewed', false)
     .lt('amount', 0)

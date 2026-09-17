@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { IconPlus, IconClose, IconMic } from './icons.jsx'
+import { IconPlus, IconClose, IconMic, IconSearch } from './icons.jsx'
+import CategoryEmojiGrid from './CategoryEmojiGrid.jsx'
+import AccountAutocomplete from './AccountAutocomplete.jsx'
 import { listAccounts } from '../lib/accountsApi.js'
 import { listCategories } from '../lib/categoriesApi.js'
-import { createManualTransaction, suggestCategoryForPurpose } from '../lib/transactionsApi.js'
+import { createManualTransaction, suggestCategoryForPurpose, listRecentPurposes } from '../lib/transactionsApi.js'
 import { createTransfers } from '../lib/transfersApi.js'
 import { supabase } from '../lib/supabaseClient.js'
 import styles from './QuickCaptureFAB.module.css'
@@ -53,12 +55,14 @@ const emptyForm = {
 // dispara el reload() completo de la página que esté montada debajo — solo
 // refresca el badge de pendientes de AppShell via onSaved; cada página
 // recoge el dato nuevo la próxima vez que monte, sin store global.
-export default function QuickCaptureFAB({ onSaved }) {
+export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
   const [open, setOpen] = useState(false)
   const [accounts, setAccounts] = useState([])
   const [categories, setCategories] = useState([])
+  const [recentPurposes, setRecentPurposes] = useState([])
   const [form, setForm] = useState(emptyForm)
   const [showMore, setShowMore] = useState(false)
+  const [tagOpen, setTagOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(false)
@@ -71,11 +75,13 @@ export default function QuickCaptureFAB({ onSaved }) {
     if (!open || accounts.length > 0) return
     listAccounts().then(setAccounts).catch((err) => setError(err.message))
     listCategories().then(setCategories).catch(() => {})
+    listRecentPurposes().then(setRecentPurposes).catch(() => {})
   }, [open, accounts.length])
 
   function reset(mode) {
     setForm({ ...emptyForm, mode: mode ?? form.mode })
     setShowMore(false)
+    setTagOpen(false)
     setError(null)
     setPurposeSuggestion(false)
   }
@@ -118,9 +124,36 @@ export default function QuickCaptureFAB({ onSaved }) {
     && form.fromAccountId && form.fromAccountId !== madreId
     && form.toAccountId && form.toAccountId !== madreId)
 
+  // La categoría es obligatoria para gasto/ingreso (a diferencia de la
+  // cuenta, que puede quedar "pendiente de banco") — decisión explícita del
+  // usuario tras ver que MonIA nunca deja guardar sin categoría.
   const canSubmit = form.mode === 'transferencia'
     ? !!(form.fromAccountId && form.toAccountId && form.amount && (!crossCurrency || form.toAmount))
-    : !!form.amount
+    : !!(form.amount && form.categoryId)
+
+  // Reordena el catálogo completo de categorías (nunca lo recorta) para que
+  // las que calzan con lo tipeado en Descripción queden primero en la fila
+  // deslizable — mismo dato que Diario.jsx (recentPurposes), pero acá
+  // reordena en vez de armar una lista corta de chips aparte: es una sola
+  // fila de CategoryEmojiGrid, siempre completa, nunca hace falta un botón
+  // "+" para ver el resto. Sigue siendo una sugerencia tocable, nunca se
+  // auto-selecciona sola — el usuario siempre confirma.
+  const purposeQuery = form.purpose.trim().toLowerCase()
+  const matchingPurposes = purposeQuery
+    ? recentPurposes.filter((p) => p.purpose.toLowerCase().includes(purposeQuery))
+    : recentPurposes
+  const priorityCategoryIds = []
+  for (const p of matchingPurposes) {
+    if (p.categoryId && !priorityCategoryIds.includes(p.categoryId)) priorityCategoryIds.push(p.categoryId)
+  }
+  const sortedCategories = [...categories].sort((a, b) => {
+    const ai = priorityCategoryIds.indexOf(a.id)
+    const bi = priorityCategoryIds.indexOf(b.id)
+    if (ai === -1 && bi === -1) return 0
+    if (ai === -1) return 1
+    if (bi === -1) return -1
+    return ai - bi
+  })
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -146,7 +179,11 @@ export default function QuickCaptureFAB({ onSaved }) {
         await createManualTransaction({
           purpose: form.purpose.trim() || (form.mode === 'ingreso' ? 'Ingreso rápido' : 'Gasto rápido'),
           amount: signedAmount,
-          occurredAt: `${form.date}T12:00:00Z`,
+          // Hora real cuando se carga "hoy" (para que listas como
+          // Diario.jsx's "Movimientos de hoy" muestren la hora real de
+          // carga) — mediodía UTC solo como marca neutra cuando se
+          // registra en una fecha pasada, de la que no se conoce la hora.
+          occurredAt: form.date === today() ? new Date().toISOString() : `${form.date}T12:00:00Z`,
           categoryId: form.categoryId || null,
           accountId: form.accountId || null,
           currency,
@@ -191,7 +228,7 @@ export default function QuickCaptureFAB({ onSaved }) {
         purpose: result.purpose || '',
         tag: result.tag || '',
       })
-      setShowMore(true)
+      if (result.tag) setTagOpen(true)
     } catch (err) {
       setVoiceError(err.message)
     } finally {
@@ -223,16 +260,50 @@ export default function QuickCaptureFAB({ onSaved }) {
     recognition.start()
   }
 
+  // Botón de micrófono propio y siempre visible (no solo dentro de la hoja
+  // de "+"), como en la referencia de MonIA — abre la hoja ya en modo
+  // "escuchando" en vez de forzar abrir "+" primero y recién ahí tocar el
+  // micrófono.
+  function handleMicButtonClick() {
+    if (voiceStatus !== 'listening') {
+      reset('gasto')
+      setOpen(true)
+    }
+    startVoiceCapture()
+  }
+
   return (
     <>
-      <button
-        type="button"
-        className={styles.fab}
-        aria-label="Registrar movimiento rápido"
-        onClick={() => setOpen(true)}
-      >
-        <IconPlus width={26} height={26} />
-      </button>
+      <div className={styles.fabCluster}>
+        <button
+          type="button"
+          className={styles.fabSecondary}
+          aria-label="Registrar movimiento rápido"
+          onClick={() => setOpen(true)}
+        >
+          <IconPlus width={22} height={22} />
+        </button>
+        <button
+          type="button"
+          className={styles.fabSecondary}
+          aria-label="Buscar movimientos"
+          onClick={() => onOpenSearch?.()}
+        >
+          <IconSearch width={20} height={20} />
+        </button>
+      </div>
+
+      {SpeechRecognitionCtor && (
+        <button
+          type="button"
+          className={voiceStatus === 'listening' ? `${styles.fabMic} ${styles.micListening}` : styles.fabMic}
+          disabled={voiceStatus === 'processing'}
+          aria-label="Registrar por voz"
+          onClick={handleMicButtonClick}
+        >
+          <IconMic width={26} height={26} />
+        </button>
+      )}
 
       {open && (
         <div className={styles.backdrop} onClick={close}>
@@ -263,29 +334,18 @@ export default function QuickCaptureFAB({ onSaved }) {
                   ))}
                 </div>
 
-                <div className={styles.amountRow}>
-                  <input
-                    type="number" inputMode="decimal" autoFocus placeholder="Monto"
-                    value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })}
-                    className={styles.amountInput}
-                  />
-                  {form.mode !== 'transferencia' && SpeechRecognitionCtor && (
-                    <button
-                      type="button"
-                      className={voiceStatus === 'listening' ? `${styles.micButton} ${styles.micListening}` : styles.micButton}
-                      disabled={voiceStatus === 'processing'}
-                      onClick={startVoiceCapture}
-                      aria-label="Registrar por voz"
-                    >
-                      <IconMic width={20} height={20} />
-                    </button>
-                  )}
-                </div>
                 {voiceStatus === 'processing' && <p className={styles.voiceHint}>Interpretando…</p>}
                 {voiceError && <p className={styles.error}>{voiceError}</p>}
 
                 {form.mode === 'transferencia' ? (
                   <>
+                    <div className={styles.amountRow}>
+                      <input
+                        type="number" inputMode="decimal" autoFocus placeholder="Monto"
+                        value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                        className={styles.amountInput}
+                      />
+                    </div>
                     <div className={styles.chipRow}>
                       <span className={styles.chipLabel}>Desde</span>
                       {accounts.map((a) => (
@@ -331,73 +391,93 @@ export default function QuickCaptureFAB({ onSaved }) {
                         Descuenta del presupuesto de origen
                       </label>
                     )}
+
+                    <button type="button" className={styles.moreToggle} onClick={() => setShowMore((v) => !v)}>
+                      {showMore ? 'Menos opciones' : 'Más opciones'}
+                    </button>
+                    {showMore && (
+                      <div className={styles.moreFields}>
+                        <input
+                          placeholder="Nota (opcional)" value={form.note}
+                          onChange={(e) => setForm({ ...form, note: e.target.value })}
+                          className={styles.textInput}
+                        />
+                        <input
+                          type="date" value={form.date}
+                          onChange={(e) => setForm({ ...form, date: e.target.value })}
+                          className={styles.textInput}
+                        />
+                      </div>
+                    )}
+
+                    {error && <p className={styles.error}>{error}</p>}
+                    <button type="submit" disabled={!canSubmit || saving} className={styles.submit}>
+                      {saving ? 'Guardando…' : 'Guardar'}
+                    </button>
                   </>
                 ) : (
-                  <div className={styles.chipRow}>
-                    {accountOptions.map((a) => (
-                      <button
-                        key={a.id} type="button"
-                        className={form.accountId === a.id ? `${styles.chip} ${styles.chipActive}` : styles.chip}
-                        onClick={() => setForm({ ...form, accountId: form.accountId === a.id ? '' : a.id })}
-                      >
-                        {a.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                  <>
+                    <input
+                      placeholder="Descripción" value={form.purpose} autoFocus
+                      onChange={(e) => { setForm({ ...form, purpose: e.target.value }); setPurposeSuggestion(false) }}
+                      onBlur={handlePurposeBlur}
+                      className={styles.bigInput}
+                    />
+                    <input
+                      type="number" inputMode="decimal" placeholder="Monto"
+                      value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                      className={styles.bigInput}
+                    />
 
-                <button type="button" className={styles.moreToggle} onClick={() => setShowMore((v) => !v)}>
-                  {showMore ? 'Menos opciones' : 'Más opciones'}
-                </button>
+                    <AccountAutocomplete
+                      accounts={accountOptions}
+                      value={form.accountId}
+                      onChange={(id) => setForm({ ...form, accountId: id })}
+                      placeholder="Cuenta"
+                    />
 
-                {showMore && (
-                  <div className={styles.moreFields}>
-                    {form.mode !== 'transferencia' && (
-                      <>
-                        <input
-                          placeholder="Descripción (opcional)" value={form.purpose}
-                          onChange={(e) => { setForm({ ...form, purpose: e.target.value }); setPurposeSuggestion(false) }}
-                          onBlur={handlePurposeBlur}
-                          className={styles.textInput}
-                        />
-                        <select
-                          value={form.categoryId}
-                          onChange={(e) => { setForm({ ...form, categoryId: e.target.value }); setPurposeSuggestion(false) }}
-                          className={styles.textInput}
-                        >
-                          <option value="">Sin categoría</option>
-                          {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                        </select>
-                        <input
-                          placeholder="Tag (opcional)" value={form.tag}
-                          onChange={(e) => setForm({ ...form, tag: e.target.value })}
-                          className={styles.textInput}
-                        />
-                        {purposeSuggestion && (
-                          <p className={styles.voiceHint}>Sugerido de tu historial — podés cambiarlo antes de guardar.</p>
-                        )}
-                      </>
+                    <CategoryEmojiGrid
+                      categories={sortedCategories}
+                      selectedId={form.categoryId}
+                      onSelect={(id) => { setForm({ ...form, categoryId: id === form.categoryId ? '' : id }); setPurposeSuggestion(false) }}
+                    />
+                    {purposeSuggestion && (
+                      <p className={styles.voiceHint}>Sugerido de tu historial — podés cambiarlo antes de guardar.</p>
                     )}
-                    {form.mode === 'transferencia' && (
+
+                    {tagOpen && (
                       <input
-                        placeholder="Nota (opcional)" value={form.note}
-                        onChange={(e) => setForm({ ...form, note: e.target.value })}
+                        placeholder="Tag (opcional)" value={form.tag} autoFocus
+                        onChange={(e) => setForm({ ...form, tag: e.target.value })}
                         className={styles.textInput}
                       />
                     )}
-                    <input
-                      type="date" value={form.date}
-                      onChange={(e) => setForm({ ...form, date: e.target.value })}
-                      className={styles.textInput}
-                    />
-                  </div>
+
+                    {error && <p className={styles.error}>{error}</p>}
+                    {form.amount && !form.categoryId && (
+                      <p className={styles.hintCaption}>Elegí una categoría para poder guardar.</p>
+                    )}
+
+                    <div className={styles.bottomRow}>
+                      <button
+                        type="button"
+                        className={tagOpen ? `${styles.tagToggle} ${styles.tagToggleActive}` : styles.tagToggle}
+                        onClick={() => setTagOpen((v) => !v)}
+                        aria-label="Agregar tag"
+                      >
+                        #
+                      </button>
+                      <input
+                        type="date" value={form.date}
+                        onChange={(e) => setForm({ ...form, date: e.target.value })}
+                        className={styles.dateInput}
+                      />
+                      <button type="submit" disabled={!canSubmit || saving} className={`${styles.submit} ${styles.submitInline}`}>
+                        {saving ? 'Guardando…' : 'Guardar'}
+                      </button>
+                    </div>
+                  </>
                 )}
-
-                {error && <p className={styles.error}>{error}</p>}
-
-                <button type="submit" disabled={!canSubmit || saving} className={styles.submit}>
-                  {saving ? 'Guardando…' : 'Guardar'}
-                </button>
               </form>
             )}
           </div>

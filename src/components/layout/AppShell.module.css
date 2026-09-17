@@ -29,6 +29,7 @@
 
 .tabItem {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -37,6 +38,13 @@
   min-height: var(--touch-target);
   color: var(--text-muted);
   font: var(--font-caption);
+}
+
+.tabItem span:last-child {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tabItem.active {

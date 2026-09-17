@@ -158,12 +158,16 @@ Notas:
 - `consumes_budget` va **siempre `true`**, sin preguntarlo — decisión
   confirmada con el usuario para mantener el Shortcut en 3 prompts (el caso
   más común es mover plata para gastarla desde la otra cuenta). Si alguna
-  vez es solo reacomodo entre bolsillos sin gastar, se corrige borrando y
-  recreando la transferencia desde `TransferHistorySection` en la app — una
-  transferencia no tiene UI de edición, ese es el mecanismo de corrección
-  para cualquier campo, no solo este. `sumOutgoingByAccount` ya ignora las
-  transferencias hacia la madre, así que devolver plata a Bold no infla el
-  "% usado" aunque el flag vaya en `true`.
+  vez es solo reacomodo entre bolsillos sin gastar, ya no hace falta borrar y
+  recrear la transferencia: `TransferHistorySection` tiene un checkbox
+  inline en la tabla (mismo criterio que al crear — solo en filas donde
+  ninguna punta es la madre) que llama a `transfersApi.updateConsumesBudget`
+  y recarga al instante. Es la única excepción a "una transferencia no tiene
+  UI de edición" — todo el resto de los campos de una transferencia sigue
+  sin edición, y borrar + recrear sigue siendo el mecanismo de corrección
+  para esos. `sumOutgoingByAccount` ya ignora las transferencias hacia la
+  madre, así que devolver plata a Bold no infla el "% usado" aunque el flag
+  vaya en `true`.
 - `idempotency_key`: se genera de nuevo en **cada ejecución** (la fecha con
   milisegundos basta; no hace falta ninguna acción de número aleatorio).
   `?on_conflict=user_id,idempotency_key` + `Prefer:
@@ -176,6 +180,12 @@ Notas:
   desde las 7 p. m. en Bogotá ya es el día siguiente.
 - Si los menús salen vacíos, el login falló (email o contraseña mal escritos
   en el paso 1): sin `access_token`, RLS devuelve `[]` en vez de un error.
+- El botón "Confirmar transferencia real" del ritual mensual
+  (`MonthlyAllocationSection.jsx`, dentro de la app) ahora usa exactamente
+  este mismo patrón upsert + `ignoreDuplicates` — con una `idempotency_key`
+  determinística por madre+hija+año+mes (`transfersApi.buildMonthlyAllocationKey`)
+  en vez de una con milisegundos — para protegerse de un doble click, una
+  recarga con estado viejo, o dos pestañas confirmando el mismo mes.
 
 ## Cambio de esquema requerido
 

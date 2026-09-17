@@ -9,10 +9,13 @@ A personal financial dashboard (React + Supabase) built from the spec in
 (sections, data model rationale, multi-currency, the MonIA CSV import flow).
 The Supabase schema lives in `schema.sql` and is the source of truth for the
 database; any schema change goes there, not only in the Supabase dashboard.
-**All 5 sections are now fully wired to Supabase** (see "Current state of
-the 5 sections" below) — there is no more sample-data scaffolding left in
+**All 6 sections are now fully wired to Supabase** (see "Current state of
+the 6 sections" below) — there is no more sample-data scaffolding left in
 the app (`src/lib/sampleData.js` was deleted once the last section was
-connected).
+connected). `Diario.jsx` (the 6th, added later) is the one exception to
+"fully replaces sample data" in spirit only in that it's an additive native
+day-to-day entry page run in **hybrid mode** alongside the pre-existing
+MonIA CSV import — see its entry under "Current state" for why.
 
 Detailed, already-decided project rules live in `.claude/rules/*.md` — one
 topic per file (nomenclature, data-model conventions, the bank-assignment
@@ -126,7 +129,7 @@ source's budget) from "just rebalancing pockets" (doesn't).
 
 **Stack**: Vite + React 18, plain JSX (no TypeScript), plain CSS with custom
 properties for design tokens + CSS Modules per component (no Tailwind),
-`react-router-dom` for the 5 top-level sections, Recharts for charts,
+`react-router-dom` for the 6 top-level sections, Recharts for charts,
 `@supabase/supabase-js` as the only data backend (no separate REST API),
 `papaparse` for parsing the MonIA CSV client-side.
 
@@ -158,7 +161,7 @@ was noticeably slow on mobile — see `handleToggleInstallment` in
 `Deudas.jsx` for the pattern to copy if another action needs the same fix.
 
 **Navigation / responsive layout**: `src/components/layout/AppShell.jsx`
-defines the 5 destinations (`NAV_ITEMS`) once and renders them as a bottom
+defines the 6 destinations (`NAV_ITEMS`) once and renders them as a bottom
 tab bar below 768px and a sidebar at/above it — `App.jsx`'s `<Routes>` must
 stay in sync with that list if a section is ever added/renamed/removed.
 The layout follows iOS HIG conventions adapted to web (safe-area insets,
@@ -279,33 +282,65 @@ in the UI, see `CURRENCIES` in `format.js`); `transactions`,
 `debts`, `fixed_expenses`, and `savings_goals` each carry their own
 `currency` too. `arq` isn't a simple USD account — it's a multi-currency
 account (several manually-tracked pockets) whose USD and EUR pockets are
-each modeled as their own `accounts` row. Exchange rates are **one row per
-currency pair** in `exchange_rates` (`base_currency`/`quote_currency`/
-`rate`, unique per `(user_id, base_currency, quote_currency)`), edited
-from a "Tasa de cambio" card in `Cuentas.jsx` via
-`exchangeRatesApi.getRates`/`setRate(base, quote, rate)` — up to 3 pairs in
-practice (COP↔USD, COP↔EUR, USD↔EUR); the USD↔EUR pair is stored directly
-rather than derived by crossing the two COP rates, since a real USD→EUR
-exchange (the most common cross-currency movement) doesn't necessarily
-match a rate computed by pivoting through COP. A `(base, quote, rate)` row
-always means "1 `quote` = `rate` `base`" (e.g. `base='COP'`,
-`quote='USD'`, `rate=4000` → "1 USD = 4000 COP"), consistently across all
-3 pairs — so the "Tasa de cambio" card's third row, `(base='USD',
-quote='EUR')`, reads "1 EUR = rate USD" (e.g. `rate=1.16` → 1 EUR = 1.16
-USD). **This bit us once already**: a user-quoted "dollar to euro" rate
-(e.g. "0.86", meaning "1 USD buys 0.86 EUR") is the *reciprocal* of what
-this field expects — it must be entered as `1 / 0.86 ≈ 1.16`, not typed in
-as-is. There's no validation catching an inverted rate (any positive
-number is "valid"), so double-check which direction a quoted rate is in
-before saving it here. `exchangeRatesApi.toCOP`
+each modeled as their own `accounts` row (this stays true — grouping them
+visually, see below, never merges the underlying rows). Exchange rates are
+**one row per currency pair** in `exchange_rates` (`base_currency`/
+`quote_currency`/`rate`, unique per `(user_id, base_currency,
+quote_currency)`), edited via `exchangeRatesApi.getRates`/`setRate(base,
+quote, rate)` — up to 3 pairs in practice (COP↔USD, COP↔EUR, USD↔EUR); the
+USD↔EUR pair is stored directly rather than derived by crossing the two COP
+rates, since a real USD→EUR exchange (the most common cross-currency
+movement) doesn't necessarily match a rate computed by pivoting through
+COP. **There is no standalone "Tasa de cambio" card anymore** — it was
+removed because a rate floating in its own disconnected card, unrelated to
+any account on screen, didn't read as belonging to anything. Each rate row
+now renders contextually via `Cuentas.jsx`'s local `renderRateRow(base,
+quote)` helper, directly inside the card of whichever account(s) use that
+currency: any hija whose `currency !== 'COP'` shows its own "1 `currency` =
+? COP" row inline, and if a currency-group (see below) contains both a USD
+and an EUR pocket, that group's card additionally shows the USD↔EUR cross
+rate. A `(base, quote, rate)` row always means "1 `quote` = `rate` `base`"
+(e.g. `base='COP'`, `quote='USD'`, `rate=4000` → "1 USD = 4000 COP"),
+consistently across all 3 pairs — so the USD/EUR row reads "1 EUR = rate
+USD" (e.g. `rate=1.16` → 1 EUR = 1.16 USD). **This bit us once already**: a
+user-quoted "dollar to euro" rate (e.g. "0.86", meaning "1 USD buys 0.86
+EUR") is the *reciprocal* of what this field expects — it must be entered
+as `1 / 0.86 ≈ 1.16`, not typed in as-is. There's no validation catching an
+inverted rate (any positive number is "valid"), so double-check which
+direction a quoted rate is in before saving it here. `exchangeRatesApi.toCOP`
 (used for consolidated totals in Panel General/Deudas) and the generic
 `convertAmount(amount, from, to, rates)` it's built on both take the full
 `rates` array rather than a single scalar, and look up the matching pair
 (or its inverse) each time; if no rate is configured for a given
 non-COP currency, `toCOP` returns `0` rather than inventing a conversion,
 so that currency's balances are silently excluded from consolidated totals
-until the user sets it — a warning is shown on the Cuentas card when this
-is the case. A dedicated `CurrencyExchangeSection.jsx` widget (rendered in
+until the user sets it — a warning banner above the accounts grid in
+`Cuentas.jsx` surfaces this case (moved there when the standalone rate card
+was removed, same underlying check).
+
+**Grouping sibling-currency accounts into one card (`accounts.currency_group_id`)**:
+`Cuentas.jsx` can now display two or more `accounts` rows that represent
+"the same real account, different currency pockets" (the running example is
+always `arq`/`arq eur`) as a single card with a currency-pill switcher,
+instead of one card per row. This is **purely a display grouping** — every
+underlying invariant in this file (one `accounts` row per currency, its own
+balance/transactions/`monthly_initial_balances`, matched by
+`fetchBalancesForMonth`/`getAccountFlowsForMonth` exactly as documented
+above) is untouched; `accountsApi.js`, the bank-assignment engine,
+`transfersApi.js`, and every other money-math function have **zero
+awareness** of this grouping and don't need any. The link is set via
+`accountsApi.setCurrencyGroup(accountId, primaryAccountId)` (or `null` to
+ungroup), exposed as a "¿Es otra moneda de...?" `<select>` in each account's
+edit form — set on the *secondary* row, pointing at the *primary* row's id
+(e.g., `arq eur`'s `currency_group_id` = `arq`'s `id`). `Cuentas.jsx`
+computes `groupKey = row.currency_group_id ?? row.id` and groups hijas by
+that key; since a row can only reference an *already-existing* account's
+id, the primary always sorts first within its group (`listAccounts`'s
+`created_at asc` order), so `group[0]` is always safely assumed to be the
+primary when rendering the card title. A local `activePocket` state
+(`{ [groupKey]: accountId }`) tracks which pocket's balance/%usado/rate row
+is currently shown; switching pockets is instant (no refetch, the data for
+every pocket in the group was already loaded). A dedicated `CurrencyExchangeSection.jsx` widget (rendered in
 `Cuentas.jsx`, above `TransferHistorySection`) exists specifically to
 register a currency swap between two accounts quickly: it prefills the
 destination amount via `convertAmount` using whatever rate is configured
@@ -438,16 +473,44 @@ of the component. Copy this pattern for any new delete/destructive action
 instead of reaching for `window.confirm`.
 
 **Quick capture (FAB) + voice input**: `QuickCaptureFAB.jsx`, mounted in
-`AppShell.jsx` on all 5 pages, covers gasto/ingreso/transferencia without
+`AppShell.jsx` on all 6 pages, covers gasto/ingreso/transferencia without
 navigating to `GastosDiarios.jsx`/`Cuentas.jsx` — it calls
 `transactionsApi.createManualTransaction`/`transfersApi.createTransfers`
-directly, the same functions the full pages use. Its microphone button
-(gasto/ingreso modes only, hidden if `window.SpeechRecognition` isn't
-supported) sends a Web Speech API transcript to the `voice-parse` Supabase
-Edge Function (`supabase/functions/voice-parse/index.ts`) — a small Deno
-function with no DB access that calls Claude Haiku 4.5 with the exact
-category/account list and Colombian amount slang rules ("mil"/"lucas"=×1.000,
-"palo(s)"=×1.000.000) and returns
+directly, the same functions the full pages use. **The floating buttons are
+a 3-piece cluster now, not a single "+"**, redesigned to match a MonIA
+screenshot the user shared mid-session: a bottom-left pill with "+" (opens
+the manual-capture sheet, unchanged) and a search icon, and a separate,
+always-visible circular mic button at bottom-right (`styles.fabMic`,
+`var(--series-1)` at rest — kept blue rather than matching the reference's
+warm/red at-rest color, since this app reserves red/`--status-critical` for
+destructive/critical state, turning red only while actively `listening` via
+the pre-existing `.micListening` pulse). Tapping the mic button
+(`handleMicButtonClick`) resets the form, opens the sheet, and starts
+`SpeechRecognition` in one tap — no more opening "+" first and finding a
+smaller mic icon buried inside the amount row (that inline button was
+removed; the standalone one fully replaces it).
+
+**The search icon's behavior was reversed mid-session**: it used to call
+`navigate('/gastos')` as "a shortcut into the existing 'Buscar movimientos'
+card there, deliberately not a new search modal, since one already exists
+and duplicating it wasn't worth the risk" — the user explicitly asked to
+undo that: no redirect, the lupa should open search right where you are.
+`onOpenSearch` is now passed down from `AppShell.jsx` (same reasoning as
+`onSaved`/`refreshPendingCount` — the FAB and the routed page are siblings
+under `AppShell`, not parent/child, so a prop is how they talk), and the
+button calls `onOpenSearch?.()` instead of navigating. `AppShell.jsx` owns
+a `searchOpen` boolean and renders the new `SearchPanel.jsx` (see below)
+alongside `QuickCaptureFAB`/`SettingsPanel`. **`GastosDiarios.jsx`'s inline
+"Buscar movimientos" card was removed once `SearchPanel.jsx` existed** —
+duplicating the same search UI in two places (a page card and a global
+popup) wasn't worth the upkeep once the popup covered the same need from
+anywhere in the app, so this is the one and only copy of the feature now.
+
+Voice capture itself is unchanged: a Web Speech API transcript goes to the
+`voice-parse` Supabase Edge Function (`supabase/functions/voice-parse/index.ts`)
+— a small Deno function with no DB access that calls Claude Haiku 4.5 with
+the exact category/account list and Colombian amount slang rules
+("mil"/"lucas"=×1.000, "palo(s)"=×1.000.000) and returns
 `{ mode, amount, categoryName, accountName, purpose, tag }`; the component
 maps those names to ids via `normalizeName` (accent/case-insensitive) and
 only ever **prefills** the form — same "never guess and save" principle as
@@ -455,10 +518,152 @@ the rest of the app, the user still has to review "Más opciones" and tap
 "Guardar". Unlike `quick-capture` (used by the iOS Shortcuts with no
 session), `voice-parse` is called from the browser with the user's real
 session, so it's deliberately **not** listed in `supabase/config.toml` and
-deploys with default JWT verification. Both this FAB and `GastosDiarios.jsx`'s
-manual-entry form also call `transactionsApi.suggestCategoryForPurpose` on
-blur of the description field — see `purpose_category_stats` under
-"Current state of the 5 sections" → `GastosDiarios.jsx`.
+deploys with default JWT verification.
+
+**A manual transaction saved for "today" now gets the real timestamp**
+(`occurredAt: form.date === today() ? new Date().toISOString() : ...T12:00:00Z`)
+instead of always being hardcoded to `T12:00:00Z` regardless of when it was
+actually entered — that placeholder used to apply unconditionally, so every
+manually-entered row showed the same fixed clock time (noon UTC = 7am
+Bogotá) in any list that renders `occurred_at` as a time, which is
+misleading once a UI actually surfaces hour:minute (see `Diario.jsx`'s
+"Movimientos de hoy" below). Backdating to a past day still falls back to
+the neutral noon marker, since the real time of day for a past date was
+never captured. Fixed in both `QuickCaptureFAB.jsx` and
+`GastosDiarios.jsx`'s (now-removed) manual form at the same time; only the
+FAB's copy survives today since the Gastos manual form no longer exists
+(see below).
+
+This FAB also calls `transactionsApi.suggestCategoryForPurpose` on blur of
+the description field — see `purpose_category_stats` under "Current state
+of the 6 sections" → `GastosDiarios.jsx`.
+
+**The gasto/ingreso sheet layout was also reworked** (transferencia mode is
+untouched — different fields, not part of this pass) to match the same
+MonIA reference and philosophy as `Diario.jsx`, through a couple of
+iterations: **category is now required** to save (`canSubmit` checks
+`form.amount && form.categoryId` for gasto/ingreso; account stays optional,
+since "pendiente de banco" is still a valid outcome for a manual row) — a
+small `styles.hintCaption` line ("Elegí una categoría para poder guardar.")
+explains why the disabled "Guardar" won't respond. Descripción and Monto
+are the first two fields, styled as fully chrome-free `.bigInput`s (no
+border at all, just placeholder-sized text — a thin `border-top` only
+appears between two adjacent `.bigInput`s, as a separator, not a per-field
+box) instead of Monto-first-then-buried-in-"Más opciones". Tag input is
+hidden behind a small "#" toggle button instead of an always-visible field,
+and date moved inline next to "Guardar" in a compact bottom row instead of
+living in "Más opciones" — "Más opciones" itself now only exists for
+transferencia mode (nota + date).
+
+**Category picking and account picking both converged on shared components**
+(also used the same way by `Diario.jsx`, so behavior stays consistent
+across every entry surface):
+- `CategoryEmojiGrid.jsx` is rendered directly (no separate flat "suggested
+  chips" row, no "+" expand toggle — an earlier iteration had both, removed
+  once the grid itself became the single source of truth). Its CSS is a
+  **horizontally-scrollable flex row of vertical tiles**, not a wrapping
+  grid (`display:flex; overflow-x:auto` in `CategoryEmojiGrid.module.css`,
+  changed from the original `grid-template-columns: repeat(auto-fill,...)`)
+  — always shows every category, "swipeable panels" per the user's own
+  words, so there's never a need to hide categories behind a toggle.
+  `QuickCaptureFAB.jsx` reorders (never filters/shortens) the full category
+  list every keystroke in Descripción, putting categories matched via
+  `listRecentPurposes` substring-matching first — same live-reorder idea as
+  before, just expressed as a full reorder feeding the one shared grid
+  instead of a separate short chip list. Selecting the already-selected
+  tile again deselects it (`onSelect` toggles), matching `CategoryEmojiGrid`'s
+  existing toggle behavior in `Diario.jsx`.
+- `src/components/AccountAutocomplete.jsx` (new) replaces the account chip
+  row in both `QuickCaptureFAB.jsx` and `Diario.jsx`: a single text input
+  ("Cuenta") that shows a dropdown of matching accounts as you type
+  (substring match, case-insensitive), same interaction shape as typing a
+  description and getting suggestions. Tapping an option sets the real
+  `accountId` and displays that account's name; typing again after a
+  selection clears `accountId` until a new option is picked (`onChange('')`
+  in `handleChange` — never lets a stale id linger against changed text).
+  Each dropdown option has `onMouseDown={(e) => e.preventDefault()}` so the
+  input doesn't blur (and the dropdown doesn't close) before the click
+  registers — a standard pattern for custom autocomplete/combobox UIs.
+  Chip rows for "Desde"/"Hacia" in `QuickCaptureFAB.jsx`'s transferencia
+  mode are untouched (out of scope, same as the rest of that mode).
+
+**`categories.emoji` is now required when creating a new category** (not
+retroactively enforced on existing categories, or on rename/edit of one
+already missing an emoji) — `SettingsPanel.jsx`'s "+ Nueva categoría" form
+disables "Crear" until both name and emoji are filled
+(`!newCategory.name.trim() || !newCategory.emoji.trim()`), and `handleCreate`
+double-checks the same condition before calling `categoriesApi.createCategory`.
+Rationale: every category created from now on should render with a real icon
+in `CategoryEmojiGrid.jsx`'s horizontally scrollable strip, not the
+letter-hash fallback — existing categories created before this rule keep
+using that fallback until someone manually edits them to add one.
+
+**Global settings drawer (`SettingsPanel.jsx`)**: category management (the
+old "Categorías" card described above, previously on `GastosDiarios.jsx`)
+was pulled out into its own always-mounted component, rendered once in
+`AppShell.jsx` alongside `QuickCaptureFAB` so it's available on every page —
+same "no per-page duplication" reasoning as the FAB. It renders a small
+fixed circular trigger (`aria-label="Ajustes"`, `IconSettings`) — pinned
+top-left (`env(safe-area-inset-top)`-aware, `z-index: 50`) on mobile
+(`< 768px`, tab-bar layout), and **top-right** on tablet/desktop
+(`≥ 768px`, sidebar layout), because top-left there sits right against the
+sidebar's `.brand` logo. Tapping it opens the same backdrop+sheet pattern
+`QuickCaptureFAB` already uses, but **as a two-level menu, not a single
+flat form**: the sheet's root view is a list of section rows
+(`SETTINGS_SECTIONS`, iOS-Settings-style — glyph + label + subtitle +
+chevron), and tapping one drills into that section's content with a "‹
+Ajustes" back button in the header replacing the title. This exists so the
+panel can grow — the user was explicit that categories won't be the only
+thing living here — without the root screen turning into an ever-longer
+single form; adding a new setting later means adding one entry to
+`SETTINGS_SECTIONS` plus its own content block, not restructuring the
+existing ones. Today there's exactly one section, `'categorias'`: the full
+category CRUD (create with emoji/color/`is_ambiguous`, inline edit of
+name/emoji/color/`is_ambiguous`/`monthly_budget`, archive via
+`ConfirmDialog`) and the relocated "Aprender categoría/tag de tu historial"
+backfill button. It deliberately does **not** show a "gastado este mes" figure
+per category (unlike the old card) — a global settings panel has no month/
+page context to compute that against, and re-fetching it just for this
+panel wasn't worth the complexity. Every page that reads categories
+(`GastosDiarios.jsx`, `Diario.jsx`, `QuickCaptureFAB.jsx`) still calls
+`listCategories()` on its own mount/open, same no-global-store pattern as
+everywhere else — an edit made here shows up next time that page/sheet
+loads, not live while both are open simultaneously. Don't add a new section
+to this menu unless the user asks for one.
+
+`ColorSwatchPicker` (previously a component defined locally inside
+`GastosDiarios.jsx`) moved to `src/components/ui/ColorSwatchPicker.jsx` as a
+shared component (used by both `SettingsPanel.jsx` and, historically, the
+old card) and its palette was expanded from the original 8 `--series-N`
+swatches to 16: the same 8 tokens plus a lighter tint of each
+(`color-mix(in srgb, var(--series-N) 55%, white)`), still deriving every
+swatch mechanically from the already-validated palette rather than
+inventing new hex values, per `diseno-ui.md`'s categorical-color rule.
+
+**Global search popup (`SearchPanel.jsx`)**: mounted once in `AppShell.jsx`
+next to `SettingsPanel`/`QuickCaptureFAB`, controlled from there via a
+`searchOpen` boolean (`open`/`onClose` props) — this is the single
+implementation of "search movimientos" now, triggered by the lupa button in
+`QuickCaptureFAB`'s cluster (see "Quick capture" above for why that changed
+from a `navigate('/gastos')` redirect). It's a self-contained backdrop+sheet
+overlay, same visual idiom as `SettingsPanel`/`QuickCaptureFAB`'s sheet, but
+wider (`max-width: 640px` vs. 420-480px) since it holds a filter form plus a
+results list. On open it fetches its own `accounts`/`categories` via
+`listAccounts()`/`listCategories()` (no global store, same pattern as every
+other component here) and calls `transactionsApi.searchTransactions` with
+the same filter shape (`query`, `categoryId`, `accountId`, `tag`,
+`dateFrom`, `dateTo`) the old inline card used, capped at 200 results.
+Editing a result's tags (`updateTransactionTags`) and deleting one
+(`deleteTransaction` behind its own `ConfirmDialog`) both work the same as
+before; deleting here does **not** trigger `dashboard:transactions-changed`
+(see `Diario.jsx` below) since this panel isn't part of the FAB's
+gasto/ingreso/transferencia save path — a page open behind it won't
+auto-refresh from a search-panel deletion today, a known gap if that ever
+matters. `GastosDiarios.jsx`'s own "Buscar movimientos" card and all of its
+dedicated state (`searchFilters`, `searchResults`, `searching`, the
+`?focus=buscar` query-param-driven scroll-and-focus effect that briefly
+existed to jump to it from the lupa) were deleted once this panel existed —
+there's no more search UI on that page at all.
 
 **Every create/log action needs a matching delete**: transactions, savings
 contributions, transfers, accounts, debts (+ installments), fixed
@@ -496,15 +701,109 @@ page's layout enough to look like the browser jumped scroll position. Fix:
 initialize `loading` to `true`, only ever set it `false` (never back to
 `true`) — subsequent reloads swap in new data silently, no blank flash.
 
-**Current state of the 5 sections** (`src/pages/`) — all fully wired to
+**Current state of the 6 sections** (`src/pages/`) — all fully wired to
 Supabase, no sample data left anywhere:
+- **`Diario.jsx`** (route `/diario`, nav between Panel and Cuentas): a
+  dedicated, mobile-first daily-entry page — the start of "Fase 3" from
+  `prompt-dashboard-financiero.md` (native entry to eventually replace
+  MonIA), explicitly run in **hybrid mode** alongside the MonIA CSV import
+  for now, not a replacement yet. Gasto/ingreso only (no transferencia — that
+  stays in Cuentas.jsx/QuickCaptureFAB). **This page has no entry form of
+  its own any more** — the collapsible "Agregar movimiento" card (and its
+  "Foto de recibo" AI button) was removed outright once the floating
+  "+"/mic buttons existed on every page: the user's reasoning was that the
+  "+" already makes it obvious where to add a movement, so a second,
+  collapsed entry point on this specific page was redundant chrome, not a
+  convenience. **This orphaned the receipt-photo feature**: `IconCamera`
+  (`icons.jsx`), `src/lib/imageUtils.js` (`resizeImageFileToBase64`) and the
+  `supabase/functions/receipt-parse/index.ts` Edge Function (mirrors
+  `voice-parse`'s architecture — same model, same prefill-only philosophy —
+  and was already written but deliberately never deployed, to avoid
+  incurring API usage before the feature was finished) are all still in the
+  repo with **zero UI caller left anywhere**. They were kept rather than
+  deleted since the feature was fully designed and might get a new home
+  later (e.g. as a FAB action) — don't delete them without asking, and
+  don't treat their presence as a bug to fix.
+
+  Top-to-bottom the page is now: a chrome-free "Total de hoy" hero (big
+  signed net amount + red/green gasto/ingreso pills, no `Card` wrapper —
+  matches a MonIA screenshot the user shared mid-session), a "Gasto de hoy
+  por categoría" bar strip (see below — also chrome-free, no `Card`), then
+  **"Movimientos de hoy" before "Tendencia (últimos 7 días)"** — that order
+  was flipped from an earlier pass at the user's request, tendencia now
+  comes last. `CategoryEmojiGrid.jsx`/`AccountAutocomplete.jsx` are still
+  imported here purely for the inline edit row of "Movimientos de hoy" (see
+  below), not for any create form.
+
+  **"Gasto de hoy por categoría" is a standalone block, not a `Card`** — the
+  user wanted it to read as an extension of the hero total (same
+  chrome-free treatment), with "Tendencia" the only one of the two still in
+  its own card. Each category renders as a **vertical bar whose height is
+  proportional to its spend** (`heightPx = Math.max(52, (value /
+  maxCategorySpend) * 140)`, a fixed 52px floor so emoji+monto always fit
+  inside even for the smallest bar) — replacing an earlier version that used
+  fixed-size "píldora" chips with no size-value encoding at all, which the
+  user flagged directly ("no hay ninguna proporción tamaño valor"). Each bar
+  is 70px wide with a 10px gap (`.categoryBarsRow`, `overflow-x: auto`),
+  sized so a ~360-390px phone shows about 4 full bars with a 5th peeking at
+  the edge as a scroll affordance — swipeable, same "swipeable panels" idiom
+  as `CategoryEmojiGrid.jsx`. The emoji + `formatCompact` amount render
+  **inside** the colored bar itself, stacked and anchored to its bottom
+  (`justify-content: flex-end` in `.categoryBarFill`), not as separate
+  labels outside it. This is a decorative sized-chip idiom, not a formal
+  Recharts chart — `diseno-ui.md`'s "part-whole → horizontal bar, never
+  vertical" rule still governs actual chart components elsewhere (Panel's
+  "Distribución por cuenta", `GastosDiarios.jsx`'s category/tag charts,
+  untouched) and wasn't relaxed; this view was already a non-chart pill
+  strip before this pass; it just gained proportional sizing.
+  "Tendencia (últimos 7 días)" is still a genuine vertical Recharts bar
+  chart in its own `Card`, day-of-week on the x-axis — legitimately vertical
+  since a day-over-day trend isn't the part-whole comparison that rule
+  governs.
+
+  **"Movimientos de hoy" now supports inline editing, not just delete**: a
+  small "✎" button next to each row's "×" sets `editingId`/`editDraft` and
+  swaps that row for a small form (descripción, monto, `AccountAutocomplete`,
+  `CategoryEmojiGrid`, tag) with Guardar/Cancelar — calls the new
+  `transactionsApi.updateTransaction(id, fields)` (a generic partial-update
+  passthrough, same shape as `categoriesApi.updateCategory`), then patches
+  the edited row into local state and adjusts that day's `trendData` bucket
+  by the delta between the old and new gasto amount (same "don't
+  `reload()` everything" reasoning as `handleToggleInstallment` in
+  `Deudas.jsx`). The edit keeps the transaction's original sign (gasto stays
+  gasto) and its original date — changing the date isn't supported here,
+  since that would move the row out of "today" entirely; that's still a
+  case for `GastosDiarios.jsx`'s "Movimientos" table. `listTransactionsForDay`
+  (`listTransactionsForRange` for the trend) still local-appends/patches
+  rather than `reload()`ing on every save/edit/delete, same hot-path
+  rationale as before.
+
+  **Live refresh via a window event, not a prop**: since this page's own
+  entry form is gone, the *only* way to add a movement while viewing
+  `/diario` is the floating FAB — but `QuickCaptureFAB` and the routed page
+  are siblings under `AppShell`, not parent/child, so there's no `reload()`
+  to pass down as a prop. `AppShell.jsx`'s `refreshPendingCount` (already
+  called as `QuickCaptureFAB`'s `onSaved`) now also does
+  `window.dispatchEvent(new Event('dashboard:transactions-changed'))`, and
+  `Diario.jsx` wraps its whole fetch (`loadAll`, via `useCallback`) in a
+  `useEffect` that both runs it once on mount and subscribes to that event
+  — so saving from the FAB while `/diario` is open refreshes it live instead
+  of requiring a manual page reload, which was a real regression the user
+  caught right after the manual form (and its own local-append logic) was
+  removed. This is a narrow, deliberate exception to "no global store": it's
+  a pure "something changed, go refetch" signal, no data travels through
+  the event itself.
 - **`PanelGeneral.jsx`**: consolidated KPIs (balance total, patrimonio
   neto, ingresos/gastos del mes), the alerts list above (including the
   category-anomaly alert), account distribution bar chart, 6-month trend
   line + comparison table, and a "Comparativa año a año" card (current YTD
   vs. same months last year via `panelApi.fetchMonthlyTrend`, 2 StatTiles +
   a 4-line chart with dashed lines for the prior year).
-- **`Cuentas.jsx`**: cuenta madre + hijas CRUD (name, currency), a monthly
+- **`Cuentas.jsx`**: cuenta madre + hijas CRUD (name, currency, and
+  optionally `currency_group_id` to group sibling-currency accounts like
+  `arq`/`arq eur` into one card — see "Multi-currency" above for the full
+  mechanics; no standalone "Tasa de cambio" card anymore, each account's
+  rate row now renders inline in its own/its group's card), a monthly
   initial-balances editor covering every active account
   (`MonthlyInitialBalancesSection.jsx` — manual entry or via the iPhone
   Shortcut described in `prompt-dashboard-financiero.md`'s "Fase 2"; both
@@ -537,76 +836,90 @@ Supabase, no sample data left anywhere:
   per-month paid status (`FixedExpensesSection.jsx`), and the
   exchange-rate card (now one row per currency pair, see "Multi-currency"
   above).
-- **`GastosDiarios.jsx`**: MonIA CSV import (month/year picker, dedup via
-  `monia_id`), the bank-assignment engine above, a "Pendientes de banco"
-  confirmation table with historical-frequency suggestions, a "Compras en
-  divisa por confirmar" queue right below it (rows whose amount is still the
-  estimate produced at import — shows MonIA's original COP figure, an editable
-  amount in the account's currency, and — once that field is edited — the
-  implied rate MonIA used, a free real-market datapoint to check the manual
-  rate against; a `≈` marks any such estimate wherever it surfaces elsewhere
-  on this page, see the arq flow above), a "Categorías" card (create/rename/
-  emoji/`is_ambiguous`/monthly-budget/archive — full CRUD via
-  `categoriesApi.js`, replacing what used to be budget-only; archive is a
-  soft delete via `categories.is_active` since `category_account_stats`
-  references categories with no cascade), spend-by-category and spend-by-tag bar charts (the
-  spend-by-tag chart excludes tags that name an account — a transaction
-  typically carries both an account tag and a descriptive tag in the same
-  `tags` array, so without this filter the same amount would be
+- **`GastosDiarios.jsx`**: this page shrank a lot mid-session — both its
+  category CRUD (moved to `SettingsPanel.jsx`) and its manual entry form and
+  search card (see below) are gone, leaving it focused on the MonIA
+  import/reconciliation workflow and the month's read-only tables. Order,
+  top to bottom: a "Pendientes de banco" confirmation table with
+  historical-frequency suggestions, a "Compras en divisa por confirmar"
+  queue right below it (rows whose amount is still the estimate produced at
+  import — shows MonIA's original COP figure, an editable amount in the
+  account's currency, and — once that field is edited — the implied rate
+  MonIA used, a free real-market datapoint to check the manual rate
+  against; a `≈` marks any such estimate wherever it surfaces elsewhere on
+  this page, see the arq flow above), spend-by-category and spend-by-tag
+  bar charts (the spend-by-tag chart excludes tags that name an account —
+  a transaction typically carries both an account tag and a descriptive tag
+  in the same `tags` array, so without this filter the same amount would be
   double-counted under both; the exclusion set is derived from the hijas'
-  names, the same source of truth the assignment engine matches against),
-  a "Gasto real vs. presupuesto por cuenta" table per cuenta hija whose
-  columns mirror the Money math rules exactly (Gastado / Movido a otras
-  cuentas / Asignado / Ingresos / % usado, with the last one measuring
-  `(gastado + movido) / (asignado + ingresos)`), a "candidatos a gasto
-  fijo" detector that flags a description repeated in ≥3 of the last 6
-  months and offers to add it as a recurring fixed expense, a manual
-  expense form (`transactionsApi.createManualTransaction`, which takes its
-  `currency` from the selected account so a gasto against arq is recorded in
-  USD/EUR — see the foreign-currency flow above) that brought
-  forward the prompt's "Fase 3" manual-entry idea early, for testing —
-  `monia_id` is `not null`/unique so manual rows get a synthetic
-  `manual-<id>` id (see `generateLocalId` gotcha above) and
-  `origin: 'manual'`; the account picker is optional (blank = "pendiente
-  de banco", same as an imported row) — and a free-text/multi-filter
-  "Buscar movimientos" card (`transactionsApi.searchTransactions`, capped
-  at 200 results) that searches the *entire* history, unlike every other
-  table on this page which is scoped to the active month/year picker.
-  Every transaction table on this page (pendientes, búsqueda, movimientos
-  del mes) has a delete action wired to `transactionsApi.deleteTransaction`
-  — deleting one and reimporting the same CSV re-adds it, since the
-  `monia_id` dedup row is gone. The "Movimientos" and "Buscar movimientos"
-  tables also have an editable Tags cell (`transactionsApi.updateTransactionTags`)
-  so a tag can be corrected/added after the fact instead of only at CSV-import
-  time — it applies the same `normalizeTag` normalization as the import, so a
-  hand-typed tag still matches account names/`IGNORED_TAGS` correctly.
+  names, the same source of truth the assignment engine matches against;
+  **both charts now share one height**, `twoColChartHeight = Math.max(120,
+  categoryChartData.length * 28, tagChartData.length * 28)` — each used to
+  compute its own height from its own row count, so whichever list was
+  shorter left empty space at the bottom of its card once CSS Grid stretched
+  both cards in that row to match the taller one), a "Gasto real vs.
+  presupuesto por cuenta" table per cuenta hija whose columns mirror the
+  Money math rules exactly (Gastado / Movido a otras cuentas / Asignado /
+  Ingresos / % usado, with the last one measuring `(gastado + movido) /
+  (asignado + ingresos)`), a "candidatos a gasto fijo" detector that flags a
+  description repeated in ≥3 of the last 6 months and offers to add it as a
+  recurring fixed expense, a "Movimientos — mes" table (editable Tags cell
+  via `transactionsApi.updateTransactionTags`, delete via
+  `transactionsApi.deleteTransaction`), and — **moved to the very end of the
+  page** (it used to be the first card) — "Importar CSV de MonIA"
+  (month/year picker, dedup via `monia_id`, the bank-assignment engine
+  above). The reorder was a deliberate priority flip: import is a once-a-
+  month chore, the tables above it are what gets checked far more often, so
+  it no longer has to be scrolled past on every visit.
+
+  **The manual expense form is gone** (`createManualTransaction` is no
+  longer imported/called from this file at all) — same reasoning as
+  `Diario.jsx`'s removed form: the floating "+" already covers manual
+  entry, so a second copy of that form on this page was redundant.
+  **"Buscar movimientos" is also gone from this page** — it's not deleted,
+  it moved to the new global `SearchPanel.jsx` (see "Quick capture" above),
+  which is the only surviving copy of the search feature; a brief
+  intermediate design (navigate here with `?focus=buscar` and
+  scroll-and-focus the old inline card) was built and then replaced within
+  the same session once the user asked for a real popup instead of a
+  redirect — don't resurrect that query-param approach.
   **Learned category/tag suggestions**: `purpose_category_stats` (schema.sql)
   incrementally learns "descripción (purpose, normalizada) → categoría + tag"
-  every time `createManualTransaction` or `importTransactions` saves a row
-  with a resolved category — same incremental-learning shape as
-  `category_account_stats`, one level earlier. `transactionsApi.suggestCategoryForPurpose`
-  is called on blur of the Descripción field in both this page's "Agregar
-  movimiento manual" form and `QuickCaptureFAB.jsx`'s manual-entry mode; it
-  only prefills category+tag when both are still empty (never overwrites an
-  explicit choice) and shows a small "sugerido de tu historial" caption so the
-  prefill is never silent. Because this only learns going forward,
-  `transactionsApi.backfillPurposeCategoryStats` (a button in the
-  "Categorías" card, "Aprender categoría/tag de tu historial") does a
+  every time `createManualTransaction` (from `QuickCaptureFAB.jsx` now,
+  since this page has none) or `importTransactions` saves a row with a
+  resolved category — same incremental-learning shape as
+  `category_account_stats`, one level earlier. Because this only learns
+  going forward, `transactionsApi.backfillPurposeCategoryStats` (a button in
+  `SettingsPanel.jsx`, "Aprender categoría/tag de tu historial") does a
   one-time pass over every already-saved transaction with a category, so
   history from before this feature existed also starts suggesting.
 - **`Deudas.jsx`**: debt CRUD (creditor, total/restante, tasa mensual
-  opcional, plazo opcional), per-debt installment calendar with a French
-  fixed-payment amortization generator (`generateAmortizationSchedule` in
-  `debtsApi.js`) when both tasa and plazo are set, a "regenerar cuotas
-  pendientes" flow that replaces only unpaid installments, and the
-  patrimonio-vs-deuda health chart. Amortization reconciliation: `debts`
-  has a `schedule_synced_remaining_amount` column snapshotting
-  `remaining_amount` at the moment the schedule was last
+  opcional, plazo opcional, per-debt `currency` via a `CURRENCIES` picker set
+  **only at creation** — the edit form shows it as a read-only label, never a
+  `<select>`, because `total_amount`/`remaining_amount`/installment amounts
+  are never converted when currency changes, so an editable currency dropdown
+  on an existing debt would silently corrupt `toCOP`-based consolidated
+  totals (e.g. relabeling a COP debt as USD without converting the number
+  multiplies its contribution by the USD/COP rate). Delete and recreate the
+  debt if its currency was set wrong — every per-debt amount renders with
+  `formatByCurrency`, while the
+  consolidated "Deuda total"/"Patrimonio" StatTiles stay in COP via `toCOP`,
+  same per-account-vs-consolidated split as the rest of the app), per-debt
+  installment calendar with a French fixed-payment amortization generator
+  (`generateAmortizationSchedule` in `debtsApi.js`) when both tasa and plazo
+  are set, a "regenerar cuotas pendientes" flow that replaces only unpaid
+  installments, and the patrimonio-vs-deuda health chart. Amortization
+  reconciliation: `debts` has a `schedule_synced_remaining_amount` column
+  snapshotting `remaining_amount` at the moment the schedule was last
   generated/regenerated (kept in sync by `toggleInstallmentPaid`); when it
   drifts from the live `remaining_amount` (e.g. a manual payment made
-  outside the installment flow), `Deudas.jsx` shows a warning banner next
-  to "Regenerar cuotas pendientes" rather than silently letting the
-  schedule go stale.
+  outside the installment flow) or when `total_amount` changes,
+  `handleEditSave` now **auto-triggers** the same "Regenerar cuotas
+  pendientes" flow right after saving — still routing through its existing
+  `ConfirmDialog` when there are unpaid installments to replace, and
+  regenerating silently only when there's nothing pending to lose — instead
+  of only showing a warning banner and waiting for the user to click the
+  button themselves.
 - **`MetasAhorro.jsx`**: both goal kinds — `'proposito'` (tied to a hija
   account, progress = that account's real balance, contribution log is
   annotation-only) and `'puntual'` (progress = sum of logged
@@ -630,35 +943,79 @@ schema or UI.
 
 These were explicitly discussed and left out — don't "fix" them
 unprompted, they're deliberate cuts, not oversights:
-- `MonthlyAllocationSection.jsx`/`FixedExpensesSection.jsx` have zero
-  currency awareness by design (non-COP accounts — arq's USD and EUR
-  pockets — are filtered out before reaching them, not made to understand
-  currency). `listRecentExpenses` drops non-COP rows for the same reason:
-  it feeds the fixed-expense detector.
-- `fixed_expenses` carries a `currency` column that nothing ever reads —
-  `FixedExpensesSection` has no currency concept and its accounts are
-  filtered to COP before it renders. `account_allocations.currency` *is*
-  honored, but only in one place (`fetchBalancesForMonth`'s `matches` check,
-  `accountsApi.js:116`, which drops an allocation whose currency doesn't
-  match its account); nothing lets the user set it to anything but the
-  default. Individual debts branch on `currency` only through the
-  consolidated "Deuda total vs. Patrimonio" number, never per-debt in the UI.
-- A transfer's `consumes_budget` is chosen at creation and never editable
-  afterwards — to change it, delete the transfer and re-create it. Same for
-  every other field of a transfer; the row has no edit UI at all.
-- `generateAmortizationSchedule` only runs once per debt (guarded by "zero
-  installments yet"); regenerating replaces unpaid installments and
-  recomputes the remaining term as `term_months - cuotas ya pagadas`.
-  Drift from a changed `total_amount` or a partial manual payment made
-  outside the installment flow is *detected and surfaced* (see the
-  `schedule_synced_remaining_amount` warning banner above) but never
-  auto-reconciled — the user still has to hit "Regenerar cuotas
-  pendientes" themselves to fix it.
-- `account_transfers` is a plain event log with no per-pair uniqueness —
-  running the same "confirm transfer" action twice for the same month (in
-  the app or, more easily, by re-running the iPhone Shortcut described in
-  the next bullet) creates duplicate real transfers with no built-in guard; deleting
-  the extra row from `TransferHistorySection` is the only fix today.
+- `MonthlyAllocationSection.jsx` still has zero currency awareness by design
+  (non-COP accounts — arq's USD and EUR pockets — are filtered out before
+  reaching it via `hijasCop` in `Cuentas.jsx`, not made to understand
+  currency) — that cut stands. `FixedExpensesSection.jsx`, however, now
+  *does* support real multi-currency: it receives the full account list (not
+  `accountsCop`) and derives each gasto fijo's `currency` from whichever
+  account is selected (`createFixedExpense`/`updateFixedExpense` now write
+  `fixed_expenses.currency`, previously a dead column), same "derive from
+  account" pattern `QuickCaptureFAB`/`createManualTransaction` already use.
+  `listRecentExpenses` still drops non-COP rows for its own separate
+  reason: it feeds the fixed-expense *detector*, a distinct code path from
+  this CRUD, not touched by this change.
+- Individual debts now have a real per-debt `currency` picker in
+  `Deudas.jsx`'s create form only (`debtsApi.createDebt` writes
+  `debts.currency`, previously always defaulted to `'COP'`) — immutable after
+  creation, see the note under "Current state of the 6 sections" above for
+  why. Every per-debt display (`formatByCurrency`) reflects it, including the
+  "Préstamos detectados sin registrar" candidates table (`tx.currency`, not a
+  hardcoded COP) — and `handlePrefillFromCandidate` also carries over the
+  source transaction's `currency` into the create form. The consolidated
+  "Deuda total vs. Patrimonio" number, `panelApi.fetchTotalDebt`, and the
+  Panel's `gasto_fijo`/`deuda` alerts already converted/labeled correctly
+  once `currency` stopped being a dead value — no changes were needed there
+  beyond passing `currency` through the `select`s.
+- A transfer's `consumes_budget` **is** now editable after creation, as a
+  deliberate, narrow exception to "no edit UI for transfers": an inline
+  checkbox in `TransferHistorySection.jsx`'s table (shown only for rows
+  where neither end is the madre, same condition as at creation) calls
+  `transfersApi.updateConsumesBudget(id, value)` and reloads — no
+  `ConfirmDialog`, since it's non-destructive and instantly reversible.
+  Every other field of a transfer still has no edit UI — delete + recreate
+  remains the correction mechanism for those.
+- `generateAmortizationSchedule` still only runs once per debt from scratch
+  (guarded by "zero installments yet"). Drift reconciliation, however, is no
+  longer fully manual: `Deudas.jsx`'s `handleEditSave` now auto-triggers the
+  same `handleRegenerateSchedule` flow right after saving an edit, whenever
+  the save left `remaining_amount` desynced from `schedule_synced_remaining_amount`
+  (same `>1` threshold as the banner) **or** changed `total_amount` (which
+  produces no persisted drift signal, so this is the only point it's
+  actionable) — provided `interest_rate`/`term_months` are still set. The
+  existing `ConfirmDialog` safeguard is preserved when there are unpaid
+  installments to replace; it only regenerates silently when there's nothing
+  destructive to warn about, exactly like the manual button already did. The
+  *standing* banner (visible on any page load, independent of an edit) still
+  can't detect a `total_amount`-only change outside that edit-time window —
+  fixing that would need a new `schedule_synced_total_amount` column, not
+  added here.
+- `account_transfers` is still a plain event log with no general per-pair
+  uniqueness, **except** the monthly madre→hijas "Confirmar transferencia
+  real" action in `MonthlyAllocationSection.jsx`, which now builds a
+  deterministic `idempotency_key` per hija (`transfersApi.buildMonthlyAllocationKey`)
+  and inserts via `createTransfersIgnoringDuplicates` (`upsert` +
+  `onConflict: 'user_id,idempotency_key'` + `ignoreDuplicates: true`) — a
+  double-click, a stale reload, or two open tabs confirming the same month
+  now gets silently absorbed at the DB level instead of creating duplicate
+  real transfers. **The mount-time "already confirmed" check deliberately
+  does NOT rely on that key matching** — it treats a hija as already funded
+  this month if *any* madre→that-hija transfer exists this month, from any
+  origin (the app's own button, the iPhone Shortcut, or a manual entry via
+  `TransferHistorySection`), and only shows the button when some hija with
+  a nonzero planned amount still lacks one. An earlier version of this guard
+  matched only rows carrying the exact ritual `idempotency_key`, which was
+  wrong: since the iPhone Shortcut inserts its own madre→hija rows with no
+  such key, that version failed to recognize a distribution already done via
+  the Shortcut and let a second real click through — this was caught by
+  actually triggering it against production data mid-development, and it
+  really did create a duplicate real transfer (since deleted). The
+  idempotency key is kept only as the DB-level insert guard for a same-session
+  double-click/race, not as the source of truth for "already done this
+  month." Manual transfers and `QuickCaptureFAB`'s transfer mode still don't
+  dedupe (the latter regenerates its `idempotencyKey` on every call and uses
+  plain `createTransfers`) — that remains a known gap, unchanged by this fix,
+  scoped only to the monthly ritual's own duplicate-confirm risk.
 - No iOS Shortcut file is checked into this repo — the user builds and
   maintains it themselves on their phone. As currently designed it does 3
   Supabase REST calls per hija account per month: sign in

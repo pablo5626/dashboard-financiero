@@ -26,8 +26,8 @@ export function sumOutgoingByAccount(transfers, accounts) {
   return outgoing
 }
 
-export async function createTransfers(rows) {
-  const payload = rows.map(({ fromAccountId, toAccountId, amount, currency, toAmount, toCurrency, transferDate, note, consumesBudget, idempotencyKey }) => ({
+function toTransferRow({ fromAccountId, toAccountId, amount, currency, toAmount, toCurrency, transferDate, note, consumesBudget, idempotencyKey }) {
+  return {
     from_account_id: fromAccountId,
     to_account_id: toAccountId,
     amount,
@@ -38,8 +38,28 @@ export async function createTransfers(rows) {
     transfer_date: transferDate,
     note: note ?? null,
     idempotency_key: idempotencyKey ?? null,
-  }))
+  }
+}
+
+export async function createTransfers(rows) {
+  const payload = rows.map(toTransferRow)
   const { error } = await supabase.from('account_transfers').insert(payload)
+  if (error) throw error
+}
+
+// Clave determinística madre+hija+año+mes — reintentar "Confirmar
+// transferencia real" (doble click, red lenta, dos pestañas) siempre
+// construye la misma clave, así que el unique(user_id, idempotency_key) de
+// la base absorbe el duplicado en silencio en vez de crear una segunda fila
+// real, igual que el Shortcut de "Transferencia rápida".
+export function buildMonthlyAllocationKey(madreId, hijaId, year, month) {
+  return `monthly_allocation:${madreId}:${hijaId}:${year}-${String(month).padStart(2, '0')}`
+}
+
+export async function createTransfersIgnoringDuplicates(rows) {
+  const payload = rows.map(toTransferRow)
+  const { error } = await supabase.from('account_transfers')
+    .upsert(payload, { onConflict: 'user_id,idempotency_key', ignoreDuplicates: true })
   if (error) throw error
 }
 
@@ -53,7 +73,7 @@ export async function getTransfersForMonth(accountIds, year, month) {
   const ids = accountIds.join(',')
   const { data, error } = await supabase
     .from('account_transfers')
-    .select('id, from_account_id, to_account_id, amount, currency, to_amount, to_currency, consumes_budget, transfer_date, note')
+    .select('id, from_account_id, to_account_id, amount, currency, to_amount, to_currency, consumes_budget, transfer_date, note, idempotency_key')
     .gte('transfer_date', monthStart)
     .lt('transfer_date', nextMonthStart)
     .or(`from_account_id.in.(${ids}),to_account_id.in.(${ids})`)
@@ -64,5 +84,10 @@ export async function getTransfersForMonth(accountIds, year, month) {
 
 export async function deleteTransfer(id) {
   const { error } = await supabase.from('account_transfers').delete().eq('id', id)
+  if (error) throw error
+}
+
+export async function updateConsumesBudget(id, consumesBudget) {
+  const { error } = await supabase.from('account_transfers').update({ consumes_budget: consumesBudget }).eq('id', id)
   if (error) throw error
 }

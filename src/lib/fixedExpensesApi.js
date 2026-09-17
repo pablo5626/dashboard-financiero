@@ -10,9 +10,9 @@ export async function listFixedExpenses() {
   return data
 }
 
-export async function createFixedExpense({ name, amount, dueDay, frequency, accountId }) {
+export async function createFixedExpense({ name, amount, dueDay, frequency, accountId, currency }) {
   const { error } = await supabase.from('fixed_expenses').insert({
-    name, amount, due_day: dueDay, frequency, account_id: accountId ?? null,
+    name, amount, due_day: dueDay, frequency, account_id: accountId ?? null, currency: currency || 'COP',
   })
   if (error) throw error
 }

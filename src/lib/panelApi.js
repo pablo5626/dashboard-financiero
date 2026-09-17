@@ -132,8 +132,8 @@ export async function fetchAlerts() {
     pendingCount, { data: allCategories, error: e5 }, { data: expenseRows, error: e6 },
     pendingCurrencyCount,
   ] = await Promise.all([
-    supabase.from('fixed_expenses').select('id, name, amount, due_day').eq('is_active', true),
-    supabase.from('debt_installments').select('id, due_date, amount, debts(creditor_name, is_active, direction)').eq('paid', false).lte('due_date', dueSoonCutoff),
+    supabase.from('fixed_expenses').select('id, name, amount, due_day, currency').eq('is_active', true),
+    supabase.from('debt_installments').select('id, due_date, amount, debts(creditor_name, is_active, direction, currency)').eq('paid', false).lte('due_date', dueSoonCutoff),
     supabase.from('savings_goals').select('id, name, current_amount, target_amount, target_date').eq('is_active', true).eq('kind', 'puntual').not('target_date', 'is', null),
     countPendingTransactions(),
     supabase.from('categories').select('id, name, monthly_budget').eq('is_active', true),
@@ -182,6 +182,7 @@ export async function fetchAlerts() {
       level: daysUntil < 0 ? 'critical' : 'warning',
       name: f.name,
       amount: Number(f.amount),
+      currency: f.currency || 'COP',
       daysUntil,
       href: '/cuentas',
     })
@@ -196,6 +197,7 @@ export async function fetchAlerts() {
       level: daysUntil < 0 ? 'critical' : 'warning',
       name: inst.debts.creditor_name,
       amount: Number(inst.amount),
+      currency: inst.debts.currency || 'COP',
       daysUntil,
       href: '/deudas',
     })

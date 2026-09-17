@@ -1,0 +1,17 @@
+.wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 208px;
+}
+
+.swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+}
+
+.selected {
+  border-color: var(--text-primary);
+}

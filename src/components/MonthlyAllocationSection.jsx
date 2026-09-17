@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import Card from './ui/Card.jsx'
 import { formatCOP } from '../lib/format.js'
 import { getAllocationsForMonth, saveAllocations, previousMonth } from '../lib/allocationsApi.js'
-import { getTransfersForMonth, createTransfers } from '../lib/transfersApi.js'
+import { getTransfersForMonth, createTransfersIgnoringDuplicates, buildMonthlyAllocationKey } from '../lib/transfersApi.js'
 
 export default function MonthlyAllocationSection({ hijas, madre, year, month, onSaved }) {
   const [values, setValues] = useState({})
@@ -21,17 +21,43 @@ export default function MonthlyAllocationSection({ hijas, madre, year, month, on
         const current = await getAllocationsForMonth(ids, year, month)
         const hasAny = Object.keys(current).length > 0
 
+        let loadedValues = current
         if (hasAny) {
           if (!cancelled) { setValues(current); setIsTemplate(false) }
         } else {
           const prev = previousMonth(year, month)
           const prevValues = await getAllocationsForMonth(ids, prev.year, prev.month)
+          loadedValues = prevValues
           if (!cancelled) { setValues(prevValues); setIsTemplate(Object.keys(prevValues).length > 0) }
         }
 
         if (madre) {
           const transfers = await getTransfersForMonth([madre.id, ...ids], year, month)
-          if (!cancelled) setAlreadyTransferred(transfers.some((t) => t.from_account_id === madre.id))
+          // Una hija cuenta como "ya confirmada" este mes si ya recibió, en
+          // transferencias madre→esa hija este mes (sin importar el origen:
+          // el botón de la app, el Shortcut de iPhone, o una carga manual),
+          // al menos el monto planeado — no solo las que llevan la
+          // idempotency_key de este flujo. Chequear solo la clave exacta
+          // deja pasar un segundo "Confirmar" real cuando el reparto de este
+          // mes ya se hizo por otro canal, duplicando plata de verdad (bug
+          // real detectado probando esto). Comparar solo "existe alguna
+          // transferencia" sin sumar el monto tiene el problema inverso: una
+          // transferencia chica y no relacionada (un ajuste manual cualquiera)
+          // marcaría la hija como "financiada" aunque el reparto real nunca
+          // haya llegado — por eso se suma el monto real recibido. La
+          // idempotency_key sigue protegiendo el insert en sí
+          // (createTransfersIgnoringDuplicates) contra un doble click o una
+          // carrera dentro de la misma sesión.
+          const transferredByHijaId = {}
+          for (const t of transfers) {
+            if (t.from_account_id !== madre.id) continue
+            transferredByHijaId[t.to_account_id] = (transferredByHijaId[t.to_account_id] ?? 0) + Number(t.amount)
+          }
+          const allFunded = ids.length > 0 && ids.every((hijaId) => {
+            const amount = Number(loadedValues[hijaId]) || 0
+            return amount === 0 || (transferredByHijaId[hijaId] ?? 0) >= amount
+          })
+          if (!cancelled) setAlreadyTransferred(allFunded)
         }
       } catch (err) {
         if (!cancelled) setError(err.message)
@@ -74,9 +100,10 @@ export default function MonthlyAllocationSection({ hijas, madre, year, month, on
         .map((r) => ({
           fromAccountId: madre.id, toAccountId: r.accountId, amount: r.amount,
           currency: 'COP', transferDate: today, note: 'Distribución mensual',
+          idempotencyKey: buildMonthlyAllocationKey(madre.id, r.accountId, year, month),
         }))
       if (rows.length === 0) return
-      await createTransfers(rows)
+      await createTransfersIgnoringDuplicates(rows)
       setAlreadyTransferred(true)
       onSaved?.()
     } catch (err) {

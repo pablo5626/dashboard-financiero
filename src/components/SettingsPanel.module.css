@@ -1,0 +1,310 @@
+/* Botón fijo arriba, en todas las páginas — chico y discreto siempre, es
+   una "ranura" de ajustes, no una acción de captura, a diferencia del
+   clúster de QuickCaptureFAB. En móvil (tab bar, <768px) va arriba a la
+   izquierda; en desktop/tablet (sidebar, ≥768px) se mueve arriba a la
+   derecha, porque a la izquierda ahí queda pegado al logo/marca de la
+   sidebar (`.brand` en AppShell.module.css). */
+.trigger {
+  position: fixed;
+  top: calc(var(--space-1) + env(safe-area-inset-top));
+  left: var(--space-1);
+  width: 40px;
+  height: 40px;
+  border-radius: 20px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-hairline);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  z-index: 50;
+}
+
+@media (min-width: 768px) {
+  .trigger {
+    left: auto;
+    right: var(--space-2);
+  }
+}
+
+.trigger:active {
+  transform: scale(0.94);
+}
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 100;
+}
+
+@media (min-width: 768px) {
+  .backdrop {
+    align-items: center;
+    padding: var(--space-2);
+  }
+}
+
+.panel {
+  background: var(--surface-raised);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  padding: var(--space-3) var(--space-2) calc(var(--space-3) + env(safe-area-inset-bottom));
+  width: 100%;
+  max-width: 480px;
+  max-height: 85dvh;
+  overflow-y: auto;
+}
+
+@media (min-width: 768px) {
+  .panel {
+    border-radius: var(--radius-card);
+    padding: var(--space-3);
+  }
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+
+.title {
+  font: var(--font-headline);
+  margin: 0;
+}
+
+.closeButton {
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.backButton {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: var(--touch-target);
+  padding: 0 4px 0 0;
+  color: var(--series-1);
+  font: var(--font-body);
+}
+
+.menuList {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: var(--space-1);
+}
+
+.menuRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border-hairline);
+  text-align: left;
+}
+
+.menuGlyph {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--series-1);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.menuText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.menuLabel {
+  font: var(--font-body);
+  color: var(--text-primary);
+}
+
+.menuSubtitle {
+  font: var(--font-caption);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menuChevron {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.sectionTitle {
+  font: var(--font-subheadline);
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+
+.hint {
+  font: var(--font-caption);
+  color: var(--text-muted);
+  margin: 0 0 var(--space-1);
+}
+
+.error {
+  color: var(--status-critical);
+  font: var(--font-footnote);
+  margin: 0 0 var(--space-1);
+}
+
+.warning {
+  color: var(--status-warning);
+  font: var(--font-caption);
+  margin: 0;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: var(--space-2);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.rowGlyph {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.rowName {
+  flex: 1;
+  min-width: 0;
+  font: var(--font-body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editLink {
+  font: var(--font-caption);
+  color: var(--text-muted);
+}
+
+.archiveLink {
+  font: var(--font-caption);
+  color: var(--status-critical);
+}
+
+.editForm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 0;
+}
+
+.editFormRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.textInput {
+  min-height: var(--touch-target);
+  border-radius: 10px;
+  border: 1px solid var(--border-hairline);
+  padding: 0 var(--space-1);
+  font: var(--font-body);
+  background: var(--surface-1);
+  color: var(--text-primary);
+}
+
+.emojiInput {
+  min-height: var(--touch-target);
+  width: 64px;
+  flex-shrink: 0;
+  text-align: center;
+  border-radius: 10px;
+  border: 1px solid var(--border-hairline);
+  font: var(--font-body);
+  background: var(--surface-1);
+  color: var(--text-primary);
+}
+
+.checkboxRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: var(--font-caption);
+  color: var(--text-secondary);
+}
+
+.rowActions {
+  display: flex;
+  gap: 8px;
+}
+
+.saveButton {
+  min-height: var(--touch-target);
+  padding: 0 var(--space-2);
+  border-radius: 10px;
+  background: var(--series-1);
+  color: #fff;
+  font-weight: 600;
+}
+
+.saveButton:disabled {
+  opacity: 0.5;
+}
+
+.cancelButton {
+  min-height: var(--touch-target);
+  padding: 0 var(--space-1);
+  color: var(--text-muted);
+}
+
+.createForm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--border-hairline);
+}
+
+.learnButton {
+  margin-top: var(--space-2);
+  min-height: var(--touch-target);
+  padding: 0 var(--space-2);
+  border-radius: 10px;
+  border: 1px solid var(--border-hairline);
+  color: var(--text-secondary);
+}
+
+.learnButton:disabled {
+  opacity: 0.6;
+}

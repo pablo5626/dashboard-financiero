@@ -1,6 +1,7 @@
 import { Routes, Route } from 'react-router-dom'
 import AppShell from './components/layout/AppShell.jsx'
 import PanelGeneral from './pages/PanelGeneral.jsx'
+import Diario from './pages/Diario.jsx'
 import Cuentas from './pages/Cuentas.jsx'
 import GastosDiarios from './pages/GastosDiarios.jsx'
 import Deudas from './pages/Deudas.jsx'
@@ -18,6 +19,7 @@ export default function App() {
     <AppShell>
       <Routes>
         <Route path="/" element={<PanelGeneral />} />
+        <Route path="/diario" element={<Diario />} />
         <Route path="/cuentas" element={<Cuentas />} />
         <Route path="/gastos" element={<GastosDiarios />} />
         <Route path="/deudas" element={<Deudas />} />

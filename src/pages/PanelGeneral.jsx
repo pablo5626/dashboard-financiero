@@ -6,7 +6,7 @@ import {
 } from 'recharts'
 import Card from '../components/ui/Card.jsx'
 import StatTile from '../components/ui/StatTile.jsx'
-import { formatCOP, formatCompact } from '../lib/format.js'
+import { formatCOP, formatCompact, formatByCurrency } from '../lib/format.js'
 import { listAccounts, fetchBalancesForMonth } from '../lib/accountsApi.js'
 import { lastNMonths, fetchMonthlyTrend, fetchTotalDebt, fetchAlerts } from '../lib/panelApi.js'
 import { getRates, toCOP } from '../lib/exchangeRatesApi.js'
@@ -30,12 +30,12 @@ function alertText(a) {
   switch (a.kind) {
     case 'gasto_fijo':
       return a.daysUntil < 0
-        ? `${a.name} venció hace ${-a.daysUntil} día(s) — ${formatCOP(a.amount)}`
-        : `${a.name} vence en ${a.daysUntil} día(s) — ${formatCOP(a.amount)}`
+        ? `${a.name} venció hace ${-a.daysUntil} día(s) — ${formatByCurrency(a.amount, a.currency)}`
+        : `${a.name} vence en ${a.daysUntil} día(s) — ${formatByCurrency(a.amount, a.currency)}`
     case 'deuda':
       return a.daysUntil < 0
-        ? `Cuota de "${a.name}" venció hace ${-a.daysUntil} día(s) — ${formatCOP(a.amount)}`
-        : `Cuota de "${a.name}" vence en ${a.daysUntil} día(s) — ${formatCOP(a.amount)}`
+        ? `Cuota de "${a.name}" venció hace ${-a.daysUntil} día(s) — ${formatByCurrency(a.amount, a.currency)}`
+        : `Cuota de "${a.name}" vence en ${a.daysUntil} día(s) — ${formatByCurrency(a.amount, a.currency)}`
     case 'meta':
       return a.daysUntil < 0
         ? `Meta "${a.name}" venció sin completarse`
@@ -179,7 +179,7 @@ export default function PanelGeneral() {
         </Card>
 
         <Card title="Distribución por cuenta">
-          <ResponsiveContainer width="100%" height={180}>
+          <ResponsiveContainer width="100%" height={220}>
             <BarChart data={hijas.map((a) => ({ name: a.name, balance: toCOP(balances[a.id] ?? 0, a.currency, rates) }))} layout="vertical" margin={{ left: 8 }}>
               <CartesianGrid horizontal={false} stroke="var(--gridline)" />
               <XAxis type="number" hide />

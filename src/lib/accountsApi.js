@@ -39,6 +39,16 @@ export async function archiveAccount(id) {
   if (error) throw error
 }
 
+// Vincula (o desvincula, con primaryAccountId = null) una cuenta como "otra
+// moneda de" otra cuenta ya existente — ej. Arq EUR pasa a mostrarse como el
+// bolsillo EUR de Arq en Cuentas.jsx, en vez de ser su propia tarjeta. Son
+// dos filas de accounts separadas de verdad (cada una con su propia moneda,
+// saldo, transacciones); esto solo cambia cómo se agrupan visualmente.
+export async function setCurrencyGroup(accountId, primaryAccountId) {
+  const { error } = await supabase.from('accounts').update({ currency_group_id: primaryAccountId }).eq('id', accountId)
+  if (error) throw error
+}
+
 export async function getMonthlyInitialBalances(accountIds, year, month) {
   if (accountIds.length === 0) return {}
   const { data, error } = await supabase
