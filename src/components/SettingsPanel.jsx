@@ -13,11 +13,15 @@ import { getRates, setRate, fetchLiveRate } from '../lib/exchangeRatesApi.js'
 import { formatByCurrency, CURRENCIES } from '../lib/format.js'
 import styles from './SettingsPanel.module.css'
 
-// Los únicos 3 pares posibles ya que CURRENCIES tiene solo 3 monedas — a
-// diferencia de Cuentas.jsx (que solo muestra el par de una moneda si hay
-// una cuenta activa en ella), acá se listan los 3 siempre: es la pantalla
-// de configurar tasas, no una vista atada a qué cuentas existen hoy.
-const RATE_PAIRS = [['COP', 'USD'], ['COP', 'EUR'], ['USD', 'EUR']]
+// Un par COP-X por cada moneda no-COP de CURRENCIES (se expande solo si se
+// agrega una moneda nueva ahí, ej. DOP/PEN/ARS) más el par especial USD-EUR
+// (por arq, que tiene pockets en ambas) — no se deriva de ninguna regla
+// general, ya que un USD→EUR real no necesariamente coincide con pivotear
+// por COP (ver CLAUDE.md, "Multi-currency"). A diferencia de Cuentas.jsx
+// (que solo muestra el par de una moneda si hay una cuenta activa en ella),
+// acá se listan todos siempre: es la pantalla de configurar tasas, no una
+// vista atada a qué cuentas existen hoy.
+const RATE_PAIRS = [...CURRENCIES.filter((c) => c !== 'COP').map((c) => ['COP', c]), ['USD', 'EUR']]
 
 const emptyNewCategory = { name: '', emoji: '', color: '', isAmbiguous: true }
 const emptyEditDraft = { name: '', emoji: '', color: '', isAmbiguous: true, monthlyBudget: '' }

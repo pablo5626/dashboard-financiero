@@ -1,0 +1,16 @@
+name: Actualizar tasas de cambio
+
+on:
+  schedule:
+    - cron: '0 10 * * *' # una vez al día, ~5am Bogotá (UTC-5)
+  workflow_dispatch:
+
+jobs:
+  update-rates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Llamar a la Edge Function rates-auto-update
+        run: |
+          curl -f -X POST \
+            -H "x-rates-cron-secret: ${{ secrets.RATES_CRON_SECRET }}" \
+            "${{ secrets.VITE_SUPABASE_URL }}/functions/v1/rates-auto-update"

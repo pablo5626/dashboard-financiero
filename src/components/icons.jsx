@@ -135,6 +135,17 @@ export function IconHash(props) {
   )
 }
 
+// Burbuja satélite de "Preguntale a tu dinero", junto a la lupa del FAB —
+// mismo criterio que IconHash/IconTag: glifo propio para no repetir un
+// ícono ya usado en otra fila/botón cercano.
+export function IconChat(props) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M4 5.5A2.5 2.5 0 016.5 3h11A2.5 2.5 0 0120 5.5v8a2.5 2.5 0 01-2.5 2.5H9l-4.5 4v-4H6.5A2.5 2.5 0 014 13.5v-8z" />
+    </svg>
+  )
+}
+
 export function IconExchange(props) {
   return (
     <svg {...base} {...props}>

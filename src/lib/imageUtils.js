@@ -30,3 +30,18 @@ export async function resizeImageFileToBase64(file, maxDimension = 1600, quality
   const base64 = resizedDataUrl.slice(resizedDataUrl.indexOf(',') + 1)
   return { base64, mediaType: 'image/jpeg' }
 }
+
+// Para un PDF (factura electrónica) en vez de una foto: no es rasterizable
+// con canvas/Image como arriba, así que se manda el archivo tal cual, solo
+// codificado a base64 -- Gemini lo lee directamente sin necesidad de
+// convertirlo a imagen primero.
+export async function fileToBase64(file) {
+  const dataUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result)
+    reader.onerror = () => reject(new Error('No se pudo leer el archivo'))
+    reader.readAsDataURL(file)
+  })
+  const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1)
+  return { base64, mediaType: file.type }
+}

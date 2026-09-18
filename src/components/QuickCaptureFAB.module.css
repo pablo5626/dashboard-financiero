@@ -38,6 +38,14 @@
   position: relative;
 }
 
+/* Mismo contenedor posicionado que .fabPlusWrap, para la burbuja satélite
+   de "Preguntale a tu dinero" junto a la lupa (ver handleSearchButtonClick
+   en QuickCaptureFAB.jsx) — reusa .fabSatellite/.fabPlusActive tal cual,
+   son genéricas. */
+.fabSearchWrap {
+  position: relative;
+}
+
 .fabPlusActive {
   background: var(--series-1);
   border-color: var(--series-1);
@@ -125,10 +133,16 @@
 
 /* Pantalla completa en mobile (referencia: captura del usuario) — ya no un
    bottom sheet recortado, así que la hoja usa toda la altura visible y "+"
-   se siente como su propia pantalla, no una tarjeta flotante. Desktop/tablet
-   (≥768px) sigue como tarjeta centrada, sin cambios. */
+   se siente como su propia pantalla, no una tarjeta flotante. Usa el mismo
+   negro que el resto de la app (var(--page-plane)) en vez de
+   var(--surface-raised) — con surface-raised como fondo, las cajas internas
+   (MONTO, chips de cuenta/categoría) quedan en var(--surface-1), que es más
+   oscuro que surface-raised, y la hoja se ve al revés que el resto de la
+   app (fondo claro, cajas oscuras). Desktop/tablet (≥768px) sigue como
+   tarjeta centrada sobre el backdrop, así que ahí sí vuelve a
+   var(--surface-raised) más abajo. */
 .sheet {
-  background: var(--surface-raised);
+  background: var(--page-plane);
   border: none;
   border-radius: 0;
   padding: max(var(--space-2), env(safe-area-inset-top)) var(--space-2) calc(var(--space-2) + env(safe-area-inset-bottom));
@@ -142,28 +156,15 @@
   flex-direction: column;
 }
 
-/* Las pantallas de cámara/voz (receiptMode/voiceMode) son más vacías que el
-   formulario normal — con el fondo var(--surface-raised) de .sheet (un gris
-   más claro que el fondo real de la app, var(--page-plane)) ese gris se nota
-   mucho más ahí que en el formulario, donde el contenido lo tapa casi todo.
-   En mobile (pantalla completa) usan el mismo negro que el resto de la app;
-   en desktop/tablet .sheet vuelve a ser una tarjeta flotante sobre el
-   backdrop, así que ahí se revierte a var(--surface-raised) más abajo. */
-.sheetFullBleed {
-  background: var(--page-plane);
-}
-
 @media (min-width: 768px) {
   .sheet {
+    background: var(--surface-raised);
     border: 1px solid var(--border-hairline);
     border-radius: 28px;
     padding: var(--space-3);
     height: auto;
     max-height: 85dvh;
     box-shadow: 0 -16px 40px -12px color-mix(in srgb, var(--series-1) 16%, transparent);
-  }
-  .sheetFullBleed {
-    background: var(--surface-raised);
   }
 }
 

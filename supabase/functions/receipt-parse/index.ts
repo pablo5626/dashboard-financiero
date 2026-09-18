@@ -33,7 +33,7 @@ const CATEGORIES = [
   'Servicios', 'Suscripciones', 'Tarjeta', 'Transporte', 'Viaje',
 ]
 
-const SYSTEM_PROMPT = `Te muestro la foto de un recibo o factura de una compra en Colombia. Devolvés SOLO un JSON estricto (sin texto extra, sin markdown) con esta forma exacta:
+const SYSTEM_PROMPT = `Te muestro la foto o el PDF de un recibo o factura (incluida una factura electrónica DIAN, que puede traer varias líneas de detalle) de una compra en Colombia. Devolvés SOLO un JSON estricto (sin texto extra, sin markdown) con esta forma exacta:
 
 {"purpose":"<string o null>","amount":<number>,"categoryName":"<string o null>"}
 
@@ -45,8 +45,13 @@ Reglas:
 - Si la imagen no es un recibo legible, poné amount en null.
 - Devolvé JSON válido y nada más.`
 
-const ALLOWED_MEDIA_TYPES = ['image/jpeg', 'image/png', 'image/webp']
-const MAX_BASE64_LENGTH = 8_000_000 // ~6MB de imagen antes de base64, generoso para una foto ya redimensionada en el cliente
+// 'application/pdf' cubre una factura electrónica emitida directamente en
+// PDF (muy común en Colombia/DIAN) -- Gemini la lee igual que una imagen en
+// el mismo campo inline_data, sin costo extra real: cobra 258 tokens por
+// página (tarifa de imagen), así que una factura de 1-3 páginas cuesta
+// fracciones de centavo, prácticamente lo mismo que una foto.
+const ALLOWED_MEDIA_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+const MAX_BASE64_LENGTH = 8_000_000 // ~6MB antes de base64, generoso para una foto ya redimensionada en el cliente o un PDF de pocas páginas
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {

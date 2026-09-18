@@ -16,10 +16,15 @@
 }
 
 /* Pantalla completa en mobile, mismo criterio que la hoja de "+"
-   (QuickCaptureFAB.module.css) — sin bottom-sheet recortado. Desktop/tablet
-   (≥768px) sigue como tarjeta centrada, sin cambios. */
+   (QuickCaptureFAB.module.css) — sin bottom-sheet recortado. Fondo
+   var(--page-plane) (el mismo negro del resto de la app), no
+   var(--surface-raised) — con surface-raised el fondo del panel queda más
+   claro que sus propias cajas internas (filtros, resultados), que usan
+   var(--surface-1), invirtiendo la jerarquía del resto de la app.
+   Desktop/tablet (≥768px) sigue como tarjeta centrada sobre el backdrop,
+   así que ahí sí vuelve a var(--surface-raised). */
 .panel {
-  background: var(--surface-raised);
+  background: var(--page-plane);
   border: none;
   border-radius: 0;
   padding: max(var(--space-2), env(safe-area-inset-top)) var(--space-2) calc(var(--space-2) + env(safe-area-inset-bottom));
@@ -33,6 +38,7 @@
 
 @media (min-width: 768px) {
   .panel {
+    background: var(--surface-raised);
     border: 1px solid var(--border-hairline);
     border-radius: 28px;
     padding: var(--space-3);

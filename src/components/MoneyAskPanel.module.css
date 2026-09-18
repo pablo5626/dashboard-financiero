@@ -1,0 +1,206 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 100;
+}
+
+@media (min-width: 768px) {
+  .backdrop {
+    align-items: center;
+    padding: var(--space-2);
+  }
+}
+
+/* Mismo criterio que SearchPanel.module.css/QuickCaptureFAB.module.css:
+   var(--page-plane) en móvil (pantalla completa, mismo negro que el resto
+   de la app), var(--surface-raised) recién en desktop/tablet como tarjeta
+   flotante sobre el backdrop. */
+.panel {
+  background: var(--page-plane);
+  border: none;
+  border-radius: 0;
+  padding: max(var(--space-2), env(safe-area-inset-top)) var(--space-2) calc(var(--space-2) + env(safe-area-inset-bottom));
+  width: 100%;
+  max-width: 560px;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow-y: auto;
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (min-width: 768px) {
+  .panel {
+    background: var(--surface-raised);
+    border: 1px solid var(--border-hairline);
+    border-radius: 28px;
+    padding: var(--space-3);
+    height: auto;
+    max-height: 85dvh;
+    box-shadow: 0 -16px 40px -12px color-mix(in srgb, var(--series-1) 16%, transparent);
+  }
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.titleBadge {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--series-1) 14%, transparent);
+  color: var(--series-1);
+}
+
+.title {
+  font: var(--font-headline);
+  margin: 0;
+}
+
+.closeButton {
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.thread {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-bottom: var(--space-1);
+}
+
+.hint {
+  font: var(--font-caption);
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.examples {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.exampleChip {
+  font: var(--font-subheadline);
+  color: var(--text-secondary);
+  background: var(--surface-1);
+  border: 1px solid var(--border-hairline);
+  border-radius: 14px;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.entry {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.entryQuestion {
+  align-self: flex-end;
+  max-width: 85%;
+  font: var(--font-subheadline);
+  font-weight: 600;
+  color: #fff;
+  background: var(--series-1);
+  border-radius: 14px 14px 2px 14px;
+  padding: 8px 12px;
+  margin: 0;
+}
+
+.entryAnswer {
+  align-self: flex-start;
+  max-width: 85%;
+  font: var(--font-body);
+  color: var(--text-primary);
+  background: var(--surface-1);
+  border-radius: 14px 14px 14px 2px;
+  padding: 10px 12px;
+  margin: 0;
+}
+
+.thinking {
+  font: var(--font-caption);
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.error {
+  color: var(--status-critical);
+  font: var(--font-footnote);
+  margin: 0;
+}
+
+.askRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 14px;
+  padding: 0 4px 0 var(--space-1);
+  margin-top: var(--space-1);
+  flex-shrink: 0;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.askRow:focus-within {
+  border-color: var(--series-1);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--series-1) 16%, transparent);
+}
+
+.bigInput {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--touch-target);
+  border: none;
+  outline: none;
+  background: transparent;
+  font: var(--font-body);
+  color: var(--text-primary);
+}
+
+.bigInput::placeholder {
+  color: var(--text-muted);
+}
+
+.askButton {
+  flex-shrink: 0;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 10px;
+  background: var(--series-1);
+  color: #fff;
+  font: var(--font-caption);
+  font-weight: 700;
+}
+
+.askButton:disabled {
+  opacity: 0.4;
+}

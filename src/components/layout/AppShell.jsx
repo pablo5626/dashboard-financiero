@@ -6,6 +6,7 @@ import { countPendingTransactions, countPendingCurrencyTransactions } from '../.
 import QuickCaptureFAB from '../QuickCaptureFAB.jsx'
 import SettingsPanel from '../SettingsPanel.jsx'
 import SearchPanel from '../SearchPanel.jsx'
+import MoneyAskPanel from '../MoneyAskPanel.jsx'
 import styles from './AppShell.module.css'
 
 const NAV_ITEMS = [
@@ -22,6 +23,7 @@ export default function AppShell({ children }) {
   const location = useLocation()
   const [pendingCount, setPendingCount] = useState(0)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [moneyAskOpen, setMoneyAskOpen] = useState(false)
 
   // Recuerda que hay movimientos por atender en Gastos sin importar por dónde
   // se entre a la app (no solo desde Panel general) — se refresca al volver
@@ -87,9 +89,14 @@ export default function AppShell({ children }) {
         ))}
       </nav>
 
-      <QuickCaptureFAB onSaved={refreshPendingCount} onOpenSearch={() => setSearchOpen(true)} />
+      <QuickCaptureFAB
+        onSaved={refreshPendingCount}
+        onOpenSearch={() => setSearchOpen(true)}
+        onOpenMoneyAsk={() => setMoneyAskOpen(true)}
+      />
       <SettingsPanel />
       <SearchPanel open={searchOpen} onClose={() => setSearchOpen(false)} />
+      <MoneyAskPanel open={moneyAskOpen} onClose={() => setMoneyAskOpen(false)} />
     </div>
   )
 }

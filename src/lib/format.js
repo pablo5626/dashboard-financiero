@@ -1,8 +1,11 @@
-export const CURRENCIES = ['COP', 'USD', 'EUR']
+export const CURRENCIES = ['COP', 'USD', 'EUR', 'DOP', 'PEN', 'ARS']
 
 const cop = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
 const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 })
 const eur = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 2 })
+const dop = new Intl.NumberFormat('es-DO', { style: 'currency', currency: 'DOP', maximumFractionDigits: 2 })
+const pen = new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN', maximumFractionDigits: 2 })
+const ars = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 2 })
 
 export function formatCOP(value) {
   return cop.format(value)
@@ -16,7 +19,19 @@ export function formatEUR(value) {
   return eur.format(value)
 }
 
-const formattersByCurrency = { USD: formatUSD, EUR: formatEUR }
+export function formatDOP(value) {
+  return dop.format(value)
+}
+
+export function formatPEN(value) {
+  return pen.format(value)
+}
+
+export function formatARS(value) {
+  return ars.format(value)
+}
+
+const formattersByCurrency = { USD: formatUSD, EUR: formatEUR, DOP: formatDOP, PEN: formatPEN, ARS: formatARS }
 
 export function formatByCurrency(value, currency) {
   return (formattersByCurrency[currency] ?? formatCOP)(value)

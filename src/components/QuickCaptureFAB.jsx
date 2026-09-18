@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { IconPlus, IconClose, IconMic, IconSearch, IconCamera } from './icons.jsx'
+import { IconPlus, IconClose, IconMic, IconSearch, IconCamera, IconChat, IconExpenses } from './icons.jsx'
 import CategoryEmojiGrid from './CategoryEmojiGrid.jsx'
 import { listAccounts, fetchBalancesForMonth } from '../lib/accountsApi.js'
 import { listCategories } from '../lib/categoriesApi.js'
@@ -7,7 +7,7 @@ import { createManualTransaction, suggestCategoryForPurpose, listRecentPurposes 
 import { createTransfers } from '../lib/transfersApi.js'
 import { getRates, convertAmount } from '../lib/exchangeRatesApi.js'
 import { flattenAccountPockets } from '../lib/currencyPockets.js'
-import { resizeImageFileToBase64 } from '../lib/imageUtils.js'
+import { resizeImageFileToBase64, fileToBase64 } from '../lib/imageUtils.js'
 import { formatByCurrency, formatCOP } from '../lib/format.js'
 import { supabase } from '../lib/supabaseClient.js'
 import styles from './QuickCaptureFAB.module.css'
@@ -73,7 +73,7 @@ const emptyForm = {
 // dispara el reload() completo de la página que esté montada debajo — solo
 // refresca el badge de pendientes de AppShell via onSaved; cada página
 // recoge el dato nuevo la próxima vez que monte, sin store global.
-export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
+export default function QuickCaptureFAB({ onSaved, onOpenSearch, onOpenMoneyAsk }) {
   const [open, setOpen] = useState(false)
   const [accounts, setAccounts] = useState([])
   const [balances, setBalances] = useState({})
@@ -120,6 +120,11 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
   // clúster abre ESTO, nunca dispara el selector de archivo por sí solo.
   const [receiptMode, setReceiptMode] = useState(false)
   const [receiptPreviewUrl, setReceiptPreviewUrl] = useState(null)
+  // Solo se llena cuando el archivo elegido es un PDF (factura electrónica)
+  // -- un PDF no se puede mostrar dentro de un <img>/URL.createObjectURL
+  // como una foto, así que la vista previa cae a mostrar el nombre del
+  // archivo en vez de una miniatura.
+  const [receiptPreviewName, setReceiptPreviewName] = useState(null)
   const [receiptResult, setReceiptResult] = useState(null) // { amount, categoryName, purpose } | null
   // true = el "+" está desplegado: muestra la burbuja satélite de cámara
   // arriba en vez de abrir la hoja directo — referencia del usuario
@@ -128,6 +133,12 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
   // la carga manual normal. Tocar la burbuja de cámara abre el escaneo y
   // colapsa esto mismo.
   const [plusExpanded, setPlusExpanded] = useState(false)
+  // Misma burbuja satélite que "+"/cámara (ver comentario de plusExpanded
+  // arriba), aplicada a la lupa: un primer toque despliega la opción
+  // "Preguntale a tu dinero" arriba, sin abrir nada todavía; un segundo
+  // toque en la lupa ya desplegada abre el buscador de siempre. Tocar la
+  // burbuja abre el panel nuevo y colapsa esto mismo.
+  const [searchExpanded, setSearchExpanded] = useState(false)
   const recognitionRef = useRef(null)
   const audioContextRef = useRef(null)
   const audioStreamRef = useRef(null)
@@ -135,20 +146,41 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
   const receiptCameraInputRef = useRef(null)
   const receiptGalleryInputRef = useRef(null)
   const plusWrapRef = useRef(null)
+  const searchWrapRef = useRef(null)
 
-  // Tocar en cualquier otro lugar de la pantalla mientras la burbuja de
-  // cámara está desplegada la retrae, sin abrir nada — mismo criterio que un
-  // menú/popover estándar que se cierra al tocar afuera. Solo escucha
-  // mientras plusExpanded es true, para no pagar un listener global todo el
-  // tiempo que el "+" está colapsado (su estado normal).
+  // Tocar en cualquier otro lugar de la pantalla mientras alguna burbuja
+  // satélite está desplegada la retrae, sin abrir nada — mismo criterio que
+  // un menú/popover estándar que se cierra al tocar afuera. Solo escucha
+  // mientras alguna de las dos está expandida, para no pagar un listener
+  // global todo el tiempo que ambas están colapsadas (su estado normal).
   useEffect(() => {
-    if (!plusExpanded) return
+    if (!plusExpanded && !searchExpanded) return
     function handlePointerDown(e) {
-      if (!plusWrapRef.current?.contains(e.target)) setPlusExpanded(false)
+      if (plusExpanded && !plusWrapRef.current?.contains(e.target)) setPlusExpanded(false)
+      if (searchExpanded && !searchWrapRef.current?.contains(e.target)) setSearchExpanded(false)
     }
     document.addEventListener('pointerdown', handlePointerDown)
     return () => document.removeEventListener('pointerdown', handlePointerDown)
-  }, [plusExpanded])
+  }, [plusExpanded, searchExpanded])
+
+  // Primer toque en la lupa (colapsada): solo despliega la burbuja
+  // "Preguntale a tu dinero". Segundo toque (ya desplegada): colapsa y abre
+  // el buscador. Colapsa también "+" si estaba abierto, mismo trato
+  // mutuamente excluyente que ya existía entre "+" y la lupa.
+  function handleSearchButtonClick() {
+    setPlusExpanded(false)
+    if (searchExpanded) {
+      setSearchExpanded(false)
+      onOpenSearch?.()
+    } else {
+      setSearchExpanded(true)
+    }
+  }
+
+  function handleMoneyAskButtonClick() {
+    setSearchExpanded(false)
+    onOpenMoneyAsk?.()
+  }
 
   function handleCameraButtonClick() {
     setPlusExpanded(false)
@@ -166,6 +198,7 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
   // camino directo a registrar un movimiento, la cámara es la opción extra
   // que aparece antes de confirmar esa acción principal.
   function handlePlusButtonClick() {
+    setSearchExpanded(false)
     if (plusExpanded) {
       setPlusExpanded(false)
       setOpen(true)
@@ -237,6 +270,7 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
     setReceiptError(null)
     setReceiptMode(false)
     setReceiptPreviewUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return null })
+    setReceiptPreviewName(null)
     setReceiptResult(null)
     setVoiceResult(null)
     setVoiceMode(false)
@@ -257,6 +291,7 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
 
   function handleRetakeReceipt() {
     setReceiptPreviewUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return null })
+    setReceiptPreviewName(null)
     setReceiptResult(null)
     setReceiptError(null)
   }
@@ -442,14 +477,24 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
   // configurada (ver CLAUDE.md, "Known deferred scope").
   async function handleReceiptFile(e) {
     const file = e.target.files?.[0]
-    e.target.value = '' // permite volver a elegir la misma foto otra vez
+    e.target.value = '' // permite volver a elegir la misma foto/PDF otra vez
     if (!file) return
-    setReceiptPreviewUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return URL.createObjectURL(file) })
+    const isPdf = file.type === 'application/pdf'
+    // Un PDF (factura electrónica) no se puede rasterizar en un <img> como
+    // una foto -- la vista previa muestra el nombre del archivo en vez de
+    // una miniatura (ver receiptPreviewName más abajo).
+    if (isPdf) {
+      setReceiptPreviewUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return null })
+      setReceiptPreviewName(file.name)
+    } else {
+      setReceiptPreviewUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return URL.createObjectURL(file) })
+      setReceiptPreviewName(null)
+    }
     setReceiptResult(null)
     setReceiptStatus('processing')
     setReceiptError(null)
     try {
-      const { base64, mediaType } = await resizeImageFileToBase64(file)
+      const { base64, mediaType } = isPdf ? await fileToBase64(file) : await resizeImageFileToBase64(file)
       const { data, error: invokeError } = await supabase.functions.invoke('receipt-parse', {
         body: { mediaType, imageBase64: base64 },
       })
@@ -579,6 +624,7 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
   // abrir "+" primero y recién ahí tocar el micrófono.
   function handleMicButtonClick() {
     setPlusExpanded(false)
+    setSearchExpanded(false)
     if (voiceStatus !== 'listening') {
       reset('gasto')
       setVoiceMode(true)
@@ -590,14 +636,26 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
   return (
     <>
       <div className={styles.fabCluster}>
-        <button
-          type="button"
-          className={styles.fabSecondary}
-          aria-label="Buscar movimientos"
-          onClick={() => { setPlusExpanded(false); onOpenSearch?.() }}
-        >
-          <IconSearch width={20} height={20} />
-        </button>
+        <div className={styles.fabSearchWrap} ref={searchWrapRef}>
+          {searchExpanded && (
+            <button
+              type="button"
+              className={styles.fabSatellite}
+              aria-label="Preguntale a tu dinero"
+              onClick={handleMoneyAskButtonClick}
+            >
+              <IconChat width={20} height={20} />
+            </button>
+          )}
+          <button
+            type="button"
+            className={searchExpanded ? `${styles.fabSecondary} ${styles.fabPlusActive}` : styles.fabSecondary}
+            aria-label={searchExpanded ? 'Buscar movimientos' : 'Más opciones de búsqueda'}
+            onClick={handleSearchButtonClick}
+          >
+            <IconSearch width={20} height={20} />
+          </button>
+        </div>
 
         <div className={styles.fabPlusWrap} ref={plusWrapRef}>
           {plusExpanded && (
@@ -636,7 +694,7 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
       {open && (
         <div className={styles.backdrop} onClick={close}>
           <div
-            className={`${styles.sheet} ${(receiptMode || voiceMode) ? styles.sheetFullBleed : ''}`}
+            className={styles.sheet}
             role="dialog" aria-modal="true"
             aria-labelledby="quick-capture-title" onClick={(e) => e.stopPropagation()}
           >
@@ -684,6 +742,11 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
                 <div className={styles.receiptPreviewCard}>
                   {receiptPreviewUrl ? (
                     <img src={receiptPreviewUrl} alt="Recibo capturado" className={styles.receiptPreviewImg} />
+                  ) : receiptPreviewName ? (
+                    <div className={styles.receiptPreviewEmpty}>
+                      <IconExpenses width={26} height={26} />
+                      <p>{receiptPreviewName}</p>
+                    </div>
                   ) : (
                     <div className={styles.receiptPreviewEmpty}>
                       <IconCamera width={26} height={26} />
@@ -721,7 +784,7 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
                       <span className={styles.receiptSourceIcon}><IconSearch width={18} height={18} /></span>
                       <span className={styles.receiptSourceText}>
                         <span className={styles.receiptSourceLabel}>Subir recibo</span>
-                        <span className={styles.receiptSourceSub}>Desde la galería</span>
+                        <span className={styles.receiptSourceSub}>Foto o PDF de factura</span>
                       </span>
                     </button>
                   </div>
@@ -748,14 +811,14 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
                   onChange={handleReceiptFile} style={{ display: 'none' }}
                 />
                 <input
-                  ref={receiptGalleryInputRef} type="file" accept="image/*"
+                  ref={receiptGalleryInputRef} type="file" accept="image/*,application/pdf"
                   onChange={handleReceiptFile} style={{ display: 'none' }}
                 />
 
                 <div className={styles.receiptFooter}>
                   <button
                     type="button" className={styles.receiptRetake}
-                    onClick={handleRetakeReceipt} disabled={!receiptPreviewUrl}
+                    onClick={handleRetakeReceipt} disabled={!receiptPreviewUrl && !receiptPreviewName}
                   >
                     Reintentar
                   </button>
