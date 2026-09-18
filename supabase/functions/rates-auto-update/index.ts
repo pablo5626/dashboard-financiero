@@ -24,7 +24,7 @@ const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
 // Function no puede importar src/lib/format.js (otro runtime), así que la
 // lista de monedas no-COP se duplica acá a mano -- mantenerla en sync con
 // CURRENCIES si se agrega una moneda nueva ahí.
-const COP_PAIR_CURRENCIES = ['USD', 'EUR', 'DOP', 'PEN', 'ARS']
+const COP_PAIR_CURRENCIES = ['USD', 'EUR', 'DOP', 'PEN', 'ARS', 'MXN', 'BRL', 'CLP', 'GBP']
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
