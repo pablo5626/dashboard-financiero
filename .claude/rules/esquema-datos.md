@@ -60,10 +60,12 @@ directamente en el panel de Supabase sin reflejarlo en el archivo.
   categoría + tag, alimentada tanto por `createManualTransaction` como por
   `importTransactions` (`src/lib/transactionsApi.js`) cada vez que una fila
   guarda una categoría resuelta. Solo se usa para precargar (nunca
-  autoguardar) categoría/tag en los formularios de carga manual
-  (`GastosDiarios.jsx`, `QuickCaptureFAB.jsx`) cuando el usuario repite una
+  autoguardar) categoría/tag en el formulario de carga manual
+  (`QuickCaptureFAB.jsx`, único formulario manual que queda — ver
+  "GastosDiarios.jsx" en `CLAUDE.md`) cuando el usuario repite una
   descripción ya vista — matching por texto exacto normalizado, sin fuzzy
-  matching por ahora.
+  matching por ahora (evaluado y explícitamente diferido, ver "Known
+  deferred scope" en `CLAUDE.md`).
 - Los bloques de `insert` de valores iniciales (cuentas, categorías) están
   comentados en `schema.sql` a propósito — se ejecutan una vez, ya
   autenticado, para que `auth.uid()` resuelva al usuario real.

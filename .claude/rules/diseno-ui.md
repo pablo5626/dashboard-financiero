@@ -39,3 +39,24 @@
 - Todo color de gráfico se pasa como `var(--series-N)` / `var(--status-*)`,
   nunca como hex literal en un componente de página, para que el modo oscuro
   (`prefers-color-scheme` + `[data-theme]`) siga funcionando automáticamente.
+- **Sin `<CartesianGrid>`** — se quitó de todos los gráficos (barras y
+  líneas) de la app porque el usuario las vio como ruido visual. No
+  reintroducir líneas de guía en un gráfico nuevo salvo que el usuario lo
+  pida explícitamente.
+- **El `YAxis` de categoría en un `BarChart` horizontal (`layout="vertical"`)
+  nunca debe llevar un `width` fijo adivinado** — Recharts ancla la
+  etiqueta al borde derecho de esa franja, así que un `width` más grande
+  del que el texto necesita dejaba un espacio vacío a la izquierda del
+  gráfico entero (no entre la etiqueta y las barras), un bug real que vivió
+  varios gráficos con anchos de 70–110px puestos a ojo. Usar
+  `estimateCategoryAxisWidth(labels)` de `src/lib/chartUtils.js`, que calcula
+  el ancho según el texto real de cada gráfico en particular. Para el
+  `YAxis` numérico de un gráfico de línea, un ancho fijo chico (42–46px)
+  alcanza porque `formatCompact` ya produce texto corto ("1.2M"/"500K").
+- **Un `BarChart` con `Cell` por categoría usa el color real de esa
+  categoría** (`categories.color`, con el mismo *fallback* a
+  `seriesForName(name)` que ya usan `Diario.jsx` y la lista de Movimientos)
+  en vez de una paleta genérica que rota sin relación con el color asignado
+  en Ajustes — así una misma categoría se ve del mismo color en todas las
+  vistas de la app. Un `Cell` por *tag* (que no tiene color propio) sigue
+  rotando la paleta genérica (`CHART_COLORS`).

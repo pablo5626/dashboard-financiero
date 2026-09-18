@@ -32,10 +32,13 @@ en este orden, priorizando siempre el dato explícito sobre la especulación:
       descriptivo de más de una palabra, no solo a nombres de cuenta.
 
       Los tags de una transacción ya guardada (importada o manual) también se
-      pueden editar directamente desde las tablas de `GastosDiarios.jsx`
-      ("Movimientos" y "Buscar movimientos"), vía `updateTransactionTags` en
-      `transactionsApi.js` — no hace falta re-importar el CSV con el tag
-      corregido en MonIA. La edición aplica la misma normalización
+      pueden editar directamente desde `GastosDiarios.jsx` — "Movimientos"
+      edita la transacción completa (descripción/monto/cuenta/categoría/tags
+      juntos, vía el modal de edición y `updateTransaction`) y "Buscar
+      movimientos" (`SearchPanel.jsx`) sigue editando solo tags vía
+      `updateTransactionTags` — ambas en `transactionsApi.js` — no hace falta
+      re-importar el CSV con el tag corregido en MonIA. La edición aplica la
+      misma normalización
       (`normalizeTag`, guion bajo → espacio + minúsculas) que el import, así
       que un tag tipeado a mano sigue calzando contra nombres de cuenta igual
       que uno importado, y escribir a mano `ignorar`/`traslado`/`moneda` desde

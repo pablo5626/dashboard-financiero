@@ -839,6 +839,28 @@ that mode doesn't read), so a voice-dictated traslado already required
 picking both accounts by hand before this pass too — a preexisting gap, not
 one this pass introduced or fixed.
 
+**The "Desde"/"Hacia" chips became one-per-account, not one-per-pocket, on
+a later follow-up** — the pocket-aware version above rendered a separate
+chip per pocket (e.g. "arq" and "arq eur" as two chips), which the user
+flagged as clutter once there was more than one multi-currency account: the
+chip rows now come from `accounts.map(...)` directly instead of
+`flattenAccountPockets(accounts)`, one chip per account regardless of how
+many pockets it has. A new `pocketsOfAccount(accountId)` helper (filters
+`pockets` by `accountId`) backs a small currency `<select>`
+(`.pocketSelect`) that renders next to the "Desde"/"Hacia" label **only**
+when the selected account has more than one pocket (`pocketsOfAccount(...)
+.length > 1`) — a single-currency account's chip needs no extra picker,
+since there's nothing to choose. Selecting an account chip defaults
+`fromKey`/`toKey` to that account's first pocket; the currency `<select>`
+only appears afterward to let the user switch to a different pocket of the
+*same* account. `toAccountPocketOptions` (the "Hacia" dropdown's option
+list) still filters out `form.fromKey` so a same-currency self-transfer
+stays impossible while a cross-pocket transfer on the same account (arq USD
+→ arq EUR) stays reachable, same rule as before this chip regrouping —
+only the chip granularity changed, not the underlying pocket-key state
+(`form.fromKey`/`form.toKey`) or any of the cross-currency logic described
+above.
+
 **`TransferHistorySection.jsx`'s own inline add-transfer form was removed**
 once the FAB above covered the exact same ground (including the pocket
 picker) — the component now only renders the transfer-history table, the
@@ -1498,39 +1520,112 @@ Supabase, no sample data left anywhere:
   MonIA used, a free real-market datapoint to check the manual rate
   against; a `≈` marks any such estimate wherever it surfaces elsewhere on
   this page, see the arq flow above), spend-by-category and spend-by-tag
-  bar charts (the spend-by-tag chart excludes tags that name an account —
-  a transaction typically carries both an account tag and a descriptive tag
-  in the same `tags` array, so without this filter the same amount would be
-  double-counted under both; the exclusion set is derived from the hijas'
-  names, the same source of truth the assignment engine matches against;
-  **both charts now share one height**, `twoColChartHeight = Math.max(120,
-  categoryChartData.length * 28, tagChartData.length * 28)` — each used to
-  compute its own height from its own row count, so whichever list was
-  shorter left empty space at the bottom of its card once CSS Grid stretched
-  both cards in that row to match the taller one), a "Gasto real vs.
-  presupuesto por cuenta" table per cuenta hija whose columns mirror the
-  Money math rules exactly (Gastado / Movido a otras cuentas / Asignado /
-  Ingresos / % usado, with the last one measuring `(gastado + movido) /
-  (asignado + ingresos)`), a "candidatos a gasto fijo" detector that flags a
-  description repeated in ≥3 of the last 6 months and offers to add it as a
-  recurring fixed expense, a "Movimientos — mes" table (editable Tags cell
-  via `transactionsApi.updateTransactionTags`, delete via
-  `transactionsApi.deleteTransaction`, and — added later — a filter row
-  above it for categoría/cuenta/tag, applied **client-side** over the
-  already-fetched `monthTransactions`, not a new Supabase query, so the
-  page's other aggregates (charts, "% usado") keep seeing the unfiltered
-  month; `useSearchParams` reads `?categoryId=&accountId=&tag=` once on
-  mount to prefill it — `SearchPanel.jsx`'s "Ver en Gastos" link is the one
-  place that builds that URL, via `useNavigate`, only for its own structured
-  filters, never its free-text query box, which this table doesn't support),
-  and — **moved to the very end of the page** (it used to be the first
-  card) — "Importar CSV de MonIA" (dedup via `monia_id`, the bank-assignment
-  engine above, using the same `MonthYearPicker` component `PanelGeneral.jsx`
-  uses — extracted from what used to be this card's own inline month
-  `<select>`/year `<input>`, zero behavior change here). The reorder was a
-  deliberate priority flip: import is a once-a-month chore, the tables above
-  it are what gets checked far more often, so
-  it no longer has to be scrolled past on every visit.
+  bar charts, a "candidatos a gasto fijo" detector that flags a description
+  repeated in ≥3 of the last 6 months and offers to add it as a recurring
+  fixed expense, "Movimientos — mes" (a day-grouped list, not a table — see
+  below), "Gasto real vs. presupuesto por cuenta" (cards with a progress
+  bar — see below), and — **moved to the very end of the page** (it used to
+  be the first card) — "Importar CSV de MonIA" (dedup via `monia_id`, the
+  bank-assignment engine above, using the same `MonthYearPicker` component
+  `PanelGeneral.jsx` uses — extracted from what used to be this card's own
+  inline month `<select>`/year `<input>`, zero behavior change here). The
+  reorder was a deliberate priority flip: import is a once-a-month chore,
+  the tables above it are what gets checked far more often, so it no longer
+  has to be scrolled past on every visit.
+
+  **Spend-by-category and spend-by-tag bar charts**: the spend-by-tag chart
+  excludes tags that name an account — a transaction typically carries both
+  an account tag and a descriptive tag in the same `tags` array, so without
+  this filter the same amount would be double-counted under both; the
+  exclusion set is derived from the hijas' names, the same source of truth
+  the assignment engine matches against. **Both charts share one height**,
+  `twoColChartHeight = Math.max(120, categoryChartData.length * 28,
+  tagChartData.length * 28)` — each used to compute its own height from its
+  own row count, so whichever list was shorter left empty space at the
+  bottom of its card once CSS Grid stretched both cards in that row to
+  match the taller one. **The spend-by-category chart's bars use each
+  category's real color** (`c.color || seriesForName(c.name)`, same
+  fallback the "Movimientos" glyph and `Diario.jsx` already use) instead of
+  a generic rotating palette — the rotating palette had no relationship to
+  the color a category is actually assigned in Ajustes, so the same
+  category showed a different color in this chart than in every other list
+  in the app; spend-by-tag still rotates the generic palette, since tags
+  have no color of their own.
+
+  **All bar/line charts in the app dropped their `<CartesianGrid>` guide
+  lines and got a tighter axis** (this page's two spend charts,
+  `PanelGeneral.jsx`'s "Distribución por cuenta"/"Patrimonio neto"/
+  "Tendencia"/"Comparativa año a año", `MetasAhorro.jsx`'s growth chart, and
+  `Deudas.jsx`'s "Salud financiera") — the user flagged that every chart
+  left a lot of unused blank space on the left. The cause: a horizontal
+  `BarChart`'s category `YAxis` right-anchors its tick label against a
+  fixed pixel `width`, so any width larger than the label actually needs
+  shows up as blank space to the *left* of the whole chart, not between the
+  label and the bars — the old hand-picked fixed widths (70–110px) were
+  generous guesses that overshot most real account/category/tag names.
+  `src/lib/chartUtils.js`'s `estimateCategoryAxisWidth(labels)` (new, small
+  dependency-free module, same "no shared store" pattern as
+  `currencyPockets.js`) computes the axis width from the longest label
+  actually being rendered in that specific chart instead of a fixed guess,
+  clamped to a sane `[34, 140]` range. The numeric `YAxis` on the line
+  charts (Patrimonio, Tendencia, Comparativa, growth) had the same issue
+  with a fixed 60–70px width against `formatCompact`'s short output
+  ("1.2M"/"500K") — reduced to a fixed 42–46px, tight enough for that
+  format without being computed dynamically (a numeric axis's tick values
+  aren't known before Recharts renders them, unlike a category axis's
+  labels).
+
+  **"Movimientos — mes" is a day-grouped list, not a table**, redesigned to
+  visually match `Diario.jsx`'s list style — a circular category glyph, the
+  category name above the bold description, tags as read-only pills, and
+  a small day header (`groupTransactionsByDate`) between groups, newest
+  first. **Tapping a movement opens a full-transaction edit modal**
+  (`editingTx`/`editDraft`, `.editBackdrop`/`.editSheet` in
+  `GastosDiarios.module.css`) — purpose, amount, account, category, and
+  tags all editable together via `transactionsApi.updateTransaction`, not
+  just tags — styled identically to the "+" FAB's full-screen sheet
+  (mobile: `100dvh`, `var(--page-plane)`; desktop: centered card,
+  `var(--surface-raised)`) so editing feels like the same UI piece as
+  adding a movement, instead of an inline expanding row. Tags inside that
+  modal are their own editable pills (`editDraft.tags`, add/remove, always
+  starting with `#`) rather than a single free-text field — deliberately
+  **not** copied from `Diario.jsx`'s own edit form, which only supports one
+  tag at a time (`tags: [editDraft.tag.trim()]`) and would silently drop
+  every other tag on a row that already had several (common in
+  CSV-imported data, e.g. `#efectivo #cerveza`) — this page's multi-tag
+  pill editor is the one to copy if `Diario.jsx` ever needs the same fix.
+  The categoría/cuenta/tag filter row above the list is collapsed behind a
+  `.filterToggle` button (`IconFilter`, badge shows the active-filter
+  count) instead of always visible, same "don't show what isn't being
+  used" reasoning as `SearchPanel.jsx`'s own "Filtros" toggle — it defaults
+  open only when the page was deep-linked with a filter already in the URL
+  (`?categoryId=&accountId=&tag=`, still read once on mount by
+  `useSearchParams`, still built only by `SearchPanel.jsx`'s "Ver en
+  Gastos" link for its structured filters). Filtering is still
+  **client-side** over the already-fetched `monthTransactions`, not a new
+  Supabase query, so the page's other aggregates (charts, "% usado") keep
+  seeing the unfiltered month. Delete is unchanged
+  (`transactionsApi.deleteTransaction`, a "×" per row).
+
+  **"Gasto real vs. presupuesto por cuenta" is a card grid with a progress
+  bar per cuenta hija, not a table**, and was moved to **after**
+  "Movimientos" (it used to come right after the two spend charts, before
+  Movimientos) — the user asked for this reorder because Movimientos is
+  checked far more often. Each card (`.budgetCard`, `styles` in
+  `GastosDiarios.module.css`) shows the account/pocket name, a `%` (or "sin
+  presupuesto" when nothing's allocated and no income landed there),
+  a colored progress bar (`budgetToneColor(pct)` — <70% good, 70–99%
+  warning, 100–119% serious, ≥120% critical, same scale as
+  `Diario.jsx`'s own `budgetToneColor` for its category-budget chips, kept
+  in sync deliberately since both answer "how close to a budget is this"),
+  and the same underlying figures the old table's columns showed (Gastado,
+  Movido a otras cuentas, Asignado, Ingresos) as caption rows below the
+  bar instead of table columns — the money-math formula behind the bar
+  (`pct = (gastado + movido) / (asignado + ingresos)`) is unchanged from
+  the old table, only the presentation changed. A Plan subagent proposed
+  three options for this redesign (polish the table with 4-tier colors,
+  this card+bar approach, or a table with an inline mini-bar as a middle
+  ground); the user picked the card+bar option.
 
   **The manual expense form is gone** (`createManualTransaction` is no
   longer imported/called from this file at all) — same reasoning as

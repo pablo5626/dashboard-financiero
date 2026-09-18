@@ -24,7 +24,10 @@
   pertenecen a una sola página, varios de ellos montados una sola vez en
   `AppShell.jsx` y controlados por su propio `open`/estado, no por rutas),
   `src/lib/` (cliente Supabase, formato, un módulo `*Api.js` por dominio de
-  datos).
+  datos, más módulos chicos sin dependencias para lógica compartida que no
+  encaja en un dominio — `currencyPockets.js` para las claves de bolsillo
+  multi-moneda, `chartUtils.js` para el cálculo de ancho de eje de los
+  gráficos horizontales, ver `.claude/rules/diseno-ui.md`).
 - No queda ningún dato de muestra en el proyecto — `src/lib/sampleData.js`
   se eliminó una vez que las secciones quedaron conectadas a Supabase (ver
   `CLAUDE.md`). Si algún día se agrega una sección nueva antes de tener su
