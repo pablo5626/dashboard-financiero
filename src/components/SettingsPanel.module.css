@@ -518,34 +518,6 @@
   border-top: 1px solid var(--border-hairline);
 }
 
-/* Toggle de dos opciones excluyentes (Debo/Me deben, tipo de meta) — mismo
-   rol que un <select> binario pero más legible de un vistazo en celular. */
-.segmentRow {
-  display: flex;
-  gap: 6px;
-}
-
-.segmentButton,
-.segmentButtonActive {
-  flex: 1;
-  min-height: var(--touch-target);
-  border-radius: 10px;
-  font: var(--font-caption);
-  font-weight: 600;
-}
-
-.segmentButton {
-  border: 1px solid var(--border-hairline);
-  color: var(--text-secondary);
-  background: transparent;
-}
-
-.segmentButtonActive {
-  border: none;
-  background: var(--series-1);
-  color: #fff;
-}
-
 .learnButton {
   margin-top: var(--space-2);
   min-height: var(--touch-target);
@@ -557,4 +529,133 @@
 
 .learnButton:disabled {
   opacity: 0.6;
+}
+
+/* Secciones de alta (Cuentas, Deudas, Metas, Gastos fijos) y Tasas —
+   comparten el lenguaje de Categorías (`.categoryEditCard`, `.categoryLabel`,
+   `.categoryInfoCard`, switch iOS) y agregan solo lo que allá no existía. */
+
+/* Variantes tintadas del avatar/glifo: siempre tokens (light/dark), nunca hex. */
+.avatarAccent {
+  background: color-mix(in srgb, var(--series-1) 14%, var(--surface-1));
+  color: var(--series-1);
+}
+
+.avatarGood {
+  background: color-mix(in srgb, var(--status-good) 14%, var(--surface-1));
+  color: var(--status-good);
+}
+
+.avatarCritical {
+  background: color-mix(in srgb, var(--status-critical) 14%, var(--surface-1));
+  color: var(--status-critical);
+}
+
+/* Código de moneda dentro del glifo (Tasas) en vez de un emoji. */
+.glyphCode {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* Dos campos lado a lado (monto + restante, fecha + fecha, ...). */
+.fieldRow {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+/* Monedas ya agregadas a una cuenta multi-moneda. */
+.pocketList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pocketRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  background: var(--surface-1);
+}
+
+.pocketCode {
+  font: var(--font-body);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.pocketBadge {
+  font: var(--font-caption);
+  font-weight: 600;
+  color: var(--series-1);
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--series-1) 12%, transparent);
+}
+
+.pocketAmount {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  font: var(--font-caption);
+  color: var(--text-muted);
+}
+
+/* Bloque plegable para los campos opcionales (mismo criterio que el <details>
+   de "Ajuste de saldo" en Cuentas): cerrado por defecto para que el alta
+   básica quepa sin scroll. */
+.optionalBlock {
+  border-top: 1px solid var(--border-hairline);
+  padding-top: 10px;
+}
+
+.optionalSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 32px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.optionalSummary::-webkit-details-marker {
+  display: none;
+}
+
+.optionalChevron {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: transform 0.15s;
+}
+
+.optionalBlock[open] .optionalChevron {
+  transform: rotate(90deg);
+}
+
+.optionalBody {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 12px;
+}
+
+/* Confirmación de alta: mismo formato que `.categoryInfoCard`, en verde. */
+.successCard {
+  font: var(--font-caption);
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--status-good) 10%, var(--surface-1));
+  border: 1px solid color-mix(in srgb, var(--status-good) 30%, transparent);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin: var(--space-1) 0 0;
+}
+
+/* Tasa sin configurar en Tasas de cambio. */
+.rateUnset {
+  font: var(--font-caption);
+  color: var(--status-warning);
 }

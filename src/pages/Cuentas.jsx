@@ -5,6 +5,7 @@ import FixedExpensesSection from '../components/FixedExpensesSection.jsx'
 import MonthlyAllocationSection from '../components/MonthlyAllocationSection.jsx'
 import MonthlyInitialBalancesSection from '../components/MonthlyInitialBalancesSection.jsx'
 import TransferHistorySection from '../components/TransferHistorySection.jsx'
+import { Field, InfoCard, SwitchRow, ChipPicker, EditHeader, EditActions, inputClass } from '../components/ui/FormKit.jsx'
 import { formatCOP, formatByCurrency, CURRENCIES } from '../lib/format.js'
 import {
   listAccounts, updateAccount, archiveAccount, fetchBalancesForMonth,
@@ -13,10 +14,13 @@ import {
 import { getRates } from '../lib/exchangeRatesApi.js'
 import { getAccountFlowsForMonth } from '../lib/transactionsApi.js'
 import { flattenAccountPockets } from '../lib/currencyPockets.js'
+import styles from './Cuentas.module.css'
 
 const now = new Date()
 const YEAR = now.getFullYear()
 const MONTH = now.getMonth() + 1
+
+const CURRENCY_OPTIONS = CURRENCIES.map((c) => ({ value: c, label: c }))
 
 const emptyEdit = { name: '', currency: 'COP', isMulti: false, extras: [], newExtraCurrency: '', newExtraTag: '' }
 
@@ -192,68 +196,115 @@ export default function Cuentas() {
           const isEditing = editingId === account.id
 
           return (
-            <Card key={account.id}>
+            <Card key={account.id} className={isEditing ? 'span-3' : undefined}>
               {isEditing ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 'var(--space-1)' }}>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                    <input
-                      autoFocus value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })}
-                      style={{ flex: 1, minWidth: 100, minHeight: 32, borderRadius: 6, border: '1px solid var(--border-hairline)', padding: '0 6px' }}
+                <form
+                  onSubmit={(e) => { e.preventDefault(); handleRenameSave(account.id) }}
+                  className={styles.editForm}
+                >
+                  <EditHeader
+                    avatar={edit.name.trim() ? edit.name.trim().charAt(0).toUpperCase() : '?'}
+                    caption="Editando cuenta"
+                    badge={edit.isMulti ? 'Multi-moneda' : edit.currency} badgeTone="accent"
+                  >
+                    <Field label="Nombre de la cuenta">
+                      <input
+                        autoFocus value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })}
+                        className={inputClass} placeholder="Ej. Nequi, Pibank, Arq"
+                      />
+                    </Field>
+                  </EditHeader>
+
+                  <Field label={edit.isMulti ? 'Moneda principal' : 'Moneda'}>
+                    <ChipPicker
+                      options={CURRENCY_OPTIONS} value={edit.currency}
+                      onChange={(currency) => setEdit({ ...edit, currency, extras: edit.extras.filter((c) => c.currency !== currency) })}
                     />
-                    <select
-                      value={edit.currency} onChange={(e) => setEdit({ ...edit, currency: e.target.value })}
-                      style={{ minHeight: 32, borderRadius: 6, border: '1px solid var(--border-hairline)' }}
-                    >
-                      {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                  </div>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, font: 'var(--font-caption)', color: 'var(--text-muted)' }}>
-                    <input type="checkbox" checked={edit.isMulti} onChange={(e) => setEdit({ ...edit, isMulti: e.target.checked })} />
-                    Cuenta multi-moneda (soporta más de una moneda bajo esta misma cuenta)
-                  </label>
+                  </Field>
+                  {edit.currency !== (account.currency || 'COP') && (
+                    <InfoCard tone="warning">
+                      Al saldo solo se suman los movimientos en la moneda de la cuenta — si la cambiás, los ya
+                      registrados en {account.currency || 'COP'} dejan de contar.
+                    </InfoCard>
+                  )}
+
+                  <SwitchRow
+                    title="Cuenta multi-moneda"
+                    helper="Guarda un saldo por cada moneda bajo esta misma cuenta (ej. Arq en USD y EUR)."
+                    checked={edit.isMulti} onChange={(isMulti) => setEdit({ ...edit, isMulti })}
+                  />
+
                   {edit.isMulti && (
-                    <div style={{ border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {edit.extras.map((c) => (
-                        <div key={c.currency} style={{ display: 'flex', alignItems: 'center', gap: 6, font: 'var(--font-caption)' }}>
-                          <span style={{ flex: 1 }}>{c.currency} — tag "{c.tag}"</span>
-                          <button type="button" onClick={() => removeExtraFromEditDraft(c.currency)} style={{ color: 'var(--status-critical)' }}>Quitar</button>
-                        </div>
-                      ))}
-                      <div style={{ display: 'flex', gap: 4 }}>
-                        <select
-                          value={edit.newExtraCurrency} onChange={(e) => setEdit({ ...edit, newExtraCurrency: e.target.value })}
-                          style={{ minHeight: 28, borderRadius: 6, border: '1px solid var(--border-hairline)' }}
-                        >
-                          <option value="">+ moneda…</option>
-                          {CURRENCIES.filter((c) => c !== edit.currency && !edit.extras.some((e2) => e2.currency === c)).map((c) => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                        <input
-                          placeholder="tag (ej. arq eur)" value={edit.newExtraTag}
-                          onChange={(e) => setEdit({ ...edit, newExtraTag: e.target.value })}
-                          style={{ flex: 1, minWidth: 0, minHeight: 28, borderRadius: 6, border: '1px solid var(--border-hairline)', padding: '0 6px' }}
+                    <div className={styles.pocketBlock}>
+                      <Field label="Otras monedas" hint={`Además de ${edit.currency}`}>
+                        {edit.extras.length > 0 && (
+                          <div className={styles.pocketList}>
+                            {edit.extras.map((c) => (
+                              <div key={c.currency} className={styles.pocketRow}>
+                                <span className={styles.pocketCode}>{c.currency}</span>
+                                <span className={styles.pocketTag}>tag "{c.tag}"</span>
+                                <button type="button" onClick={() => removeExtraFromEditDraft(c.currency)} className={styles.removeLink}>Quitar</button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <ChipPicker
+                          options={CURRENCIES.filter((c) => c !== edit.currency && !edit.extras.some((e2) => e2.currency === c)).map((c) => ({ value: c, label: `+ ${c}` }))}
+                          value={edit.newExtraCurrency} allowClear
+                          onChange={(newExtraCurrency) => setEdit({ ...edit, newExtraCurrency })}
                         />
-                        <button type="button" onClick={addExtraToEditDraft} disabled={!edit.newExtraCurrency} style={{ color: 'var(--series-1)', fontWeight: 600 }}>Agregar</button>
-                      </div>
+                      </Field>
+                      {edit.newExtraCurrency && (
+                        <div className={styles.addRow}>
+                          <input
+                            placeholder={`Tag para MonIA (ej. ${edit.name.trim().toLowerCase()} ${edit.newExtraCurrency.toLowerCase()})`}
+                            value={edit.newExtraTag} onChange={(e) => setEdit({ ...edit, newExtraTag: e.target.value })}
+                            className={inputClass} style={{ flex: 1 }}
+                          />
+                          <button
+                            type="button" onClick={addExtraToEditDraft}
+                            style={{ minHeight: 'var(--touch-target)', padding: '0 var(--space-2)', borderRadius: 10, background: 'var(--series-1)', color: '#fff', fontWeight: 600 }}
+                          >
+                            Agregar
+                          </button>
+                        </div>
+                      )}
+                      <InfoCard>
+                        El tag es lo que escribís en MonIA para que una compra caiga en esa moneda. MonIA no acepta
+                        espacios: usá guion bajo (arq_eur).
+                      </InfoCard>
                     </div>
                   )}
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={() => handleRenameSave(account.id)} style={{ color: 'var(--series-1)', fontWeight: 600 }}>Guardar</button>
-                    <button onClick={() => setEditingId(null)} style={{ color: 'var(--text-muted)' }}>Cancelar</button>
-                  </div>
-                </div>
+
+                  <EditActions
+                    disabled={!edit.name.trim()} onCancel={() => setEditingId(null)}
+                    onDelete={() => handleArchive(account.id, account.name)} deleteLabel="Eliminar cuenta"
+                  />
+                </form>
               ) : (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-1)' }}>
-                  <h2 style={{ font: 'var(--font-headline)', margin: 0 }}>
-                    {account.name}
-                    {pockets.length === 1 && currency !== 'COP' && <span style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', fontWeight: 400, marginLeft: 6 }}>{currency}</span>}
-                  </h2>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={() => startEdit(account)} style={{ font: 'var(--font-caption)', color: 'var(--text-muted)' }}>Editar</button>
-                    <button onClick={() => handleArchive(account.id, account.name)} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button>
+                <div
+                  className={styles.cardHeader} role="button" tabIndex={0}
+                  onClick={() => startEdit(account)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startEdit(account) } }}
+                >
+                  <span className={styles.avatar}>{account.name.charAt(0).toUpperCase()}</span>
+                  <div className={styles.cardHeaderText}>
+                    <h2 className={styles.cardName}>{account.name}</h2>
+                    <span className={styles.cardSubtitle}>
+                      {pockets.length > 1 ? `Multi-moneda · ${pockets.map((p) => p.currency).join(' · ')}` : currency}
+                    </span>
                   </div>
+                  <button
+                    type="button" className={styles.deleteLink}
+                    onClick={(e) => { e.stopPropagation(); handleArchive(account.id, account.name) }}
+                  >
+                    Eliminar
+                  </button>
                 </div>
               )}
 
+              {isEditing ? null : (
+              <>
               {pockets.length > 1 && (
                 <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
                   {pockets.map((p) => (
@@ -293,6 +344,8 @@ export default function Cuentas() {
                     {movidoAmt > 0 && ` — ${formatByCurrency(movidoAmt, currency)} movidos a otras cuentas`}
                   </div>
                 </>
+              )}
+              </>
               )}
             </Card>
           )

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip } from 'recharts'
 import Card from '../components/ui/Card.jsx'
 import ConfirmDialog from '../components/ui/ConfirmDialog.jsx'
+import { Field, FieldRow, InfoCard, ChipPicker, EditHeader, EditActions, MeterPreview, inputClass } from '../components/ui/FormKit.jsx'
 import { formatCOP, formatByCurrency, formatCompact } from '../lib/format.js'
 import { listAccounts, fetchBalancesForMonth } from '../lib/accountsApi.js'
 import { lastNMonths, fetchMonthlyTrend } from '../lib/panelApi.js'
@@ -10,6 +11,7 @@ import {
   listContributions, addContribution, deleteContribution,
 } from '../lib/savingsApi.js'
 import { createManualTransaction } from '../lib/transactionsApi.js'
+import styles from './MetasAhorro.module.css'
 
 const now = new Date()
 const YEAR = now.getFullYear()
@@ -246,6 +248,12 @@ export default function MetasAhorro() {
 
           const monthsAtPace = monthsToGoalAtCurrentPace(current, target, growthSeries)
 
+          const editTarget = editForm.targetAmount ? Number(editForm.targetAmount) : null
+          const editMonths = monthsUntil(editForm.targetDate)
+          const editSuggested = isEditing && editTarget != null && editMonths
+            ? Math.max(0, (editTarget - current) / editMonths)
+            : null
+
           const plannedMonthly = plannedMonthlyAmount(g)
           const planVsActualRows = plannedMonthly != null
             ? buildPlanVsActualRows(g, lastNMonths(YEAR, MONTH, TREND_MONTHS), goalContributions, propositoTrends[g.id], plannedMonthly)
@@ -254,32 +262,90 @@ export default function MetasAhorro() {
           return (
             <Card key={g.id} className="span-3">
               {isEditing ? (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 'var(--space-2)' }}>
-                  <input placeholder="Nombre" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} style={{ ...formInput, flex: '1 1 160px' }} />
-                  {editForm.kind === 'proposito' && (
-                    <select value={editForm.accountId} onChange={(e) => setEditForm({ ...editForm, accountId: e.target.value })} style={formInput}>
-                      <option value="">Cuenta vinculada…</option>
-                      {hijas.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
-                    </select>
+                <form
+                  onSubmit={(e) => { e.preventDefault(); handleEditSave(g.id) }}
+                  className={styles.editForm}
+                >
+                  <EditHeader
+                    avatar={editForm.name?.trim() ? editForm.name.trim().charAt(0).toUpperCase() : '?'}
+                    caption="Editando meta"
+                    badge={g.kind === 'proposito' ? 'Con propósito' : 'Puntual'} badgeTone="accent"
+                  >
+                    <Field label="Nombre de la meta">
+                      <input
+                        autoFocus value={editForm.name} className={inputClass}
+                        onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                        placeholder="Ej. Viaje, fondo de emergencia"
+                      />
+                    </Field>
+                  </EditHeader>
+
+                  {g.kind === 'proposito' && (
+                    <Field label="Cuenta vinculada" hint="Su saldo es el avance de la meta">
+                      <ChipPicker
+                        options={hijas.map((h) => ({ value: h.id, label: h.name }))}
+                        value={editForm.accountId} allowClear
+                        onChange={(accountId) => setEditForm({ ...editForm, accountId })}
+                      />
+                    </Field>
                   )}
-                  <input type="number" placeholder="Meta $ (opcional)" value={editForm.targetAmount} onChange={(e) => setEditForm({ ...editForm, targetAmount: e.target.value })} style={{ ...formInput, width: 140 }} />
-                  <input type="date" value={editForm.targetDate} onChange={(e) => setEditForm({ ...editForm, targetDate: e.target.value })} style={formInput} />
-                  <button onClick={() => handleEditSave(g.id)} style={{ color: 'var(--series-1)', fontWeight: 600 }}>Guardar</button>
-                  <button onClick={() => setEditingId(null)} style={{ color: 'var(--text-muted)' }}>Cancelar</button>
-                </div>
+
+                  <FieldRow>
+                    <Field label="Meta (opcional)" hint={`En ${goalCurrency}`}>
+                      <input
+                        type="number" step="any" placeholder="0" value={editForm.targetAmount} className={inputClass}
+                        onChange={(e) => setEditForm({ ...editForm, targetAmount: e.target.value })}
+                      />
+                    </Field>
+                    <Field label="Fecha objetivo">
+                      <input
+                        type="date" value={editForm.targetDate} className={inputClass}
+                        onChange={(e) => setEditForm({ ...editForm, targetDate: e.target.value })}
+                      />
+                    </Field>
+                  </FieldRow>
+
+                  {editTarget != null && editTarget > 0 && (
+                    <MeterPreview pct={Math.round((current / editTarget) * 100)} color="var(--series-5)">
+                      {Math.round((current / editTarget) * 100)}% completado — llevás {formatByCurrency(current, goalCurrency)}{' '}
+                      de {formatByCurrency(editTarget, goalCurrency)}
+                    </MeterPreview>
+                  )}
+                  <InfoCard>
+                    {editSuggested != null
+                      ? `Para llegar antes de ${editForm.targetDate} necesitás aportar ~${formatByCurrency(editSuggested, goalCurrency)}/mes.`
+                      : 'Con un monto y una fecha objetivo te calculo cuánto aportar por mes.'}
+                  </InfoCard>
+
+                  <EditActions
+                    disabled={!editForm.name?.trim()} onCancel={() => setEditingId(null)}
+                    onDelete={() => handleArchive(g.id, g.name)} deleteLabel="Eliminar meta"
+                  />
+                </form>
               ) : (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <h2 style={{ font: 'var(--font-headline)', margin: 0 }}>{g.name}</h2>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={() => startEdit(g)} style={{ font: 'var(--font-caption)', color: 'var(--text-muted)' }}>Editar</button>
-                    <button onClick={() => handleArchive(g.id, g.name)} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button>
+                <div
+                  className={styles.cardHeader} role="button" tabIndex={0}
+                  onClick={() => startEdit(g)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startEdit(g) } }}
+                >
+                  <span className={styles.avatar}>{g.name.charAt(0).toUpperCase()}</span>
+                  <div className={styles.cardHeaderText}>
+                    <h2 className={styles.cardName}>{g.name}</h2>
+                    <span className={styles.cardSubtitle}>
+                      {g.kind === 'proposito' ? `Ahorro con propósito — cuenta ${g.accounts?.name ?? '—'}` : 'Meta puntual'}
+                    </span>
                   </div>
+                  <button
+                    type="button" className={styles.deleteLink}
+                    onClick={(e) => { e.stopPropagation(); handleArchive(g.id, g.name) }}
+                  >
+                    Eliminar
+                  </button>
                 </div>
               )}
 
-              <div style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', marginBottom: 8 }}>
-                {g.kind === 'proposito' ? `Ahorro con propósito — cuenta ${g.accounts?.name ?? '—'}` : 'Meta puntual'}
-              </div>
+              {!isEditing && (
+              <>
 
               <div style={{ font: 'var(--font-title)', marginBottom: 4 }}>{formatByCurrency(current, goalCurrency)}</div>
               <div style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', marginBottom: 8 }}>
@@ -395,6 +461,8 @@ export default function MetasAhorro() {
                   Agregar aporte
                 </button>
               </div>
+              </>
+              )}
             </Card>
           )
         })}

@@ -1,0 +1,124 @@
+/* Tarjeta de cuenta hija: el encabezado entero se toca para editar (sin un
+   botón "Editar" aparte, mismo criterio que las filas de Movimientos en
+   Diario/Gastos y las categorías en Ajustes) y, al editar, la tarjeta se
+   expande a ancho completo (`span-3`) para que quepa el formulario. */
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: var(--space-1);
+  cursor: pointer;
+  border-radius: 10px;
+}
+
+.cardHeader:focus-visible {
+  outline: 2px solid var(--series-1);
+  outline-offset: 2px;
+}
+
+.avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font: var(--font-headline);
+  color: var(--series-1);
+  background: color-mix(in srgb, var(--series-1) 14%, var(--surface-1));
+  border: 1px solid var(--border-hairline);
+}
+
+.cardHeaderText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.cardName {
+  font: var(--font-headline);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardSubtitle {
+  font: var(--font-caption);
+  color: var(--text-muted);
+}
+
+.deleteLink {
+  flex-shrink: 0;
+  font: var(--font-caption);
+  color: var(--status-critical);
+  padding: 8px 0 8px 8px;
+}
+
+/* Formulario de edición (ocupa la tarjeta completa). */
+.editForm {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.nameInputRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Bloque de monedas adicionales de una cuenta multi-moneda. */
+.pocketBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--border-hairline);
+  padding-top: 12px;
+}
+
+.pocketList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pocketRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  background: var(--surface-1);
+}
+
+.pocketCode {
+  font: var(--font-body);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.pocketTag {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: var(--font-caption);
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.removeLink {
+  font: var(--font-caption);
+  color: var(--status-critical);
+}
+
+.addRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}

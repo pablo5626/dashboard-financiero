@@ -1,0 +1,409 @@
+/* Estilos de FormKit.jsx — el lenguaje visual de edición de la app (ver
+   SettingsPanel.module.css → categorías, y Diario.module.css → .txEdit*).
+   Valores duplicados a propósito de esos archivos en vez de importarlos: cada
+   módulo CSS de la app es dueño de lo suyo. Solo tokens, nunca hex. */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.fieldRow {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.labelRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.label {
+  font: var(--font-caption);
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.labelHint {
+  font: var(--font-caption);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.helper {
+  font: var(--font-caption);
+  color: var(--text-muted);
+}
+
+.textInput {
+  min-height: var(--touch-target);
+  min-width: 0;
+  border-radius: 10px;
+  border: 1px solid var(--border-hairline);
+  padding: 0 var(--space-1);
+  font: var(--font-body);
+  background: var(--surface-1);
+  color: var(--text-primary);
+}
+
+.infoCard {
+  font: var(--font-caption);
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--series-1) 10%, var(--surface-1));
+  border: 1px solid color-mix(in srgb, var(--series-1) 25%, transparent);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin: 0;
+}
+
+.infoCardWarning {
+  background: color-mix(in srgb, var(--status-warning) 12%, var(--surface-1));
+  border-color: color-mix(in srgb, var(--status-warning) 35%, transparent);
+}
+
+/* Switch estilo iOS — input real (accesible) + dos spans hermanos encima. */
+.switchRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px;
+  border-radius: 12px;
+  background: var(--surface-1);
+}
+
+.switchTrack {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 46px;
+  height: 27px;
+  flex-shrink: 0;
+}
+
+.switchInput {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.switchTrackBg {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--border-hairline);
+  transition: background 0.15s;
+}
+
+.switchInput:checked ~ .switchTrackBg {
+  background: var(--series-1);
+}
+
+.switchThumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 21px;
+  height: 21px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  transition: transform 0.15s;
+}
+
+.switchInput:checked ~ .switchThumb {
+  transform: translateX(19px);
+}
+
+/* Píldoras seleccionables — la elegida se tiñe de --series-1. */
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font: var(--font-footnote);
+  font-weight: 600;
+}
+
+.chipActive {
+  color: var(--series-1);
+  border-color: var(--series-1);
+  background: color-mix(in srgb, var(--series-1) 12%, var(--surface-1));
+}
+
+/* Control segmentado tipo iOS. */
+.segmentRow {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 12px;
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-1);
+}
+
+.segmentButton,
+.segmentButtonActive {
+  flex: 1;
+  min-height: 38px;
+  padding: 0 8px;
+  border-radius: 9px;
+  border: none;
+  font: var(--font-caption);
+  font-weight: 600;
+}
+
+.segmentButton {
+  color: var(--text-secondary);
+  background: transparent;
+}
+
+.segmentButtonActive {
+  background: var(--series-1);
+  color: #fff;
+}
+
+/* Tarjeta de edición inline. */
+.editCard {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  padding: var(--space-2);
+  border-radius: 14px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-hairline);
+}
+
+.editHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.editHeaderBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.captionRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.caption {
+  flex: 1;
+  min-width: 0;
+  font: var(--font-caption);
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.badge {
+  flex-shrink: 0;
+  font: var(--font-caption);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-hairline);
+  color: var(--text-secondary);
+}
+
+.badge_good {
+  color: var(--status-good);
+  background: color-mix(in srgb, var(--status-good) 12%, transparent);
+  border-color: color-mix(in srgb, var(--status-good) 30%, transparent);
+}
+
+.badge_critical {
+  color: var(--status-critical);
+  background: color-mix(in srgb, var(--status-critical) 12%, transparent);
+  border-color: color-mix(in srgb, var(--status-critical) 30%, transparent);
+}
+
+.badge_warning {
+  color: var(--status-warning);
+  background: color-mix(in srgb, var(--status-warning) 12%, transparent);
+  border-color: color-mix(in srgb, var(--status-warning) 35%, transparent);
+}
+
+.badge_accent {
+  color: var(--series-1);
+  background: color-mix(in srgb, var(--series-1) 12%, transparent);
+  border-color: color-mix(in srgb, var(--series-1) 30%, transparent);
+}
+
+.avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 700;
+  flex-shrink: 0;
+  border: 1px solid var(--border-hairline);
+}
+
+.tone_accent {
+  background: color-mix(in srgb, var(--series-1) 14%, var(--surface-1));
+  color: var(--series-1);
+}
+
+.tone_good {
+  background: color-mix(in srgb, var(--status-good) 14%, var(--surface-1));
+  color: var(--status-good);
+}
+
+.tone_critical {
+  background: color-mix(in srgb, var(--status-critical) 14%, var(--surface-1));
+  color: var(--status-critical);
+}
+
+.tone_warning {
+  background: color-mix(in srgb, var(--status-warning) 14%, var(--surface-1));
+  color: var(--status-warning);
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.saveButton {
+  min-height: var(--touch-target);
+  padding: 0 var(--space-2);
+  border-radius: 10px;
+  background: var(--series-1);
+  color: #fff;
+  font-weight: 600;
+}
+
+.saveButton:disabled {
+  opacity: 0.5;
+}
+
+.cancelButton {
+  min-height: var(--touch-target);
+  padding: 0 var(--space-1);
+  color: var(--text-muted);
+}
+
+.deleteButton {
+  margin-left: auto;
+  min-height: var(--touch-target);
+  padding: 0 var(--space-1);
+  font: var(--font-footnote);
+  color: var(--status-critical);
+}
+
+/* Vista previa de avance mientras se edita. */
+.meter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.meterTrack {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--gridline);
+  overflow: hidden;
+}
+
+.meterFill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.15s;
+}
+
+.meterCaption {
+  font: var(--font-caption);
+  color: var(--text-secondary);
+}
+
+/* Hoja modal — mismos valores que .editBackdrop/.editSheet de
+   GastosDiarios.module.css: pantalla completa en móvil, tarjeta centrada en
+   tablet/desktop (≥768px). */
+.sheetBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 100;
+}
+
+@media (min-width: 768px) {
+  .sheetBackdrop {
+    align-items: center;
+    padding: var(--space-2);
+  }
+}
+
+.sheet {
+  position: relative;
+  background: var(--page-plane);
+  padding: max(var(--space-2), env(safe-area-inset-top)) var(--space-2) calc(var(--space-2) + env(safe-area-inset-bottom));
+  width: 100%;
+  max-width: 460px;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+@media (min-width: 768px) {
+  .sheet {
+    background: var(--surface-raised);
+    border: 1px solid var(--border-hairline);
+    border-radius: 28px;
+    padding: var(--space-3);
+    height: auto;
+    max-height: 85dvh;
+    box-shadow: 0 -16px 40px -12px color-mix(in srgb, var(--series-1) 16%, transparent);
+  }
+}
+
+.sheetClose {
+  position: absolute;
+  top: max(6px, env(safe-area-inset-top));
+  right: 6px;
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  z-index: 1;
+}

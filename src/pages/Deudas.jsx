@@ -4,6 +4,7 @@ import { estimateCategoryAxisWidth } from '../lib/chartUtils.js'
 import Card from '../components/ui/Card.jsx'
 import ConfirmDialog from '../components/ui/ConfirmDialog.jsx'
 import StatTile from '../components/ui/StatTile.jsx'
+import { Field, FieldRow, InfoCard, ChipPicker, EditHeader, EditActions, EditSheet, MeterPreview, inputClass } from '../components/ui/FormKit.jsx'
 import { formatCOP, formatByCurrency } from '../lib/format.js'
 import { listAccounts, fetchBalancesForMonth, totalBalanceInCOP } from '../lib/accountsApi.js'
 import { getRates, toCOP } from '../lib/exchangeRatesApi.js'
@@ -15,6 +16,7 @@ import {
   createInstallmentsBulk, generateAmortizationSchedule, deleteUnpaidInstallments,
   addAbono, deleteAbono,
 } from '../lib/debtsApi.js'
+import styles from './Deudas.module.css'
 
 const now = new Date()
 const YEAR = now.getFullYear()
@@ -400,6 +402,10 @@ export default function Deudas() {
     .reduce((sum, d) => sum + toCOP(Number(d.remaining_amount), d.currency, rates), 0)
   const saldoNeto = totalMeDeben - deudaTotal
   const visibleDebts = debts.filter((d) => (d.direction || 'debo') === activeDirection)
+  const editingDebt = editingId ? debts.find((d) => d.id === editingId) : null
+  const editTotal = Number(editForm.totalAmount) || 0
+  const editRemaining = Number(editForm.remainingAmount) || 0
+  const editPctPaid = editTotal > 0 ? Math.round(((editTotal - editRemaining) / editTotal) * 100) : 0
   const healthData = [
     { name: 'Patrimonio', value: patrimonio },
     { name: 'Deuda total', value: deudaTotal },
@@ -476,7 +482,6 @@ export default function Deudas() {
 
         {visibleDebts.map((d) => {
           const pctPaid = d.total_amount > 0 ? Math.round(((d.total_amount - d.remaining_amount) / d.total_amount) * 100) : 0
-          const isEditing = editingId === d.id
           const debtInstallments = installments.filter((i) => i.debt_id === d.id)
           const upcoming = debtInstallments.filter((i) => !i.paid)
           const draft = installmentForm[d.id] ?? { dueDate: '', amount: '' }
@@ -494,43 +499,27 @@ export default function Deudas() {
 
           return (
             <Card key={d.id} className="span-3">
-              {isEditing ? (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 'var(--space-2)' }}>
-                  <input placeholder={d.direction === 'me_deben' ? 'Nombre de la persona' : 'Acreedor'} value={editForm.creditorName} onChange={(e) => setEditForm({ ...editForm, creditorName: e.target.value })} style={{ ...formInput, flex: '1 1 160px' }} />
-                  <input type="number" placeholder="Monto total" value={editForm.totalAmount} onChange={(e) => setEditForm({ ...editForm, totalAmount: e.target.value })} style={{ ...formInput, width: 130 }} />
-                  <input type="number" placeholder="Restante" value={editForm.remainingAmount} onChange={(e) => setEditForm({ ...editForm, remainingAmount: e.target.value })} style={{ ...formInput, width: 130 }} />
-                  <span style={{ ...formInput, width: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }} title="La moneda no se puede editar — los montos no se convierten automáticamente. Borrá y recreá la deuda si hace falta cambiarla.">
-                    {d.currency || 'COP'}
+              <div
+                className={styles.cardHeader} role="button" tabIndex={0}
+                onClick={() => startEdit(d)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startEdit(d) } }}
+              >
+                <span className={`${styles.avatar} ${d.direction === 'me_deben' ? styles.avatarMeDeben : styles.avatarDebo}`}>
+                  {d.creditor_name.charAt(0).toUpperCase()}
+                </span>
+                <div className={styles.cardHeaderText}>
+                  <h2 className={styles.cardName}>{d.creditor_name}</h2>
+                  <span className={styles.cardSubtitle}>
+                    {d.direction === 'me_deben' ? 'Préstamo dado' : 'Deuda'} · {d.currency || 'COP'}
                   </span>
-                  {d.direction === 'me_deben' ? (
-                    <>
-                      <select value={editForm.counterpartyRelationship} onChange={(e) => setEditForm({ ...editForm, counterpartyRelationship: e.target.value })} style={{ ...formInput, width: 150 }}>
-                        <option value="">Relación (opcional)</option>
-                        {RELATIONSHIP_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                      </select>
-                      <input placeholder="Contacto (opcional)" value={editForm.contactInfo} onChange={(e) => setEditForm({ ...editForm, contactInfo: e.target.value })} style={{ ...formInput, width: 150 }} />
-                      <input type="date" value={editForm.expectedPaymentDate} onChange={(e) => setEditForm({ ...editForm, expectedPaymentDate: e.target.value })} style={formInput} />
-                      <input placeholder="Motivo / notas (opcional)" value={editForm.notes} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} style={{ ...formInput, flex: '1 1 160px' }} />
-                    </>
-                  ) : (
-                    <>
-                      <input type="number" placeholder="Cuota mensual" value={editForm.monthlyPayment} onChange={(e) => setEditForm({ ...editForm, monthlyPayment: e.target.value })} style={{ ...formInput, width: 130 }} />
-                      <input type="number" placeholder="Tasa % mensual (opcional)" value={editForm.interestRate} onChange={(e) => setEditForm({ ...editForm, interestRate: e.target.value })} style={{ ...formInput, width: 150 }} />
-                      <input type="number" placeholder="Plazo (# cuotas)" value={editForm.termMonths} onChange={(e) => setEditForm({ ...editForm, termMonths: e.target.value })} style={{ ...formInput, width: 130 }} />
-                    </>
-                  )}
-                  <button onClick={() => handleEditSave(d.id)} style={{ color: 'var(--series-1)', fontWeight: 600 }}>Guardar</button>
-                  <button onClick={() => setEditingId(null)} style={{ color: 'var(--text-muted)' }}>Cancelar</button>
                 </div>
-              ) : (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-1)' }}>
-                  <h2 style={{ font: 'var(--font-headline)', margin: 0 }}>{d.creditor_name}</h2>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={() => startEdit(d)} style={{ font: 'var(--font-caption)', color: 'var(--text-muted)' }}>Editar</button>
-                    <button onClick={() => handleArchive(d.id, d.creditor_name, d.direction)} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button>
-                  </div>
-                </div>
-              )}
+                <button
+                  type="button" className={styles.deleteLink}
+                  onClick={(e) => { e.stopPropagation(); handleArchive(d.id, d.creditor_name, d.direction) }}
+                >
+                  Eliminar
+                </button>
+              </div>
 
               <div style={{ font: 'var(--font-title)', marginBottom: 4 }}>{formatByCurrency(d.remaining_amount, d.currency)} restantes</div>
               <div style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', marginBottom: 8 }}>
@@ -703,6 +692,126 @@ export default function Deudas() {
           </p></Card>
         )}
       </div>
+
+      <EditSheet open={!!editingDebt} onClose={() => setEditingId(null)} title="Editar deuda">
+        {editingDebt && (
+          <form
+            onSubmit={(e) => { e.preventDefault(); handleEditSave(editingDebt.id) }}
+            className={styles.sheetForm}
+          >
+            <EditHeader
+              avatar={editForm.creditorName?.trim() ? editForm.creditorName.trim().charAt(0).toUpperCase() : '?'}
+              tone={editingDebt.direction === 'me_deben' ? 'good' : 'critical'}
+              caption={editingDebt.direction === 'me_deben' ? 'Editando préstamo' : 'Editando deuda'}
+              badge={editingDebt.direction === 'me_deben' ? 'Me deben' : 'Debo'}
+              badgeTone={editingDebt.direction === 'me_deben' ? 'good' : 'critical'}
+            >
+              <Field label={editingDebt.direction === 'me_deben' ? 'Nombre de la persona' : 'Acreedor'}>
+                <input
+                  autoFocus value={editForm.creditorName} className={inputClass}
+                  onChange={(e) => setEditForm({ ...editForm, creditorName: e.target.value })}
+                />
+              </Field>
+            </EditHeader>
+
+            <FieldRow>
+              <Field label={editingDebt.direction === 'me_deben' ? 'Monto prestado' : 'Monto total'}>
+                <input
+                  type="number" step="any" value={editForm.totalAmount} className={inputClass}
+                  onChange={(e) => setEditForm({ ...editForm, totalAmount: e.target.value })}
+                />
+              </Field>
+              <Field label="Restante">
+                <input
+                  type="number" step="any" value={editForm.remainingAmount} className={inputClass}
+                  onChange={(e) => setEditForm({ ...editForm, remainingAmount: e.target.value })}
+                />
+              </Field>
+            </FieldRow>
+
+            <MeterPreview pct={editPctPaid} color="var(--series-3)">
+              {editPctPaid}% {editingDebt.direction === 'me_deben' ? 'recuperado' : 'pagado'} — restan{' '}
+              {formatByCurrency(editRemaining, editingDebt.currency)} de {formatByCurrency(editTotal, editingDebt.currency)}
+            </MeterPreview>
+            {editRemaining > editTotal && (
+              <InfoCard tone="warning">El restante es mayor que el monto total — revisá los dos números.</InfoCard>
+            )}
+
+            <Field label="Moneda" hint="No se puede cambiar">
+              <span className={styles.lockedPill}>{editingDebt.currency || 'COP'}</span>
+            </Field>
+            <InfoCard>
+              Los montos no se convierten solos al cambiar de moneda. Si hace falta otra, borrá la deuda y
+              volvé a crearla.
+            </InfoCard>
+
+            {editingDebt.direction === 'me_deben' ? (
+              <>
+                <span className={styles.sectionLabel}>Contacto y fechas</span>
+                <Field label="Relación">
+                  <ChipPicker
+                    options={RELATIONSHIP_OPTIONS} value={editForm.counterpartyRelationship} allowClear
+                    onChange={(counterpartyRelationship) => setEditForm({ ...editForm, counterpartyRelationship })}
+                  />
+                </Field>
+                <Field label="Contacto">
+                  <input
+                    placeholder="Teléfono, correo…" value={editForm.contactInfo} className={inputClass}
+                    onChange={(e) => setEditForm({ ...editForm, contactInfo: e.target.value })}
+                  />
+                </Field>
+                <Field label="Pago esperado">
+                  <input
+                    type="date" value={editForm.expectedPaymentDate} className={inputClass}
+                    onChange={(e) => setEditForm({ ...editForm, expectedPaymentDate: e.target.value })}
+                  />
+                </Field>
+                <Field label="Motivo o notas">
+                  <input
+                    placeholder="Para qué fue" value={editForm.notes} className={inputClass}
+                    onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                  />
+                </Field>
+              </>
+            ) : (
+              <>
+                <span className={styles.sectionLabel}>Cuotas e intereses</span>
+                <FieldRow>
+                  <Field label="Cuota mensual">
+                    <input
+                      type="number" step="any" value={editForm.monthlyPayment} className={inputClass}
+                      onChange={(e) => setEditForm({ ...editForm, monthlyPayment: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="Tasa % mensual">
+                    <input
+                      type="number" step="any" value={editForm.interestRate} className={inputClass}
+                      onChange={(e) => setEditForm({ ...editForm, interestRate: e.target.value })}
+                    />
+                  </Field>
+                </FieldRow>
+                <Field label="Plazo (# cuotas)">
+                  <input
+                    type="number" step="1" value={editForm.termMonths} className={inputClass}
+                    onChange={(e) => setEditForm({ ...editForm, termMonths: e.target.value })}
+                  />
+                </Field>
+                <InfoCard>
+                  Si cambiás el monto total o el restante y la deuda tiene tasa y plazo, el cronograma de cuotas
+                  pendientes se regenera — te pido confirmar antes de reemplazarlas.
+                </InfoCard>
+              </>
+            )}
+
+            <EditActions
+              disabled={!editForm.creditorName?.trim() || !editForm.totalAmount || !editForm.remainingAmount}
+              onCancel={() => setEditingId(null)}
+              onDelete={() => { setEditingId(null); handleArchive(editingDebt.id, editingDebt.creditor_name, editingDebt.direction) }}
+              deleteLabel={editingDebt.direction === 'me_deben' ? 'Eliminar préstamo' : 'Eliminar deuda'}
+            />
+          </form>
+        )}
+      </EditSheet>
 
       <ConfirmDialog
         open={!!confirmArchive}

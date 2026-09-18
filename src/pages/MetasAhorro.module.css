@@ -1,0 +1,69 @@
+/* Tarjeta de meta: el encabezado se toca para editar (sin botón "Editar"
+   aparte) y la tarjeta se convierte en formulario inline con una proyección
+   de aporte mensual que se recalcula mientras se escribe. El avatar usa
+   --series-5, el mismo color de la barra de avance de la meta. */
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: var(--space-1);
+  cursor: pointer;
+  border-radius: 10px;
+}
+
+.cardHeader:focus-visible {
+  outline: 2px solid var(--series-1);
+  outline-offset: 2px;
+}
+
+.avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font: var(--font-headline);
+  color: var(--series-5);
+  background: color-mix(in srgb, var(--series-5) 14%, var(--surface-1));
+  border: 1px solid var(--border-hairline);
+}
+
+.cardHeaderText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.cardName {
+  font: var(--font-headline);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardSubtitle {
+  font: var(--font-caption);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deleteLink {
+  flex-shrink: 0;
+  font: var(--font-caption);
+  color: var(--status-critical);
+  padding: 8px 0 8px 8px;
+}
+
+.editForm {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: var(--space-1);
+}

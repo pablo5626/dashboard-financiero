@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { IconSettings, IconClose, IconChevronRight, IconTag, IconHash, IconAccounts, IconDebts, IconGoals, IconExchange, IconExpenses, IconBudget } from './icons.jsx'
 import ColorSwatchPicker from './ui/ColorSwatchPicker.jsx'
 import ConfirmDialog from './ui/ConfirmDialog.jsx'
+import { Field, InfoCard, SwitchRow, ChipPicker, Segmented } from './ui/FormKit.jsx'
 import { listCategories, createCategory, updateCategory, archiveCategory } from '../lib/categoriesApi.js'
 import { backfillPurposeCategoryStats, markLoanTransactionReviewed, isReservedTag } from '../lib/transactionsApi.js'
 import { listTags, createTag, deleteTag } from '../lib/tagsApi.js'
@@ -48,6 +49,9 @@ const emptyNewDebt = {
 const emptyNewGoal = { kind: 'puntual', name: '', accountId: '', targetAmount: '', targetDate: '' }
 
 const emptyNewFixedExpense = { name: '', amount: '', dueDay: '', frequency: 'mensual', accountId: '' }
+
+const CURRENCY_OPTIONS = CURRENCIES.map((c) => ({ value: c, label: c }))
+const ACCOUNT_TYPE_OPTIONS = [...CURRENCY_OPTIONS, { value: MULTI, label: 'Multi-moneda' }]
 
 // Menú raíz de "Ajustes" — una fila por sección, patrón lista de Ajustes de
 // iOS (glifo + título + subtítulo + chevron). Agregar una sección nueva es
@@ -123,6 +127,7 @@ export default function SettingsPanel() {
   const [savingRatePair, setSavingRatePair] = useState(null) // "base_quote" | null
   const [fetchingRatePair, setFetchingRatePair] = useState(null) // "base_quote" | null
   const [rateFetchError, setRateFetchError] = useState({}) // "base_quote" -> string | undefined
+  const [editingRatePair, setEditingRatePair] = useState('') // "base_quote" en edición, o ''
 
   const [budgetSettings, setBudgetSettings] = useState({ budgetAlertsEnabled: true, budgetAlertThresholdPct: 100 })
   const [savingBudgetSettings, setSavingBudgetSettings] = useState(false)
@@ -473,6 +478,7 @@ export default function SettingsPanel() {
     try {
       await setRate(base, quote, Number(input))
       setRateInputs({ ...rateInputs, [pairKey]: '' })
+      setEditingRatePair('')
       setRates(await getRates())
       // Cuentas.jsx también edita/muestra tasas inline en cada cuenta y sigue
       // montado debajo de este panel mientras se guarda acá — mismo patrón de
@@ -513,11 +519,14 @@ export default function SettingsPanel() {
     setOpen(false)
     setSection(null)
     setEditingId('')
+    setEditingRatePair('')
     setError(null)
     window.dispatchEvent(new Event('dashboard:settings-closed'))
   }
 
   const activeSection = SETTINGS_SECTIONS.find((s) => s.key === section)
+  const hasMadre = accounts.some((a) => a.kind === 'madre')
+  const fixedExpenseCurrency = accounts.find((a) => a.id === newFixedExpense.accountId)?.currency || 'COP'
 
   return (
     <>
@@ -904,78 +913,108 @@ export default function SettingsPanel() {
             <>
             <h3 className={styles.sectionTitle}>Cuentas</h3>
             <p className={styles.hint}>
-              {accounts.some((a) => a.kind === 'madre')
+              {hasMadre
                 ? 'Creá una cuenta hija nueva — para renombrar, archivar o editar saldos de una ya existente, andá a la página "Cuentas".'
-                : 'Todavía no tenés una cuenta madre — creála primero (marcá la casilla de abajo) antes de agregar hijas.'}
+                : 'Todavía no tenés una cuenta madre — creála primero (activá el interruptor de abajo) antes de agregar hijas.'}
             </p>
 
-            <form onSubmit={handleCreateAccount} className={styles.createForm} style={{ borderTop: 'none', paddingTop: 0 }}>
-              <input
-                placeholder={newAccount.isMadre ? 'Nombre (ej. Bold)' : 'Nombre (ej. Pibank)'} value={newAccount.name}
-                onChange={(e) => setNewAccount({ ...newAccount, name: e.target.value })}
-                className={styles.textInput}
-              />
-
-              {!accounts.some((a) => a.kind === 'madre') && (
-                <label className={styles.checkboxRow}>
+            <form onSubmit={handleCreateAccount} className={`${styles.editForm} ${styles.categoryEditCard}`}>
+              <div className={styles.categoryEditHeader}>
+                <span className={`${styles.categoryEditAvatar} ${styles.avatarAccent}`}>
+                  {newAccount.name.trim() ? newAccount.name.trim().charAt(0).toUpperCase() : <IconAccounts width={26} height={26} />}
+                </span>
+                <Field label={newAccount.isMadre ? 'Nombre de la cuenta madre' : 'Nombre de la cuenta'}>
                   <input
-                    type="checkbox" checked={newAccount.isMadre}
-                    onChange={(e) => setNewAccount({ ...newAccount, isMadre: e.target.checked })}
+                    placeholder={newAccount.isMadre ? 'Ej. Bold' : 'Ej. Pibank, Nequi, Dale'} value={newAccount.name}
+                    onChange={(e) => setNewAccount({ ...newAccount, name: e.target.value })}
+                    className={styles.textInput}
                   />
-                  Es la cuenta madre (de donde sale la distribución mensual hacia las hijas)
-                </label>
-              )}
+                </Field>
+              </div>
 
-              {!newAccount.isMadre && (
-                <select
-                  value={newAccount.type}
-                  onChange={(e) => setNewAccount({ ...newAccount, type: e.target.value, pockets: [], draftCurrency: '', draftAmount: '' })}
-                  className={styles.textInput}
-                >
-                  {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                  <option value={MULTI}>Multi-moneda</option>
-                </select>
-              )}
-
-              {!newAccount.isMadre && newAccount.type !== MULTI && (
-                <input
-                  type="number" placeholder="Saldo inicial (opcional)" value={newAccount.initialBalance}
-                  onChange={(e) => setNewAccount({ ...newAccount, initialBalance: e.target.value })}
-                  className={styles.textInput}
+              {!hasMadre && (
+                <SwitchRow
+                  title="Es la cuenta madre"
+                  helper="De acá sale la distribución mensual hacia las hijas. Solo hay una y siempre es en COP."
+                  checked={newAccount.isMadre}
+                  onChange={(isMadre) => setNewAccount({ ...newAccount, isMadre })}
                 />
               )}
 
-              {!newAccount.isMadre && newAccount.type === MULTI && (
-                <div className={styles.editForm} style={{ border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 8 }}>
-                  <p className={styles.hint} style={{ margin: 0 }}>
-                    Agregá cada moneda que tiene esta cuenta (mínimo 2) y cuánto tiene hoy — opcional, se carga como saldo inicial de este mes.
-                  </p>
-                  {newAccount.pockets.map((p) => (
-                    <div key={p.currency} className={styles.editFormRow}>
-                      <span style={{ flex: 1, font: 'var(--font-body)' }}>{p.currency}{p.amount ? ` — ${p.amount}` : ''}</span>
-                      <button type="button" onClick={() => removePocketFromNewAccount(p.currency)} className={styles.archiveLink}>Quitar</button>
-                    </div>
-                  ))}
-                  <div className={styles.editFormRow} style={{ flexWrap: 'wrap' }}>
-                    <select
-                      value={newAccount.draftCurrency}
-                      onChange={(e) => setNewAccount({ ...newAccount, draftCurrency: e.target.value })}
-                      className={styles.textInput}
-                      style={{ flex: '1 1 100px', minWidth: 0 }}
-                    >
-                      <option value="">+ moneda…</option>
-                      {CURRENCIES.filter((c) => !newAccount.pockets.some((p) => p.currency === c)).map((c) => <option key={c} value={c}>{c}</option>)}
-                    </select>
+              {!newAccount.isMadre && (
+                <Field label="Moneda">
+                  <ChipPicker
+                    options={ACCOUNT_TYPE_OPTIONS} value={newAccount.type}
+                    onChange={(type) => setNewAccount({ ...newAccount, type, pockets: [], draftCurrency: '', draftAmount: '' })}
+                  />
+                </Field>
+              )}
+
+              {!newAccount.isMadre && newAccount.type !== MULTI && (
+                <div className={`${styles.categoryFieldGroup} ${styles.categoryEditBudgetGroup}`}>
+                  <Field label="Saldo inicial (opcional)" hint={`En ${newAccount.type}`}>
                     <input
-                      type="number" placeholder="Cuánto tiene (opcional)" value={newAccount.draftAmount}
-                      onChange={(e) => setNewAccount({ ...newAccount, draftAmount: e.target.value })}
+                      type="number" step="any" placeholder="0" value={newAccount.initialBalance}
+                      onChange={(e) => setNewAccount({ ...newAccount, initialBalance: e.target.value })}
                       className={styles.textInput}
-                      style={{ flex: '1 1 120px', minWidth: 0 }}
                     />
-                    <button type="button" onClick={addPocketToNewAccount} disabled={!newAccount.draftCurrency} className={styles.saveButton} style={{ flexShrink: 0 }}>
-                      Agregar
-                    </button>
+                  </Field>
+                  <InfoCard>
+                    Se carga una sola vez, al crear la cuenta — después el saldo se calcula solo con tus movimientos
+                    y transferencias.
+                  </InfoCard>
+                </div>
+              )}
+
+              {!newAccount.isMadre && newAccount.type === MULTI && (
+                <div className={`${styles.categoryFieldGroup} ${styles.categoryEditBudgetGroup}`}>
+                  <div className={styles.categoryLabelRow}>
+                    <span className={styles.categoryLabel}>Monedas de la cuenta</span>
+                    <span className={styles.categoryLabelHint}>Mínimo 2</span>
                   </div>
+
+                  {newAccount.pockets.length > 0 && (
+                    <div className={styles.pocketList}>
+                      {newAccount.pockets.map((p, i) => (
+                        <div key={p.currency} className={styles.pocketRow}>
+                          <span className={styles.pocketCode}>{p.currency}</span>
+                          {i === 0 && <span className={styles.pocketBadge}>Principal</span>}
+                          <span className={styles.pocketAmount}>
+                            {p.amount ? formatByCurrency(Number(p.amount), p.currency) : 'Sin saldo inicial'}
+                          </span>
+                          <button type="button" onClick={() => removePocketFromNewAccount(p.currency)} className={styles.archiveLink}>
+                            Quitar
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <span className={styles.categoryHelperText}>Tocá una moneda para agregarla.</span>
+                  <ChipPicker
+                    options={CURRENCIES.filter((c) => !newAccount.pockets.some((p) => p.currency === c)).map((c) => ({ value: c, label: c }))}
+                    value={newAccount.draftCurrency} allowClear
+                    onChange={(draftCurrency) => setNewAccount({ ...newAccount, draftCurrency })}
+                  />
+
+                  {newAccount.draftCurrency && (
+                    <div className={styles.editFormRow}>
+                      <input
+                        type="number" step="any" placeholder={`Cuánto tiene en ${newAccount.draftCurrency} (opcional)`}
+                        value={newAccount.draftAmount}
+                        onChange={(e) => setNewAccount({ ...newAccount, draftAmount: e.target.value })}
+                        className={styles.textInput} style={{ flex: 1, minWidth: 0 }}
+                      />
+                      <button type="button" onClick={addPocketToNewAccount} className={styles.saveButton} style={{ flexShrink: 0 }}>
+                        Agregar
+                      </button>
+                    </div>
+                  )}
+
+                  <InfoCard>
+                    La primera moneda que agregues es la principal de la cuenta. Lo que escribas como "cuánto tiene"
+                    se carga como saldo inicial de este mes.
+                  </InfoCard>
                   {newAccount.pockets.length < 2 && (
                     <p className={styles.warning}>Agregá al menos 2 monedas.</p>
                   )}
@@ -992,7 +1031,7 @@ export default function SettingsPanel() {
             </form>
 
             {accountCreated && (
-              <p className={styles.hint}>Cuenta "{accountCreated}" creada — ya aparece en la página "Cuentas".</p>
+              <p className={styles.successCard}>Cuenta "{accountCreated}" creada — ya aparece en la página "Cuentas".</p>
             )}
             </>
             )}
@@ -1005,120 +1044,152 @@ export default function SettingsPanel() {
               existente, andá a la página "Deudas".
             </p>
 
-            {newDebt.sourceTransactionId && (
-              <p className={styles.hint} style={{ color: 'var(--series-1)' }}>
-                Precargado desde un movimiento importado — revisá los datos y confirmá.{' '}
-                <button type="button" onClick={() => setNewDebt(emptyNewDebt)} className={styles.archiveLink} style={{ color: 'var(--text-muted)' }}>
-                  Cancelar precarga
-                </button>
-              </p>
-            )}
+            <form onSubmit={handleCreateDebt} className={`${styles.editForm} ${styles.categoryEditCard}`}>
+              {newDebt.sourceTransactionId && (
+                <InfoCard>
+                  Precargado desde un movimiento importado — revisá los datos y confirmá.{' '}
+                  <button type="button" onClick={() => setNewDebt(emptyNewDebt)} className={styles.archiveLink}>
+                    Cancelar precarga
+                  </button>
+                </InfoCard>
+              )}
 
-            <form onSubmit={handleCreateDebt} className={styles.createForm} style={{ borderTop: 'none', paddingTop: 0 }}>
-              <div className={styles.segmentRow}>
-                <button
-                  type="button"
-                  className={newDebt.direction === 'debo' ? styles.segmentButtonActive : styles.segmentButton}
-                  onClick={() => setNewDebt({ ...emptyNewDebt, direction: 'debo' })}
-                >
-                  Debo
-                </button>
-                <button
-                  type="button"
-                  className={newDebt.direction === 'me_deben' ? styles.segmentButtonActive : styles.segmentButton}
-                  onClick={() => setNewDebt({ ...emptyNewDebt, direction: 'me_deben' })}
-                >
-                  Me deben
-                </button>
-              </div>
-
-              <input
-                placeholder={newDebt.direction === 'me_deben' ? 'Nombre de la persona' : 'Acreedor'}
-                value={newDebt.creditorName}
-                onChange={(e) => setNewDebt({ ...newDebt, creditorName: e.target.value })}
-                className={styles.textInput}
+              <Segmented
+                options={[{ value: 'debo', label: 'Debo' }, { value: 'me_deben', label: 'Me deben' }]}
+                value={newDebt.direction}
+                onChange={(direction) => setNewDebt({ ...emptyNewDebt, direction })}
               />
 
-              <div className={styles.editFormRow}>
-                <input
-                  type="number" placeholder={newDebt.direction === 'me_deben' ? 'Monto prestado' : 'Monto total'}
-                  value={newDebt.totalAmount} onChange={(e) => setNewDebt({ ...newDebt, totalAmount: e.target.value })}
-                  className={styles.textInput} style={{ flex: 1, minWidth: 0 }}
-                />
-                <input
-                  type="number" placeholder="Restante" value={newDebt.remainingAmount}
-                  onChange={(e) => setNewDebt({ ...newDebt, remainingAmount: e.target.value })}
-                  className={styles.textInput} style={{ flex: 1, minWidth: 0 }}
-                />
-                <select
-                  value={newDebt.currency} onChange={(e) => setNewDebt({ ...newDebt, currency: e.target.value })}
-                  className={styles.textInput} style={{ flex: '0 0 80px' }}
-                >
-                  {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
+              <div className={styles.categoryEditHeader}>
+                <span className={`${styles.categoryEditAvatar} ${newDebt.direction === 'me_deben' ? styles.avatarGood : styles.avatarCritical}`}>
+                  {newDebt.creditorName.trim() ? newDebt.creditorName.trim().charAt(0).toUpperCase() : <IconDebts width={26} height={26} />}
+                </span>
+                <Field label={newDebt.direction === 'me_deben' ? 'Nombre de la persona' : 'Acreedor'}>
+                  <input
+                    placeholder={newDebt.direction === 'me_deben' ? 'Ej. Juan' : 'Ej. Banco, tarjeta, familiar'}
+                    value={newDebt.creditorName}
+                    onChange={(e) => setNewDebt({ ...newDebt, creditorName: e.target.value })}
+                    className={styles.textInput}
+                  />
+                </Field>
               </div>
 
-              {newDebt.direction === 'me_deben' ? (
-                <>
-                  <select
-                    value={newDebt.counterpartyRelationship}
-                    onChange={(e) => setNewDebt({ ...newDebt, counterpartyRelationship: e.target.value })}
-                    className={styles.textInput}
-                  >
-                    <option value="">Relación (opcional)</option>
-                    {RELATIONSHIP_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
+              <div className={styles.fieldRow}>
+                <Field label={newDebt.direction === 'me_deben' ? 'Monto prestado' : 'Monto total'}>
                   <input
-                    placeholder="Contacto (opcional)" value={newDebt.contactInfo}
-                    onChange={(e) => setNewDebt({ ...newDebt, contactInfo: e.target.value })}
+                    type="number" step="any" placeholder="0" value={newDebt.totalAmount}
+                    onChange={(e) => setNewDebt({ ...newDebt, totalAmount: e.target.value })}
                     className={styles.textInput}
                   />
-                  <div className={styles.editFormRow}>
-                    <input
-                      type="date" value={newDebt.startDate}
-                      onChange={(e) => setNewDebt({ ...newDebt, startDate: e.target.value })}
-                      className={styles.textInput} style={{ flex: 1, minWidth: 0 }}
-                    />
-                    <input
-                      type="date" placeholder="Fecha esperada de pago" value={newDebt.expectedPaymentDate}
-                      onChange={(e) => setNewDebt({ ...newDebt, expectedPaymentDate: e.target.value })}
-                      className={styles.textInput} style={{ flex: 1, minWidth: 0 }}
-                    />
-                  </div>
+                </Field>
+                <Field label="Restante">
                   <input
-                    placeholder="Motivo / notas (opcional)" value={newDebt.notes}
-                    onChange={(e) => setNewDebt({ ...newDebt, notes: e.target.value })}
+                    type="number" step="any" placeholder="0" value={newDebt.remainingAmount}
+                    onChange={(e) => setNewDebt({ ...newDebt, remainingAmount: e.target.value })}
                     className={styles.textInput}
                   />
-                </>
-              ) : (
-                <>
-                  <div className={styles.editFormRow}>
-                    <input
-                      type="number" placeholder="Cuota mensual (opcional)" value={newDebt.monthlyPayment}
-                      onChange={(e) => setNewDebt({ ...newDebt, monthlyPayment: e.target.value })}
-                      className={styles.textInput} style={{ flex: 1, minWidth: 0 }}
-                    />
-                    <input
-                      type="number" placeholder="Tasa % mensual (opcional)" value={newDebt.interestRate}
-                      onChange={(e) => setNewDebt({ ...newDebt, interestRate: e.target.value })}
-                      className={styles.textInput} style={{ flex: 1, minWidth: 0 }}
-                    />
-                  </div>
-                  <div className={styles.editFormRow}>
-                    <input
-                      type="number" placeholder="Plazo (# cuotas, opcional)" value={newDebt.termMonths}
-                      onChange={(e) => setNewDebt({ ...newDebt, termMonths: e.target.value })}
-                      className={styles.textInput} style={{ flex: 1, minWidth: 0 }}
-                    />
-                    <input
-                      type="date" value={newDebt.startDate}
-                      onChange={(e) => setNewDebt({ ...newDebt, startDate: e.target.value })}
-                      className={styles.textInput} style={{ flex: 1, minWidth: 0 }}
-                    />
-                  </div>
-                </>
-              )}
+                </Field>
+              </div>
+
+              <Field label="Moneda" hint="No se puede cambiar después">
+                <ChipPicker
+                  options={CURRENCY_OPTIONS} value={newDebt.currency}
+                  onChange={(currency) => setNewDebt({ ...newDebt, currency })}
+                />
+              </Field>
+
+              <details
+                key={`${newDebt.direction}-${newDebt.sourceTransactionId ?? ''}`}
+                className={styles.optionalBlock} open={newDebt.sourceTransactionId ? true : undefined}
+              >
+                <summary className={styles.optionalSummary}>
+                  <span className={styles.categoryLabel}>
+                    {newDebt.direction === 'me_deben' ? 'Contacto y fechas (opcional)' : 'Cuotas e intereses (opcional)'}
+                  </span>
+                  <IconChevronRight width={16} height={16} className={styles.optionalChevron} />
+                </summary>
+
+                <div className={styles.optionalBody}>
+                  {newDebt.direction === 'me_deben' ? (
+                    <>
+                      <Field label="Relación">
+                        <ChipPicker
+                          options={RELATIONSHIP_OPTIONS} value={newDebt.counterpartyRelationship} allowClear
+                          onChange={(counterpartyRelationship) => setNewDebt({ ...newDebt, counterpartyRelationship })}
+                        />
+                      </Field>
+                      <Field label="Contacto">
+                        <input
+                          placeholder="Teléfono, correo…" value={newDebt.contactInfo}
+                          onChange={(e) => setNewDebt({ ...newDebt, contactInfo: e.target.value })}
+                          className={styles.textInput}
+                        />
+                      </Field>
+                      <div className={styles.fieldRow}>
+                        <Field label="Fecha del préstamo">
+                          <input
+                            type="date" value={newDebt.startDate}
+                            onChange={(e) => setNewDebt({ ...newDebt, startDate: e.target.value })}
+                            className={styles.textInput}
+                          />
+                        </Field>
+                        <Field label="Pago esperado">
+                          <input
+                            type="date" value={newDebt.expectedPaymentDate}
+                            onChange={(e) => setNewDebt({ ...newDebt, expectedPaymentDate: e.target.value })}
+                            className={styles.textInput}
+                          />
+                        </Field>
+                      </div>
+                      <Field label="Motivo o notas">
+                        <input
+                          placeholder="Para qué fue" value={newDebt.notes}
+                          onChange={(e) => setNewDebt({ ...newDebt, notes: e.target.value })}
+                          className={styles.textInput}
+                        />
+                      </Field>
+                    </>
+                  ) : (
+                    <>
+                      <div className={styles.fieldRow}>
+                        <Field label="Cuota mensual">
+                          <input
+                            type="number" step="any" placeholder="0" value={newDebt.monthlyPayment}
+                            onChange={(e) => setNewDebt({ ...newDebt, monthlyPayment: e.target.value })}
+                            className={styles.textInput}
+                          />
+                        </Field>
+                        <Field label="Tasa % mensual">
+                          <input
+                            type="number" step="any" placeholder="0" value={newDebt.interestRate}
+                            onChange={(e) => setNewDebt({ ...newDebt, interestRate: e.target.value })}
+                            className={styles.textInput}
+                          />
+                        </Field>
+                      </div>
+                      <div className={styles.fieldRow}>
+                        <Field label="Plazo (# cuotas)">
+                          <input
+                            type="number" step="1" placeholder="0" value={newDebt.termMonths}
+                            onChange={(e) => setNewDebt({ ...newDebt, termMonths: e.target.value })}
+                            className={styles.textInput}
+                          />
+                        </Field>
+                        <Field label="Fecha de inicio">
+                          <input
+                            type="date" value={newDebt.startDate}
+                            onChange={(e) => setNewDebt({ ...newDebt, startDate: e.target.value })}
+                            className={styles.textInput}
+                          />
+                        </Field>
+                      </div>
+                      <InfoCard>
+                        Con tasa y plazo, la página "Deudas" genera sola el calendario de cuotas.
+                      </InfoCard>
+                    </>
+                  )}
+                </div>
+              </details>
 
               <button
                 type="submit"
@@ -1130,7 +1201,7 @@ export default function SettingsPanel() {
             </form>
 
             {debtCreated && (
-              <p className={styles.hint}>"{debtCreated}" registrada — ya aparece en la página "Deudas".</p>
+              <p className={styles.successCard}>"{debtCreated}" registrada — ya aparece en la página "Deudas".</p>
             )}
             </>
             )}
@@ -1142,52 +1213,60 @@ export default function SettingsPanel() {
               Creá una meta nueva — para aportes, editar o eliminar una ya existente, andá a la página "Metas".
             </p>
 
-            <form onSubmit={handleCreateGoal} className={styles.createForm} style={{ borderTop: 'none', paddingTop: 0 }}>
-              <div className={styles.segmentRow}>
-                <button
-                  type="button"
-                  className={newGoal.kind === 'puntual' ? styles.segmentButtonActive : styles.segmentButton}
-                  onClick={() => setNewGoal({ ...emptyNewGoal, kind: 'puntual' })}
-                >
-                  Meta puntual
-                </button>
-                <button
-                  type="button"
-                  className={newGoal.kind === 'proposito' ? styles.segmentButtonActive : styles.segmentButton}
-                  onClick={() => setNewGoal({ ...emptyNewGoal, kind: 'proposito' })}
-                >
-                  Ahorro con propósito
-                </button>
-              </div>
-
-              <input
-                placeholder="Nombre" value={newGoal.name}
-                onChange={(e) => setNewGoal({ ...newGoal, name: e.target.value })}
-                className={styles.textInput}
+            <form onSubmit={handleCreateGoal} className={`${styles.editForm} ${styles.categoryEditCard}`}>
+              <Segmented
+                options={[{ value: 'puntual', label: 'Meta puntual' }, { value: 'proposito', label: 'Ahorro con propósito' }]}
+                value={newGoal.kind}
+                onChange={(kind) => setNewGoal({ ...emptyNewGoal, kind })}
               />
+              <InfoCard>
+                {newGoal.kind === 'puntual'
+                  ? 'El progreso es la suma de los aportes que vayas registrando en la página "Metas".'
+                  : 'El progreso es el saldo real de la cuenta vinculada — no hace falta registrar aportes.'}
+              </InfoCard>
+
+              <div className={styles.categoryEditHeader}>
+                <span className={`${styles.categoryEditAvatar} ${styles.avatarAccent}`}>
+                  {newGoal.name.trim() ? newGoal.name.trim().charAt(0).toUpperCase() : <IconGoals width={26} height={26} />}
+                </span>
+                <Field label="Nombre de la meta">
+                  <input
+                    placeholder="Ej. Viaje, fondo de emergencia" value={newGoal.name}
+                    onChange={(e) => setNewGoal({ ...newGoal, name: e.target.value })}
+                    className={styles.textInput}
+                  />
+                </Field>
+              </div>
 
               {newGoal.kind === 'proposito' && (
-                <select
-                  value={newGoal.accountId} onChange={(e) => setNewGoal({ ...newGoal, accountId: e.target.value })}
-                  className={styles.textInput}
-                >
-                  <option value="">Cuenta vinculada…</option>
-                  {accounts.filter((a) => a.kind === 'hija').map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
-                </select>
+                <Field label="Cuenta vinculada">
+                  <ChipPicker
+                    options={accounts.filter((a) => a.kind === 'hija').map((h) => ({ value: h.id, label: h.name }))}
+                    value={newGoal.accountId} allowClear
+                    onChange={(accountId) => setNewGoal({ ...newGoal, accountId })}
+                  />
+                </Field>
               )}
 
-              <div className={styles.editFormRow}>
-                <input
-                  type="number" placeholder="Meta $ (opcional)" value={newGoal.targetAmount}
-                  onChange={(e) => setNewGoal({ ...newGoal, targetAmount: e.target.value })}
-                  className={styles.textInput} style={{ flex: 1, minWidth: 0 }}
-                />
-                <input
-                  type="date" value={newGoal.targetDate}
-                  onChange={(e) => setNewGoal({ ...newGoal, targetDate: e.target.value })}
-                  className={styles.textInput} style={{ flex: 1, minWidth: 0 }}
-                />
+              <div className={styles.fieldRow}>
+                <Field label="Meta (opcional)">
+                  <input
+                    type="number" step="any" placeholder="0" value={newGoal.targetAmount}
+                    onChange={(e) => setNewGoal({ ...newGoal, targetAmount: e.target.value })}
+                    className={styles.textInput}
+                  />
+                </Field>
+                <Field label="Fecha objetivo">
+                  <input
+                    type="date" value={newGoal.targetDate}
+                    onChange={(e) => setNewGoal({ ...newGoal, targetDate: e.target.value })}
+                    className={styles.textInput}
+                  />
+                </Field>
               </div>
+              <InfoCard>
+                Con monto y fecha, en "Metas" ves el ritmo planeado contra lo aportado.
+              </InfoCard>
 
               <button type="submit" disabled={creatingGoal || !newGoal.name.trim()} className={styles.saveButton}>
                 {creatingGoal ? 'Creando…' : 'Agregar meta'}
@@ -1195,7 +1274,7 @@ export default function SettingsPanel() {
             </form>
 
             {goalCreated && (
-              <p className={styles.hint}>Meta "{goalCreated}" creada — ya aparece en la página "Metas".</p>
+              <p className={styles.successCard}>Meta "{goalCreated}" creada — ya aparece en la página "Metas".</p>
             )}
             </>
             )}
@@ -1208,42 +1287,56 @@ export default function SettingsPanel() {
               página "Cuentas".
             </p>
 
-            <form onSubmit={handleCreateFixedExpense} className={styles.createForm} style={{ borderTop: 'none', paddingTop: 0 }}>
-              <input
-                placeholder="Nombre (ej. Netflix)" value={newFixedExpense.name}
-                onChange={(e) => setNewFixedExpense({ ...newFixedExpense, name: e.target.value })}
-                className={styles.textInput}
-              />
-              <div className={styles.editFormRow}>
-                <input
-                  type="number" placeholder="Monto" value={newFixedExpense.amount}
-                  onChange={(e) => setNewFixedExpense({ ...newFixedExpense, amount: e.target.value })}
-                  className={styles.textInput} style={{ flex: 1, minWidth: 0 }}
-                />
-                <input
-                  type="number" min="1" max="31" placeholder="Día del mes" value={newFixedExpense.dueDay}
-                  onChange={(e) => setNewFixedExpense({ ...newFixedExpense, dueDay: e.target.value })}
-                  className={styles.textInput} style={{ flex: '0 0 100px' }}
-                />
+            <form onSubmit={handleCreateFixedExpense} className={`${styles.editForm} ${styles.categoryEditCard}`}>
+              <div className={styles.categoryEditHeader}>
+                <span className={`${styles.categoryEditAvatar} ${styles.avatarAccent}`}>
+                  {newFixedExpense.name.trim() ? newFixedExpense.name.trim().charAt(0).toUpperCase() : <IconExpenses width={26} height={26} />}
+                </span>
+                <Field label="Nombre del gasto">
+                  <input
+                    placeholder="Ej. Netflix, arriendo, internet" value={newFixedExpense.name}
+                    onChange={(e) => setNewFixedExpense({ ...newFixedExpense, name: e.target.value })}
+                    className={styles.textInput}
+                  />
+                </Field>
               </div>
-              <div className={styles.editFormRow}>
-                <select
+
+              <div className={styles.fieldRow}>
+                <Field label="Monto" hint={`En ${fixedExpenseCurrency}`}>
+                  <input
+                    type="number" step="any" placeholder="0" value={newFixedExpense.amount}
+                    onChange={(e) => setNewFixedExpense({ ...newFixedExpense, amount: e.target.value })}
+                    className={styles.textInput}
+                  />
+                </Field>
+                <Field label="Día del mes">
+                  <input
+                    type="number" min="1" max="31" step="1" placeholder="1–31" value={newFixedExpense.dueDay}
+                    onChange={(e) => setNewFixedExpense({ ...newFixedExpense, dueDay: e.target.value })}
+                    className={styles.textInput}
+                  />
+                </Field>
+              </div>
+
+              <Field label="Frecuencia">
+                <Segmented
+                  options={[{ value: 'mensual', label: 'Mensual' }, { value: 'anual', label: 'Anual' }]}
                   value={newFixedExpense.frequency}
-                  onChange={(e) => setNewFixedExpense({ ...newFixedExpense, frequency: e.target.value })}
-                  className={styles.textInput} style={{ flex: 1, minWidth: 0 }}
-                >
-                  <option value="mensual">Mensual</option>
-                  <option value="anual">Anual</option>
-                </select>
-                <select
-                  value={newFixedExpense.accountId}
-                  onChange={(e) => setNewFixedExpense({ ...newFixedExpense, accountId: e.target.value })}
-                  className={styles.textInput} style={{ flex: 1, minWidth: 0 }}
-                >
-                  <option value="">Sin cuenta específica</option>
-                  {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </select>
-              </div>
+                  onChange={(frequency) => setNewFixedExpense({ ...newFixedExpense, frequency })}
+                />
+              </Field>
+
+              <Field label="Cuenta" hint="Opcional">
+                <ChipPicker
+                  options={accounts.map((a) => ({ value: a.id, label: a.name }))}
+                  value={newFixedExpense.accountId} allowClear
+                  onChange={(accountId) => setNewFixedExpense({ ...newFixedExpense, accountId })}
+                />
+              </Field>
+              <InfoCard>
+                Aparece en "Próximos pagos" del Panel y avisa cuando falten pocos días para su vencimiento. La
+                moneda sale de la cuenta que elijas.
+              </InfoCard>
 
               <button
                 type="submit"
@@ -1255,7 +1348,7 @@ export default function SettingsPanel() {
             </form>
 
             {fixedExpenseCreated && (
-              <p className={styles.hint}>"{fixedExpenseCreated}" creado — ya aparece en la página "Cuentas".</p>
+              <p className={styles.successCard}>"{fixedExpenseCreated}" creado — ya aparece en la página "Cuentas".</p>
             )}
             </>
             )}
@@ -1264,40 +1357,83 @@ export default function SettingsPanel() {
             <>
             <h3 className={styles.sectionTitle}>Tasas de cambio</h3>
             <p className={styles.hint}>
-              1 USD/EUR equivale a cuántos COP (y USD↔EUR) — "Buscar" trae la tasa del día desde una API de tipos de
-              cambio real, no de una IA (una tasa de cambio es un dato vivo, no algo que un modelo "sepa" de forma
-              confiable). Siempre editable a mano antes de guardar.
+              Cuántos COP vale 1 USD/EUR (y USD↔EUR). Tocá una tasa para editarla.
             </p>
 
-            {RATE_PAIRS.map(([base, quote]) => {
-              const pairKey = `${base}_${quote}`
-              const existingRate = rates.find((r) => r.base_currency === base && r.quote_currency === quote)
-              return (
-                <div key={pairKey} className={styles.editForm} style={{ borderBottom: '1px solid var(--border-hairline)', paddingBottom: 10 }}>
-                  <div className={styles.hint} style={{ margin: 0, color: 'var(--text-primary)', fontWeight: 600 }}>
-                    {existingRate ? `1 ${quote} = ${formatByCurrency(existingRate.rate, base)}` : `1 ${quote} = ? ${base} (sin configurar)`}
+            <div className={styles.list}>
+              {RATE_PAIRS.map(([base, quote]) => {
+                const pairKey = `${base}_${quote}`
+                const existingRate = rates.find((r) => r.base_currency === base && r.quote_currency === quote)
+                const isEditing = editingRatePair === pairKey
+                return (
+                  <div
+                    key={pairKey}
+                    className={isEditing ? styles.row : `${styles.row} ${styles.rowClickable}`}
+                    onClick={isEditing ? undefined : () => setEditingRatePair(pairKey)}
+                  >
+                    {isEditing ? (
+                      <form onSubmit={(e) => handleSaveRate(e, base, quote)} className={`${styles.editForm} ${styles.categoryEditCard}`}>
+                        <div className={styles.categoryEditHeader}>
+                          <span className={`${styles.categoryEditAvatar} ${styles.avatarAccent} ${styles.glyphCode}`}>{quote}</span>
+                          <div className={styles.categoryFieldGroup}>
+                            <span className={styles.categoryRowName}>1 {quote}</span>
+                            <span className={existingRate ? styles.categoryRowSubtitle : styles.rateUnset}>
+                              {existingRate ? `= ${formatByCurrency(existingRate.rate, base)}` : 'Sin configurar'}
+                            </span>
+                          </div>
+                        </div>
+
+                        <Field label="Nueva tasa" hint={`${base} por 1 ${quote}`}>
+                          <input
+                            type="number" step="any" placeholder={`Ej. ${base === 'COP' ? '4000' : '1.1'}`}
+                            value={rateInputs[pairKey] ?? ''} autoFocus
+                            onChange={(e) => setRateInputs({ ...rateInputs, [pairKey]: e.target.value })}
+                            className={styles.textInput}
+                          />
+                          <div className={styles.categoryBudgetPresets}>
+                            <button
+                              type="button" onClick={() => handleFetchLiveRate(base, quote)} disabled={fetchingRatePair === pairKey}
+                              className={styles.categoryBudgetPresetButton}
+                            >
+                              {fetchingRatePair === pairKey ? 'Buscando…' : 'Buscar tasa de hoy'}
+                            </button>
+                          </div>
+                          {rateFetchError[pairKey] && <p className={styles.warning}>{rateFetchError[pairKey]}</p>}
+                        </Field>
+
+                        <InfoCard>
+                          "Buscar" trae la tasa del día desde una API de tipos de cambio (no de una IA) y solo rellena
+                          el campo — revisala y tocá Guardar.
+                        </InfoCard>
+
+                        <div className={styles.rowActions}>
+                          <button type="submit" disabled={savingRatePair === pairKey || !rateInputs[pairKey]} className={styles.saveButton}>
+                            Guardar
+                          </button>
+                          <button
+                            type="button" className={styles.cancelButton}
+                            onClick={() => { setEditingRatePair(''); setRateInputs({ ...rateInputs, [pairKey]: '' }) }}
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </form>
+                    ) : (
+                      <>
+                        <span className={`${styles.categoryGlyph} ${styles.avatarAccent} ${styles.glyphCode}`}>{quote}</span>
+                        <span className={styles.categoryRowText}>
+                          <span className={styles.categoryRowName}>1 {quote}</span>
+                          <span className={existingRate ? styles.categoryRowSubtitle : styles.rateUnset}>
+                            {existingRate ? `= ${formatByCurrency(existingRate.rate, base)}` : 'Sin configurar'}
+                          </span>
+                        </span>
+                        <IconChevronRight width={18} height={18} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+                      </>
+                    )}
                   </div>
-                  <form onSubmit={(e) => handleSaveRate(e, base, quote)} className={styles.editFormRow}>
-                    <input
-                      type="number" placeholder={`Ej. ${base === 'COP' ? '4000' : '1.1'}`}
-                      value={rateInputs[pairKey] ?? ''}
-                      onChange={(e) => setRateInputs({ ...rateInputs, [pairKey]: e.target.value })}
-                      className={styles.textInput} style={{ flex: 1, minWidth: 0 }}
-                    />
-                    <button
-                      type="button" onClick={() => handleFetchLiveRate(base, quote)} disabled={fetchingRatePair === pairKey}
-                      className={styles.cancelButton} style={{ border: '1px solid var(--border-hairline)', borderRadius: 10, padding: '0 10px' }}
-                    >
-                      {fetchingRatePair === pairKey ? 'Buscando…' : 'Buscar'}
-                    </button>
-                    <button type="submit" disabled={savingRatePair === pairKey || !rateInputs[pairKey]} className={styles.saveButton}>
-                      Guardar
-                    </button>
-                  </form>
-                  {rateFetchError[pairKey] && <p className={styles.warning}>{rateFetchError[pairKey]}</p>}
-                </div>
-              )
-            })}
+                )
+              })}
+            </div>
             </>
             )}
           </div>

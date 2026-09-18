@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import Card from './ui/Card.jsx'
 import ConfirmDialog from './ui/ConfirmDialog.jsx'
+import { Field, FieldRow, Segmented, ChipPicker, EditCard, EditHeader, EditActions, inputClass } from './ui/FormKit.jsx'
 import { formatByCurrency } from '../lib/format.js'
 import {
   listFixedExpenses, updateFixedExpense, archiveFixedExpense,
   getMonthStatuses, setPaidStatus,
 } from '../lib/fixedExpensesApi.js'
+import styles from './FixedExpensesSection.module.css'
 
 const YEAR = new Date().getFullYear()
 const MONTH = new Date().getMonth() + 1
@@ -93,74 +95,124 @@ export default function FixedExpensesSection({ accounts }) {
   if (error) return <Card title="Gastos fijos recurrentes"><p style={{ color: 'var(--status-critical)' }}>{error}</p></Card>
   if (!items) return <Card title="Gastos fijos recurrentes"><p style={{ color: 'var(--text-muted)' }}>Cargando…</p></Card>
 
+  const byDay = (a, b) => a.due_day - b.due_day
+  const pending = items.filter((f) => !(statuses[f.id]?.paid ?? false)).sort(byDay)
+  const paidItems = items.filter((f) => statuses[f.id]?.paid ?? false).sort(byDay)
+  const groups = [
+    { key: 'pending', title: 'Pendientes este mes', rows: pending },
+    { key: 'paid', title: 'Pagados este mes', rows: paidItems },
+  ].filter((g) => g.rows.length > 0)
+
+  function renderRow(f) {
+    const paid = statuses[f.id]?.paid ?? false
+    const editing = editingId === f.id
+
+    if (editing) {
+      return (
+        <div key={f.id} className={styles.editWrap}>
+          <EditCard
+            as="form"
+            onSubmit={(e) => { e.preventDefault(); handleEditSave(f.id) }}
+          >
+            <EditHeader
+              avatar={editForm.dueDay || '–'} tone={paid ? 'good' : 'warning'}
+              caption="Editando gasto fijo" badge={paid ? 'Pagado' : 'Pendiente'} badgeTone={paid ? 'good' : 'warning'}
+            >
+              <Field label="Nombre del gasto">
+                <input
+                  autoFocus value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                  className={inputClass} placeholder="Ej. Netflix, arriendo"
+                />
+              </Field>
+            </EditHeader>
+
+            <FieldRow>
+              <Field label="Monto" hint={`En ${currencyOf(editForm.accountId)}`}>
+                <input
+                  type="number" step="any" value={editForm.amount}
+                  onChange={(e) => setEditForm({ ...editForm, amount: e.target.value })} className={inputClass}
+                />
+              </Field>
+              <Field label="Día del mes">
+                <input
+                  type="number" min="1" max="31" step="1" value={editForm.dueDay}
+                  onChange={(e) => setEditForm({ ...editForm, dueDay: e.target.value })} className={inputClass}
+                />
+              </Field>
+            </FieldRow>
+
+            <Field label="Frecuencia">
+              <Segmented
+                options={[{ value: 'mensual', label: 'Mensual' }, { value: 'anual', label: 'Anual' }]}
+                value={editForm.frequency} onChange={(frequency) => setEditForm({ ...editForm, frequency })}
+              />
+            </Field>
+
+            <Field label="Cuenta" hint="Opcional — define la moneda">
+              <ChipPicker
+                options={accounts.map((a) => ({ value: a.id, label: a.name }))}
+                value={editForm.accountId} allowClear
+                onChange={(accountId) => setEditForm({ ...editForm, accountId })}
+              />
+            </Field>
+
+            <EditActions
+              disabled={!editForm.name.trim() || !editForm.amount || !editForm.dueDay}
+              onCancel={() => setEditingId(null)}
+              onDelete={() => handleArchive(f.id, f.name)} deleteLabel="Eliminar gasto"
+            />
+          </EditCard>
+        </div>
+      )
+    }
+
+    return (
+      <div
+        key={f.id} className={styles.row} role="button" tabIndex={0}
+        onClick={() => startEdit(f)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startEdit(f) } }}
+      >
+        <span className={`${styles.dayTile} ${paid ? styles.dayTilePaid : styles.dayTilePending}`}>
+          <span className={styles.dayNumber}>{f.due_day}</span>
+          <span className={styles.dayLabel}>DÍA</span>
+        </span>
+        <span className={styles.rowText}>
+          <span className={styles.rowName}>{f.name}</span>
+          <span className={styles.rowMeta}>{f.frequency === 'anual' ? 'Anual' : 'Mensual'} · {f.accounts?.name ?? 'Sin cuenta'}</span>
+        </span>
+        <span className={styles.rowRight}>
+          <span className={styles.rowAmount}>{formatByCurrency(f.amount, f.currency)}</span>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); togglePaid(f.id, paid) }}
+            className={`${styles.statusPill} ${paid ? styles.statusPaid : styles.statusPending}`}
+          >
+            {paid ? 'Pagado' : 'Pendiente'}
+          </button>
+        </span>
+        <button
+          type="button" className={styles.rowDelete} aria-label={`Eliminar ${f.name}`}
+          onClick={(e) => { e.stopPropagation(); handleArchive(f.id, f.name) }}
+        >
+          ×
+        </button>
+      </div>
+    )
+  }
+
   return (
     <>
     <Card title="Gastos fijos recurrentes" className="span-3">
-      <div className="table-scroll" style={{ marginBottom: 'var(--space-2)' }}>
-      <table className="simple-table">
-        <thead>
-          <tr><th>Nombre</th><th>Monto</th><th>Vence</th><th>Frecuencia</th><th>Cuenta</th><th>Estado</th><th></th></tr>
-        </thead>
-        <tbody>
-          {items.map((f) => {
-            const status = statuses[f.id]
-            const paid = status?.paid ?? false
-            const isEditing = editingId === f.id
-
-            if (isEditing) {
-              return (
-                <tr key={f.id}>
-                  <td><input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} style={cellInput} /></td>
-                  <td><input type="number" value={editForm.amount} onChange={(e) => setEditForm({ ...editForm, amount: e.target.value })} style={cellInput} /></td>
-                  <td><input type="number" min="1" max="31" value={editForm.dueDay} onChange={(e) => setEditForm({ ...editForm, dueDay: e.target.value })} style={{ ...cellInput, width: 50 }} /></td>
-                  <td>
-                    <select value={editForm.frequency} onChange={(e) => setEditForm({ ...editForm, frequency: e.target.value })} style={cellInput}>
-                      <option value="mensual">Mensual</option>
-                      <option value="anual">Anual</option>
-                    </select>
-                  </td>
-                  <td>
-                    <select value={editForm.accountId} onChange={(e) => setEditForm({ ...editForm, accountId: e.target.value })} style={cellInput}>
-                      <option value="">—</option>
-                      {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                    </select>
-                  </td>
-                  <td colSpan={2} style={{ whiteSpace: 'nowrap' }}>
-                    <button onClick={() => handleEditSave(f.id)} style={{ color: 'var(--series-1)', fontWeight: 600, marginRight: 8 }}>Guardar</button>
-                    <button onClick={() => setEditingId(null)} style={{ color: 'var(--text-muted)' }}>Cancelar</button>
-                  </td>
-                </tr>
-              )
-            }
-
-            return (
-              <tr key={f.id}>
-                <td>{f.name}</td>
-                <td className="amount-cell">{formatByCurrency(f.amount, f.currency)}</td>
-                <td>Día {f.due_day}</td>
-                <td>{f.frequency === 'anual' ? 'Anual' : 'Mensual'}</td>
-                <td>{f.accounts?.name ?? '—'}</td>
-                <td>
-                  <button
-                    onClick={() => togglePaid(f.id, paid)}
-                    style={{ color: paid ? 'var(--status-good)' : 'var(--status-warning)', fontWeight: 600 }}
-                  >
-                    {paid ? 'Pagado' : 'Pendiente'}
-                  </button>
-                </td>
-                <td style={{ whiteSpace: 'nowrap' }}>
-                  <button onClick={() => startEdit(f)} style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', marginRight: 8 }}>Editar</button>
-                  <button onClick={() => handleArchive(f.id, f.name)} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button>
-                </td>
-              </tr>
-            )
-          })}
-          {items.length === 0 && (
-            <tr><td colSpan={7} style={{ color: 'var(--text-muted)' }}>Aún no hay gastos fijos definidos.</td></tr>
-          )}
-        </tbody>
-      </table>
-      </div>
+      {groups.map((g) => (
+        <div key={g.key} className={styles.group}>
+          <div className={styles.groupHeader}>
+            <span className={styles.groupTitle}>{g.title}</span>
+            <span className={styles.groupCount}>{g.rows.length}</span>
+          </div>
+          {g.rows.map(renderRow)}
+        </div>
+      ))}
+      {items.length === 0 && <p className={styles.empty}>Aún no hay gastos fijos definidos.</p>}
     </Card>
 
     <ConfirmDialog
@@ -175,5 +227,3 @@ export default function FixedExpensesSection({ accounts }) {
     </>
   )
 }
-
-const cellInput = { width: '100%', minHeight: 32, borderRadius: 6, border: '1px solid var(--border-hairline)', padding: '0 6px' }

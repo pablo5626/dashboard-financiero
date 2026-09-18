@@ -1321,6 +1321,58 @@ than a separate "Eliminar" link per row. The create input's placeholder
 became `"#Nueva etiqueta"` (was `"Nombre (ej. mercado)"`), matching the
 mockup's own input copy.
 
+**The remaining Ajustes sections (`'cuentas'`, `'deudas'`, `'metas'`,
+`'gastos-fijos'`, `'tasas'`) were redesigned to match Categorías/Presupuestos/
+Tags, and every old "Editar" button in the app was replaced by tap-to-edit
+with its own layout.** The shared vocabulary lives in
+`src/components/ui/FormKit.jsx` (+ `FormKit.module.css`): `Field` (uppercase
+label above the control, optional right-side hint), `FieldRow`, `InfoCard`
+(tinted caption box, `tone="warning"` variant), `SwitchRow` (iOS switch +
+helper text), `ChipPicker` (selectable pills, `allowClear` for optional
+fields), `Segmented` (iOS segmented control), `EditCard`/`EditHeader`/
+`EditActions` (bordered card, live square avatar + "EDITANDO X" caption +
+type badge, Guardar/Cancelar + optional destructive `onDelete`),
+`MeterPreview` (live progress bar) and `EditSheet` (modal: full screen on
+mobile, centered card ≥768px, closes on Escape/backdrop). `SettingsPanel.jsx`
+imports `Field`/`InfoCard`/`SwitchRow`/`ChipPicker`/`Segmented` from there
+for its create forms; its Categorías/Presupuestos/Tags code still uses its
+own `category*` classes (duplicated CSS, deliberately not merged). In
+Ajustes: Cuentas/Deudas/Metas/Gastos fijos are one `editForm categoryEditCard`
+card each with a live avatar, currency as `ChipPicker` pills, optional fields
+behind a `<details>` (Deudas), an `InfoCard` explaining where the data is
+used, and a green `.successCard` after creating; Tasas is now a list of
+tappable rows (one per pair, `1 USD = $ 4.000` / "Sin configurar") that expand
+into an edit card (`editingRatePair`) with "Buscar tasa de hoy" — all inputs
+that take decimals now carry `step="any"` (the rate input had none, so the
+browser's native validation rejected any non-integer rate like 1.16 or a
+fetched 4123.45).
+
+The four pages that used a text "Editar" button each got a **different**
+edit design, on the user's request that every one be distinct rather than
+one generic form: **`Cuentas.jsx`** — the card header (`.cardHeader`, avatar +
+name + currency line) is the tap target and the card itself becomes
+`span-3` and turns into the edit form (moneda principal chips, multi-moneda
+switch, extra pockets list with MonIA tag + an `InfoCard` about `arq_eur`,
+warning when the primary currency changes because balances only sum rows in
+the account's own currency). **`FixedExpensesSection.jsx`** — the 7-column
+table became a list grouped into "Pendientes este mes" / "Pagados este mes"
+(sorted by due day) with a "day tile" (`.dayTile`, the due day as the hero,
+tinted warning/good) instead of a generic avatar, a status pill that toggles
+paid without opening edit (`stopPropagation`), and an inline `EditCard` under
+the tapped row. **`Deudas.jsx`** — tapping the card header opens an
+`EditSheet` (modal, like Gastos' "Editar movimiento") with a live
+`MeterPreview` of % pagado/recuperado, the currency shown as a locked dashed
+pill, and an `InfoCard` that says a changed total/remaining regenerates the
+pending installments. **`MetasAhorro.jsx`** — the card becomes an inline form
+with a live projection: `MeterPreview` of progress against the typed target
+and an `InfoCard` computing "necesitás aportar ~X/mes" from the typed target
+and date (same `monthsUntil` math as the "Aporte sugerido" line). In all four,
+"Eliminar" stays reachable both as a link on the collapsed header
+(`stopPropagation`) and as the destructive action inside the edit UI,
+still behind `ConfirmDialog`. Not verified against real data:
+`FixedExpensesSection`'s row list (the account used to test had no fixed
+expenses, only its empty state was seen).
+
 **Global search popup (`SearchPanel.jsx`)**: mounted once in `AppShell.jsx`
 next to `SettingsPanel`/`QuickCaptureFAB`, controlled from there via a
 `searchOpen` boolean (`open`/`onClose` props) — this is the single
