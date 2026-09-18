@@ -296,6 +296,34 @@
   border-top: 1px solid var(--border-hairline);
 }
 
+/* Toggle de dos opciones excluyentes (Debo/Me deben, tipo de meta) — mismo
+   rol que un <select> binario pero más legible de un vistazo en celular. */
+.segmentRow {
+  display: flex;
+  gap: 6px;
+}
+
+.segmentButton,
+.segmentButtonActive {
+  flex: 1;
+  min-height: var(--touch-target);
+  border-radius: 10px;
+  font: var(--font-caption);
+  font-weight: 600;
+}
+
+.segmentButton {
+  border: 1px solid var(--border-hairline);
+  color: var(--text-secondary);
+  background: transparent;
+}
+
+.segmentButtonActive {
+  border: none;
+  background: var(--series-1);
+  color: #fff;
+}
+
 .learnButton {
   margin-top: var(--space-2);
   min-height: var(--touch-target);

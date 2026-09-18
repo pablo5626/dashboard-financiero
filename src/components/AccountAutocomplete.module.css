@@ -28,7 +28,10 @@
 }
 
 .option {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   width: 100%;
   text-align: left;
   min-height: var(--touch-target);
@@ -39,6 +42,12 @@
 
 .option:hover {
   background: var(--surface-1);
+}
+
+.optionBalance {
+  flex-shrink: 0;
+  font: var(--font-caption);
+  color: var(--text-muted);
 }
 
 .empty {

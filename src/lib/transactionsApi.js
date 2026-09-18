@@ -3,6 +3,7 @@ import { supabase } from './supabaseClient.js'
 import { listAccounts } from './accountsApi.js'
 import { listCategories } from './categoriesApi.js'
 import { getRates, convertAmount } from './exchangeRatesApi.js'
+import { buildPocketIndex, resolvePocketKey } from './currencyPockets.js'
 
 // Tags de nivel 1 que marcan una fila del CSV que el dashboard NO debe contar,
 // porque el movimiento real ya está registrado en otro lado — ver
@@ -42,7 +43,9 @@ export function isReservedTag(tag, accounts) {
   const normalized = normalizeTag(tag)
   if (!normalized) return false
   if (IGNORED_TAGS.includes(normalized)) return true
-  return accounts.some((a) => a.kind === 'hija' && a.name.toLowerCase() === normalized)
+  return accounts.some((a) => a.kind === 'hija' && (
+    a.name.toLowerCase() === normalized || (a.extraCurrencies ?? []).some((c) => c.tag.toLowerCase() === normalized)
+  ))
 }
 
 // Misma idea que normalizeTag pero para el texto de descripción (purpose),
@@ -91,21 +94,26 @@ export function filterRowsByMonth(rows, year, month) {
 
 // El vocabulario de tags de cuenta son los nombres mismos de las cuentas
 // hijas activas (en minúsculas): 'dale', 'nequi', ..., 'arq', 'arq eur'. No
-// hay lista fija que mantener — crear una cuenta habilita su tag solo.
-function tagAssignedAccountId(tags, accountIdByLowerName) {
+// hay lista fija que mantener — crear una cuenta habilita su tag solo. Cada
+// tag resuelve a un "bolsillo" ({accountId, currency}), no solo a un id: el
+// nombre de la cuenta (bare) apunta a su moneda primaria, y el tag de cada
+// moneda adicional de una cuenta multi-moneda (account.extraCurrencies,
+// ej. "arq eur") apunta a esa moneda específica sobre el MISMO accountId.
+function tagAssignedPocket(tags, pocketByTag) {
   for (const tag of tags) {
-    if (accountIdByLowerName[tag]) return accountIdByLowerName[tag]
+    if (pocketByTag[tag]) return pocketByTag[tag]
   }
   return null
 }
 
 // Nivel 1 (variante moneda, ver .claude/rules/motor-asignacion.md): si la
-// fila trae una moneda distinta de COP y existe exactamente una cuenta hija
-// activa con esa moneda, se asigna esa cuenta — dato real explícito del CSV
-// (currency), no especulación, igual de confiable que un tag de banco.
-function currencyAssignedAccountId(currency, accountsByCurrency) {
+// fila trae una moneda distinta de COP y existe exactamente un bolsillo
+// (cuenta o moneda de una cuenta multi-moneda) con esa moneda, se asigna ese
+// bolsillo — dato real explícito del CSV (currency), no especulación, igual
+// de confiable que un tag de banco.
+function currencyAssignedPocket(currency, pocketsByCurrency) {
   if (!currency || currency === 'COP') return null
-  const candidates = accountsByCurrency[currency]
+  const candidates = pocketsByCurrency[currency]
   return candidates && candidates.length === 1 ? candidates[0] : null
 }
 
@@ -168,14 +176,23 @@ export async function importTransactions(rows, year, month) {
   if (monthRows.length === 0) return { imported: 0, skipped: 0, totalInMonth: 0 }
 
   const [accounts, categories, rates] = await Promise.all([listAccounts(), listCategories(), getRates()])
-  const accountIdByLowerName = Object.fromEntries(
-    accounts.filter((a) => a.kind === 'hija').map((a) => [a.name.toLowerCase(), a.id])
-  )
   const currencyByAccountId = Object.fromEntries(accounts.map((a) => [a.id, a.currency || 'COP']))
-  const accountsByCurrency = {}
+
+  // Índices de bolsillo por tag y por moneda (ver tagAssignedPocket /
+  // currencyAssignedPocket arriba): un bolsillo es {accountId, currency}. El
+  // nombre bare de la cuenta apunta a su moneda primaria; cada moneda extra
+  // de una cuenta multi-moneda aporta su propio tag y su propio bolsillo,
+  // aunque comparta accountId con el primario.
+  const pocketByTag = {}
+  const pocketsByCurrency = {}
   for (const a of accounts.filter((a) => a.kind === 'hija')) {
-    const cur = a.currency || 'COP'
-    ;(accountsByCurrency[cur] ??= []).push(a.id)
+    const primary = a.currency || 'COP'
+    pocketByTag[a.name.toLowerCase()] = { accountId: a.id, currency: primary }
+    ;(pocketsByCurrency[primary] ??= []).push({ accountId: a.id, currency: primary })
+    for (const extra of a.extraCurrencies ?? []) {
+      pocketByTag[extra.tag.toLowerCase()] = { accountId: a.id, currency: extra.currency }
+      ;(pocketsByCurrency[extra.currency] ??= []).push({ accountId: a.id, currency: extra.currency })
+    }
   }
   const categoryByLowerName = Object.fromEntries(categories.map((c) => [c.name.trim().toLowerCase(), c]))
 
@@ -189,15 +206,17 @@ export async function importTransactions(rows, year, month) {
 
   const payload = monthRows.map((r) => {
     const category = r.categoryName ? categoryByLowerName[r.categoryName.toLowerCase()] : null
-    const tagAccountId = tagAssignedAccountId(r.tags, accountIdByLowerName)
-    const currencyAccountId = currencyAssignedAccountId(r.currency, accountsByCurrency)
+    const tagPocket = tagAssignedPocket(r.tags, pocketByTag)
+    const currencyPocket = currencyAssignedPocket(r.currency, pocketsByCurrency)
 
     let accountId = null
+    let resolvedCurrency = null
     let assignmentLevel = 3
     let assignmentConfirmed = false
 
-    if (tagAccountId) {
-      accountId = tagAccountId
+    if (tagPocket) {
+      accountId = tagPocket.accountId
+      resolvedCurrency = tagPocket.currency
       assignmentLevel = 1
       assignmentConfirmed = true
     } else if (isIgnoredRow(r.tags)) {
@@ -205,8 +224,9 @@ export async function importTransactions(rows, year, month) {
       accountId = null
       assignmentLevel = 1
       assignmentConfirmed = true
-    } else if (currencyAccountId) {
-      accountId = currencyAccountId
+    } else if (currencyPocket) {
+      accountId = currencyPocket.accountId
+      resolvedCurrency = currencyPocket.currency
       assignmentLevel = 1
       assignmentConfirmed = true
     } else if (category?.is_ambiguous === false && singleAccountByCategory[category.id]) {
@@ -215,10 +235,12 @@ export async function importTransactions(rows, year, month) {
       assignmentConfirmed = true
     }
 
-    // Moneda de la fila distinta a la de la cuenta asignada: compra en divisa
-    // que MonIA exportó convertida a COP (ver convertToAccountCurrency). Las
-    // filas ignoradas nunca llegan acá — resuelven a account_id = null antes.
-    const accountCurrency = accountId ? currencyByAccountId[accountId] : null
+    // Moneda de la fila distinta a la del bolsillo asignado: compra en divisa
+    // que MonIA exportó convertida a COP (ver convertToAccountCurrency). Sin
+    // señal específica de bolsillo (nivel 2/3, sin tag ni moneda propia) se
+    // asume la moneda PRIMARIA de la cuenta. Las filas ignoradas nunca llegan
+    // acá — resuelven a account_id = null antes.
+    const accountCurrency = accountId ? (resolvedCurrency ?? currencyByAccountId[accountId]) : null
     const currencyFix = accountCurrency && accountCurrency !== r.currency
       ? convertToAccountCurrency(r, accountCurrency, rates)
       : null
@@ -579,7 +601,7 @@ export async function deleteTransaction(id) {
 export async function getAccountFlowsForMonth(accounts, year, month) {
   if (accounts.length === 0) return { spent: {}, income: {} }
   const accountIds = accounts.map((a) => a.id)
-  const currencyByAccountId = Object.fromEntries(accounts.map((a) => [a.id, a.currency || 'COP']))
+  const pocketIndex = buildPocketIndex(accounts)
   const monthStart = `${year}-${String(month).padStart(2, '0')}-01`
   const nextMonthStart = month === 12
     ? `${year + 1}-01-01`
@@ -596,10 +618,11 @@ export async function getAccountFlowsForMonth(accounts, year, month) {
   const spent = {}
   const income = {}
   for (const row of data) {
-    if ((row.currency || 'COP') !== currencyByAccountId[row.account_id]) continue
+    const key = resolvePocketKey(pocketIndex, row.account_id, row.currency)
+    if (!key) continue
     const amount = Number(row.amount)
-    if (amount < 0) spent[row.account_id] = (spent[row.account_id] ?? 0) + -amount
-    else income[row.account_id] = (income[row.account_id] ?? 0) + amount
+    if (amount < 0) spent[key] = (spent[key] ?? 0) + -amount
+    else income[key] = (income[key] ?? 0) + amount
   }
   return { spent, income }
 }
@@ -696,6 +719,31 @@ export async function searchTransactions({ query, categoryId, accountId, tag, da
   const { data, error } = await q
   if (error) throw error
   return data
+}
+
+// Tags más usados en el histórico reciente, para ofrecerlos como chips
+// tocables en el buscador — a diferencia de un mockup con ejemplos fijos
+// (#rappi, #supermercado…), esto sale de datos reales del usuario, nunca
+// una lista inventada. Excluye IGNORED_TAGS (traslado/moneda/ignorar, que
+// son marcadores del motor de asignación, no tags de verdad); excluir los
+// que nombran una cuenta queda del lado del llamador, que ya tiene la lista
+// de cuentas cargada (mismo criterio que accountNameTags en GastosDiarios.jsx).
+export async function listTopTags(limit = 8) {
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('tags')
+    .order('occurred_at', { ascending: false })
+    .limit(500)
+  if (error) throw error
+
+  const counts = {}
+  for (const row of data) {
+    for (const tag of row.tags ?? []) {
+      if (IGNORED_TAGS.includes(tag)) continue
+      counts[tag] = (counts[tag] ?? 0) + 1
+    }
+  }
+  return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, limit).map(([t]) => t)
 }
 
 // Agrupa gastos por descripción (purpose, normalizado) y sugiere como

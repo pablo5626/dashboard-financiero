@@ -7,13 +7,19 @@ import MonthlyInitialBalancesSection from '../components/MonthlyInitialBalancesS
 import TransferHistorySection from '../components/TransferHistorySection.jsx'
 import CurrencyExchangeSection from '../components/CurrencyExchangeSection.jsx'
 import { formatCOP, formatByCurrency, CURRENCIES } from '../lib/format.js'
-import { listAccounts, createAccount, updateAccount, archiveAccount, fetchBalancesForMonth, setCurrencyGroup } from '../lib/accountsApi.js'
+import {
+  listAccounts, updateAccount, archiveAccount, fetchBalancesForMonth,
+  addAccountCurrency, removeAccountCurrency,
+} from '../lib/accountsApi.js'
 import { getRates, setRate } from '../lib/exchangeRatesApi.js'
 import { getAccountFlowsForMonth } from '../lib/transactionsApi.js'
+import { flattenAccountPockets } from '../lib/currencyPockets.js'
 
 const now = new Date()
 const YEAR = now.getFullYear()
 const MONTH = now.getMonth() + 1
+
+const emptyEdit = { name: '', currency: 'COP', isMulti: false, extras: [], newExtraCurrency: '', newExtraTag: '' }
 
 export default function Cuentas() {
   const [accounts, setAccounts] = useState(null)
@@ -25,13 +31,8 @@ export default function Cuentas() {
   const [rates, setRates] = useState([])
   const [error, setError] = useState(null)
   const [editingId, setEditingId] = useState(null)
-  const [editName, setEditName] = useState('')
-  const [editCurrency, setEditCurrency] = useState('COP')
-  const [editGroupWith, setEditGroupWith] = useState('')
-  const [activePocket, setActivePocket] = useState({}) // groupKey -> accountId
-  const [newName, setNewName] = useState('')
-  const [newCurrency, setNewCurrency] = useState('COP')
-  const [creating, setCreating] = useState(false)
+  const [edit, setEdit] = useState(emptyEdit)
+  const [activePocket, setActivePocket] = useState({}) // accountId -> pocketKey
   const [rateInputs, setRateInputs] = useState({}) // "base_quote" -> string
   const [savingRatePair, setSavingRatePair] = useState(null) // "base_quote" | null
   const [confirmArchive, setConfirmArchive] = useState(null) // { id, name } | null
@@ -58,44 +59,65 @@ export default function Cuentas() {
 
   useEffect(() => { reload() }, [])
 
+  // Ajustes → Tasas de cambio también puede guardar una tasa mientras esta
+  // página sigue montada debajo del panel — mismo patrón de evento global
+  // que dashboard:debts-changed/goals-changed, para que el "1 USD = ..." de
+  // cada cuenta se actualice sin recargar la página entera.
+  useEffect(() => {
+    window.addEventListener('dashboard:rates-changed', reload)
+    return () => window.removeEventListener('dashboard:rates-changed', reload)
+  }, [])
+
   const madre = accounts?.find((a) => a.kind === 'madre')
   const hijas = accounts?.filter((a) => a.kind === 'hija') ?? []
-  const hijasCop = hijas.filter((h) => (h.currency || 'COP') === 'COP')
+  // Las cuentas multi-moneda quedan fuera del ritual mensual madre->hijas:
+  // ese ritual no tiene concepto de moneda (ver CLAUDE.md, "Known deferred
+  // scope"), y una cuenta con varios bolsillos no encaja en "un solo monto en
+  // COP a distribuir" aunque su moneda primaria sea COP.
+  const hijasCop = hijas.filter((h) => !h.is_multi_currency && (h.currency || 'COP') === 'COP')
 
-  // Agrupa cuentas ligadas por currency_group_id (ej. Arq EUR -> Arq) para
-  // mostrarlas como una sola tarjeta con selector de moneda, en vez de una
-  // tarjeta por fila — son cuentas separadas de verdad, esto es solo
-  // agrupación visual (ver setCurrencyGroup en accountsApi.js).
-  const groupsByKey = {}
-  const groupOrder = []
-  for (const h of hijas) {
-    const key = h.currency_group_id ?? h.id
-    if (!groupsByKey[key]) { groupsByKey[key] = []; groupOrder.push(key) }
-    groupsByKey[key].push(h)
+  function startEdit(account) {
+    setEditingId(account.id)
+    setEdit({
+      name: account.name,
+      currency: account.currency || 'COP',
+      isMulti: !!account.is_multi_currency,
+      extras: (account.extraCurrencies ?? []).map((c) => ({ ...c })),
+      newExtraCurrency: '',
+      newExtraTag: '',
+    })
   }
-  const accountGroups = groupOrder.map((key) => groupsByKey[key])
 
-  async function handleCreate(e) {
-    e.preventDefault()
-    if (!newName.trim()) return
-    setCreating(true)
-    try {
-      await createAccount({ name: newName.trim(), kind: 'hija', parentAccountId: madre?.id, currency: newCurrency })
-      setNewName('')
-      setNewCurrency('COP')
-      await reload()
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setCreating(false)
-    }
+  function addExtraToEditDraft() {
+    if (!edit.newExtraCurrency) return
+    setEdit((prev) => ({
+      ...prev,
+      extras: [...prev.extras, { currency: prev.newExtraCurrency, tag: prev.newExtraTag.trim() || `${prev.name} ${prev.newExtraCurrency}`.toLowerCase() }],
+      newExtraCurrency: '',
+      newExtraTag: '',
+    }))
+  }
+
+  function removeExtraFromEditDraft(currency) {
+    setEdit((prev) => ({ ...prev, extras: prev.extras.filter((c) => c.currency !== currency) }))
   }
 
   async function handleRenameSave(id) {
-    if (!editName.trim()) return
+    if (!edit.name.trim()) return
     try {
-      await updateAccount(id, { name: editName.trim(), currency: editCurrency })
-      await setCurrencyGroup(id, editGroupWith || null)
+      await updateAccount(id, { name: edit.name.trim(), currency: edit.currency, is_multi_currency: edit.isMulti })
+
+      const account = accounts.find((a) => a.id === id)
+      const before = new Set((account?.extraCurrencies ?? []).map((c) => c.currency))
+      const after = edit.isMulti ? new Set(edit.extras.map((c) => c.currency)) : new Set()
+
+      for (const c of edit.extras) {
+        if (edit.isMulti && !before.has(c.currency)) await addAccountCurrency(id, c.currency, c.tag)
+      }
+      for (const currency of before) {
+        if (!after.has(currency)) await removeAccountCurrency(id, currency)
+      }
+
       setEditingId(null)
       await reload()
     } catch (err) {
@@ -201,82 +223,106 @@ export default function Cuentas() {
       )}
 
       <div className="grid-auto">
-        {accountGroups.map((group) => {
-          const groupKey = group[0].currency_group_id ?? group[0].id
-          const activeId = activePocket[groupKey] ?? group[0].id
-          const active = group.find((a) => a.id === activeId) ?? group[0]
-          const currency = active.currency || 'COP'
-          const bal = balances[active.id] ?? 0
-          const alloc = allocated[active.id]
-          const spentAmt = spent[active.id] ?? 0
+        {hijas.map((account) => {
+          const pockets = flattenAccountPockets([account])
+          const activeKey = activePocket[account.id] ?? pockets[0].key
+          const active = pockets.find((p) => p.key === activeKey) ?? pockets[0]
+          const currency = active.currency
+          const bal = balances[active.key] ?? 0
+          const alloc = allocated[active.key]
+          const spentAmt = spent[active.key] ?? 0
           // La plata que entra a la cuenta fuera del reparto mensual de la
           // madre amplía lo disponible: gastarla no es sobregirar el
           // presupuesto. account_allocations queda intacta, siempre significa
           // "lo que la madre repartió".
-          const incomeAmt = income[active.id] ?? 0
+          const incomeAmt = income[active.key] ?? 0
           const disponible = (alloc ?? 0) + incomeAmt
           // Lo transferido a otra cuenta también consume el presupuesto: si la
-          // plata salió de acá para gastarse desde arq, no sigue disponible.
-          const movidoAmt = transferredOut[active.id] ?? 0
+          // plata salió de acá para gastarse desde otro bolsillo, no sigue
+          // disponible.
+          const movidoAmt = transferredOut[active.key] ?? 0
           const usado = spentAmt + movidoAmt
           const pct = disponible > 0 ? Math.round((usado / disponible) * 100) : null
-          const isEditing = editingId === active.id
-          const nonCopCurrencies = [...new Set(group.map((m) => m.currency || 'COP').filter((c) => c !== 'COP'))]
+          const isEditing = editingId === account.id
+          const nonCopCurrencies = [...new Set(pockets.map((p) => p.currency).filter((c) => c !== 'COP'))]
 
           return (
-            <Card key={groupKey}>
+            <Card key={account.id}>
               {isEditing ? (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 'var(--space-1)' }}>
-                  <input
-                    autoFocus value={editName} onChange={(e) => setEditName(e.target.value)}
-                    style={{ flex: 1, minWidth: 100, minHeight: 32, borderRadius: 6, border: '1px solid var(--border-hairline)', padding: '0 6px' }}
-                  />
-                  <select
-                    value={editCurrency} onChange={(e) => setEditCurrency(e.target.value)}
-                    style={{ minHeight: 32, borderRadius: 6, border: '1px solid var(--border-hairline)' }}
-                  >
-                    {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                  <select
-                    value={editGroupWith} onChange={(e) => setEditGroupWith(e.target.value)}
-                    title="Mostrarla junto a otra cuenta como si fueran distintas monedas de lo mismo (ej. Arq EUR con Arq)"
-                    style={{ minHeight: 32, borderRadius: 6, border: '1px solid var(--border-hairline)', flexBasis: '100%' }}
-                  >
-                    <option value="">Cuenta independiente</option>
-                    {hijas.filter((h) => h.id !== active.id && (h.currency_group_id ?? h.id) !== groupKey).map((h) => (
-                      <option key={h.id} value={h.id}>Es otra moneda de {h.name}</option>
-                    ))}
-                  </select>
-                  <button onClick={() => handleRenameSave(active.id)} style={{ color: 'var(--series-1)', fontWeight: 600 }}>Guardar</button>
-                  <button onClick={() => setEditingId(null)} style={{ color: 'var(--text-muted)' }}>Cancelar</button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 'var(--space-1)' }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                    <input
+                      autoFocus value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })}
+                      style={{ flex: 1, minWidth: 100, minHeight: 32, borderRadius: 6, border: '1px solid var(--border-hairline)', padding: '0 6px' }}
+                    />
+                    <select
+                      value={edit.currency} onChange={(e) => setEdit({ ...edit, currency: e.target.value })}
+                      style={{ minHeight: 32, borderRadius: 6, border: '1px solid var(--border-hairline)' }}
+                    >
+                      {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, font: 'var(--font-caption)', color: 'var(--text-muted)' }}>
+                    <input type="checkbox" checked={edit.isMulti} onChange={(e) => setEdit({ ...edit, isMulti: e.target.checked })} />
+                    Cuenta multi-moneda (soporta más de una moneda bajo esta misma cuenta)
+                  </label>
+                  {edit.isMulti && (
+                    <div style={{ border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {edit.extras.map((c) => (
+                        <div key={c.currency} style={{ display: 'flex', alignItems: 'center', gap: 6, font: 'var(--font-caption)' }}>
+                          <span style={{ flex: 1 }}>{c.currency} — tag "{c.tag}"</span>
+                          <button type="button" onClick={() => removeExtraFromEditDraft(c.currency)} style={{ color: 'var(--status-critical)' }}>Quitar</button>
+                        </div>
+                      ))}
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <select
+                          value={edit.newExtraCurrency} onChange={(e) => setEdit({ ...edit, newExtraCurrency: e.target.value })}
+                          style={{ minHeight: 28, borderRadius: 6, border: '1px solid var(--border-hairline)' }}
+                        >
+                          <option value="">+ moneda…</option>
+                          {CURRENCIES.filter((c) => c !== edit.currency && !edit.extras.some((e2) => e2.currency === c)).map((c) => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                        <input
+                          placeholder="tag (ej. arq eur)" value={edit.newExtraTag}
+                          onChange={(e) => setEdit({ ...edit, newExtraTag: e.target.value })}
+                          style={{ flex: 1, minWidth: 0, minHeight: 28, borderRadius: 6, border: '1px solid var(--border-hairline)', padding: '0 6px' }}
+                        />
+                        <button type="button" onClick={addExtraToEditDraft} disabled={!edit.newExtraCurrency} style={{ color: 'var(--series-1)', fontWeight: 600 }}>Agregar</button>
+                      </div>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={() => handleRenameSave(account.id)} style={{ color: 'var(--series-1)', fontWeight: 600 }}>Guardar</button>
+                    <button onClick={() => setEditingId(null)} style={{ color: 'var(--text-muted)' }}>Cancelar</button>
+                  </div>
                 </div>
               ) : (
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-1)' }}>
                   <h2 style={{ font: 'var(--font-headline)', margin: 0 }}>
-                    {group.length > 1 ? group[0].name : active.name}
-                    {group.length === 1 && currency !== 'COP' && <span style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', fontWeight: 400, marginLeft: 6 }}>{currency}</span>}
+                    {account.name}
+                    {pockets.length === 1 && currency !== 'COP' && <span style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', fontWeight: 400, marginLeft: 6 }}>{currency}</span>}
                   </h2>
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={() => { setEditingId(active.id); setEditName(active.name); setEditCurrency(currency); setEditGroupWith(active.currency_group_id ?? '') }} style={{ font: 'var(--font-caption)', color: 'var(--text-muted)' }}>Editar</button>
-                    <button onClick={() => handleArchive(active.id, active.name)} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button>
+                    <button onClick={() => startEdit(account)} style={{ font: 'var(--font-caption)', color: 'var(--text-muted)' }}>Editar</button>
+                    <button onClick={() => handleArchive(account.id, account.name)} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button>
                   </div>
                 </div>
               )}
 
-              {group.length > 1 && (
+              {pockets.length > 1 && (
                 <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-                  {group.map((m) => (
+                  {pockets.map((p) => (
                     <button
-                      key={m.id} type="button"
-                      onClick={() => setActivePocket({ ...activePocket, [groupKey]: m.id })}
+                      key={p.key} type="button"
+                      onClick={() => setActivePocket({ ...activePocket, [account.id]: p.key })}
                       style={{
                         minHeight: 28, padding: '0 10px', borderRadius: 14, font: 'var(--font-caption)', fontWeight: 600,
-                        border: m.id === active.id ? 'none' : '1px solid var(--border-hairline)',
-                        background: m.id === active.id ? 'var(--series-1)' : 'transparent',
-                        color: m.id === active.id ? '#fff' : 'var(--text-secondary)',
+                        border: p.key === active.key ? 'none' : '1px solid var(--border-hairline)',
+                        background: p.key === active.key ? 'var(--series-1)' : 'transparent',
+                        color: p.key === active.key ? '#fff' : 'var(--text-secondary)',
                       }}
                     >
-                      {m.currency || 'COP'}
+                      {p.currency}
                     </button>
                   ))}
                 </div>
@@ -313,29 +359,6 @@ export default function Cuentas() {
             </Card>
           )
         })}
-
-        <Card title="Agregar cuenta hija">
-          <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input
-                placeholder="Nombre (ej. Pibank)" value={newName} onChange={(e) => setNewName(e.target.value)}
-                style={{ flex: 1, minWidth: 0, minHeight: 'var(--touch-target)', borderRadius: 10, border: '1px solid var(--border-hairline)', padding: '0 var(--space-1)' }}
-              />
-              <select
-                value={newCurrency} onChange={(e) => setNewCurrency(e.target.value)}
-                style={{ minHeight: 'var(--touch-target)', borderRadius: 10, border: '1px solid var(--border-hairline)' }}
-              >
-                {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-            <button
-              type="submit" disabled={creating}
-              style={{ alignSelf: 'flex-start', minHeight: 'var(--touch-target)', padding: '0 var(--space-2)', borderRadius: 10, background: 'var(--series-1)', color: '#fff', fontWeight: 600, opacity: creating ? 0.6 : 1 }}
-            >
-              Agregar
-            </button>
-          </form>
-        </Card>
 
         <MonthlyAllocationSection hijas={hijasCop} madre={madre} year={YEAR} month={MONTH} onSaved={reload} />
 

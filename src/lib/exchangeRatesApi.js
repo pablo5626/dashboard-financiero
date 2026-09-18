@@ -17,6 +17,26 @@ export async function setRate(baseCurrency, quoteCurrency, rate) {
   if (error) throw error
 }
 
+// Busca la tasa del día para un par vía una API pública de tipos de cambio
+// (open.er-api.com — gratis, sin API key, sin CORS) en vez de pedírsela a un
+// modelo de lenguaje: una tasa de cambio es un dato vivo, no algo que una IA
+// "sepa" de forma confiable (entrenada hasta cierta fecha, sin acceso a
+// internet real) — usar un endpoint de datos es lo que evita inventar un
+// número, mismo principio de "nunca adivinar" que rige toda la app. Nunca
+// escribe en la base — solo devuelve el valor para PRELLENAR el input
+// manual de la fila de tasa correspondiente; el usuario sigue tocando
+// "Guardar" para confirmarlo, igual que voice-parse/receipt-parse.
+// `quote`/`base` usan la misma convención que setRate/renderRateRow: el
+// resultado es "1 quote = rate base".
+export async function fetchLiveRate(base, quote) {
+  const res = await fetch(`https://open.er-api.com/v6/latest/${quote}`)
+  if (!res.ok) throw new Error('No se pudo consultar la tasa de cambio')
+  const data = await res.json()
+  const rate = data?.rates?.[base]
+  if (typeof rate !== 'number') throw new Error(`Sin dato de ${base} para ${quote}`)
+  return rate
+}
+
 // Convierte un monto de una moneda a otra usando la fila que coincida con
 // el par (directa: base=to/quote=from, o inversa: base=from/quote=to).
 // Devuelve null si no hay ninguna tasa configurada para ese par.

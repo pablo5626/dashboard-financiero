@@ -6,7 +6,7 @@ import { formatCOP, formatByCurrency, formatCompact } from '../lib/format.js'
 import { listAccounts, fetchBalancesForMonth } from '../lib/accountsApi.js'
 import { lastNMonths, fetchMonthlyTrend } from '../lib/panelApi.js'
 import {
-  listSavingsGoals, createSavingsGoal, updateSavingsGoal, archiveSavingsGoal,
+  listSavingsGoals, updateSavingsGoal, archiveSavingsGoal,
   listContributions, addContribution, deleteContribution,
 } from '../lib/savingsApi.js'
 
@@ -16,7 +16,6 @@ const MONTH = now.getMonth() + 1
 const TREND_MONTHS = 6
 const MONTH_LABELS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
 
-const emptyGoalForm = { kind: 'puntual', name: '', accountId: '', targetAmount: '', targetDate: '' }
 const emptyContribForm = { amount: '', date: new Date().toISOString().slice(0, 10), note: '' }
 
 function monthsUntil(dateStr) {
@@ -78,10 +77,8 @@ export default function MetasAhorro() {
   const [contributions, setContributions] = useState([])
   const [error, setError] = useState(null)
 
-  const [form, setForm] = useState(emptyGoalForm)
-  const [saving, setSaving] = useState(false)
   const [editingId, setEditingId] = useState(null)
-  const [editForm, setEditForm] = useState(emptyGoalForm)
+  const [editForm, setEditForm] = useState({})
   const [contribForm, setContribForm] = useState({})
   const [confirmArchive, setConfirmArchive] = useState(null) // { id, name } | null
   const [confirmDeleteContribution, setConfirmDeleteContribution] = useState(null) // { goal, contribution } | null
@@ -110,28 +107,16 @@ export default function MetasAhorro() {
 
   useEffect(() => { reload() }, [])
 
-  const hijas = accounts.filter((a) => a.kind === 'hija')
+  // "Agregar meta de ahorro" vive en Ajustes → Metas de ahorro desde acá
+  // (mismo criterio que "Cuentas"/"Deudas" — ver CLAUDE.md), así que esta
+  // página necesita refrescar cuando eso pasa mientras sigue montada debajo
+  // del panel de Ajustes — mismo patrón de evento global usado en Deudas.jsx.
+  useEffect(() => {
+    window.addEventListener('dashboard:goals-changed', reload)
+    return () => window.removeEventListener('dashboard:goals-changed', reload)
+  }, [])
 
-  async function handleCreate(e) {
-    e.preventDefault()
-    if (!form.name.trim()) return
-    setSaving(true)
-    try {
-      await createSavingsGoal({
-        kind: form.kind,
-        name: form.name.trim(),
-        accountId: form.accountId || null,
-        targetAmount: form.targetAmount ? Number(form.targetAmount) : null,
-        targetDate: form.targetDate,
-      })
-      setForm(emptyGoalForm)
-      await reload()
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setSaving(false)
-    }
-  }
+  const hijas = accounts.filter((a) => a.kind === 'hija')
 
   function startEdit(g) {
     setEditingId(g.id)
@@ -376,27 +361,6 @@ export default function MetasAhorro() {
             </Card>
           )
         })}
-
-        <Card title="Agregar meta de ahorro" className="span-3">
-          <form onSubmit={handleCreate} style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            <select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value, accountId: '' })} style={formInput}>
-              <option value="puntual">Meta puntual</option>
-              <option value="proposito">Ahorro con propósito</option>
-            </select>
-            <input placeholder="Nombre" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={{ ...formInput, flex: '1 1 160px' }} />
-            {form.kind === 'proposito' && (
-              <select value={form.accountId} onChange={(e) => setForm({ ...form, accountId: e.target.value })} style={formInput}>
-                <option value="">Cuenta vinculada…</option>
-                {hijas.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
-              </select>
-            )}
-            <input type="number" placeholder="Meta $ (opcional)" value={form.targetAmount} onChange={(e) => setForm({ ...form, targetAmount: e.target.value })} style={{ ...formInput, width: 140 }} />
-            <input type="date" value={form.targetDate} onChange={(e) => setForm({ ...form, targetDate: e.target.value })} style={formInput} />
-            <button type="submit" disabled={saving} style={{ minHeight: 'var(--touch-target)', padding: '0 var(--space-2)', borderRadius: 10, background: 'var(--series-1)', color: '#fff', fontWeight: 600, opacity: saving ? 0.6 : 1 }}>
-              Agregar
-            </button>
-          </form>
-        </Card>
 
         {goals.length === 0 && (
           <Card className="span-3"><p style={{ color: 'var(--text-muted)' }}>Aún no hay metas de ahorro registradas.</p></Card>

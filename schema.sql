@@ -14,12 +14,39 @@ create table accounts (
   kind text not null check (kind in ('madre', 'hija')),
   parent_account_id uuid references accounts(id),  -- hijas apuntan a la madre
   is_fixed_expenses_account boolean not null default false,
-  currency text not null default 'COP',        -- moneda nativa de la cuenta (COP o USD)
-  currency_group_id uuid references accounts(id),  -- si no es null, apunta a la cuenta "primaria" del mismo conjunto (ej. Arq EUR -> Arq): son cuentas separadas de verdad (cada una con su propia moneda/saldo/transacciones), pero Cuentas.jsx las muestra como una sola tarjeta con selector de moneda
+  currency text not null default 'COP',        -- moneda PRIMARIA de la cuenta (ej. USD para arq) — si is_multi_currency, las monedas adicionales viven en account_currencies, no acá
+  is_multi_currency boolean not null default false, -- true = la cuenta tiene más de un bolsillo de moneda (ver account_currencies) bajo esta misma fila/id
   is_active boolean not null default true,
   sort_order int not null default 0,
   created_at timestamptz not null default now()
 );
+
+-- Monedas ADICIONALES de una cuenta multi-moneda (ej. arq en EUR además de su
+-- USD primario) — todas comparten el mismo account_id real: no son cuentas
+-- separadas, es una sola cuenta con varios saldos. Reemplaza el viejo
+-- mecanismo de currency_group_id (dos filas de `accounts` enlazadas), que
+-- solo agrupaba visualmente dos cuentas de verdad separadas; acá es una única
+-- cuenta con varios `currency` posibles de verdad. `tag` es el texto que el
+-- motor de asignación de MonIA (o una edición manual de tags) debe matchear
+-- para que una transacción caiga en ESTE bolsillo específico en vez del
+-- primario (ej. tag "arq eur" -> este bolsillo EUR de la cuenta "arq"); ver
+-- .claude/rules/motor-asignacion.md.
+create table account_currencies (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) default auth.uid(),
+  account_id uuid not null references accounts(id) on delete cascade,
+  currency text not null,
+  tag text not null,
+  created_at timestamptz not null default now(),
+  unique (account_id, currency),
+  unique (user_id, tag)
+);
+
+alter table account_currencies enable row level security;
+create policy "select own account_currencies" on account_currencies for select using (user_id = auth.uid());
+create policy "insert own account_currencies" on account_currencies for insert with check (user_id = auth.uid());
+create policy "update own account_currencies" on account_currencies for update using (user_id = auth.uid());
+create policy "delete own account_currencies" on account_currencies for delete using (user_id = auth.uid());
 
 -- Valores iniciales sugeridos (el usuario puede renombrar/eliminar libremente)
 -- Se insertan solo como plantilla de arranque; comentar si no se desea precargar.
@@ -83,7 +110,10 @@ create table monthly_initial_balances (
   currency text not null default 'COP',
   source text not null default 'manual' check (source in ('manual', 'shortcut')),
   created_at timestamptz not null default now(),
-  unique (user_id, account_id, year, month)
+  -- Incluye currency (no solo account_id/year/month) para que una cuenta
+  -- multi-moneda pueda tener un saldo inicial por cada bolsillo el mismo mes
+  -- (ej. arq-USD y arq-EUR), en vez de pisarse entre sí.
+  unique (user_id, account_id, year, month, currency)
 );
 
 -- Historial de transferencias entre cuentas (madre->hija, hija->hija, ajustes)

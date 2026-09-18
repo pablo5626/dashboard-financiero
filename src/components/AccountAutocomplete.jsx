@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { formatByCurrency } from '../lib/format.js'
 import styles from './AccountAutocomplete.module.css'
 
 // Cuadro de texto con sugerencias, mismo patrón de interacción que la
@@ -7,7 +8,14 @@ import styles from './AccountAutocomplete.module.css'
 // cómoda en pantalla. `onMouseDown` con preventDefault en cada opción evita
 // que el input pierda el foco (y cierre la lista) antes de que el click
 // llegue a registrarse.
-export default function AccountAutocomplete({ accounts, value, onChange, placeholder = 'Cuenta' }) {
+//
+// `balances` es opcional: { [accountId]: number }, en la moneda PRIMARIA de
+// cada cuenta (mismo shape que devuelve accountsApi.fetchBalancesForMonth,
+// leído con su clave "plana" — ver currencyPockets.js). Cuando viene, cada
+// opción muestra el saldo del mes a la derecha, para elegir la cuenta a
+// simple vista igual que la referencia de MonIA, en vez de tener que abrir
+// Cuentas para recordar cuánto tiene cada una.
+export default function AccountAutocomplete({ accounts, value, onChange, placeholder = 'Cuenta', balances }) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
   const selected = accounts.find((a) => a.id === value)
@@ -50,7 +58,10 @@ export default function AccountAutocomplete({ accounts, value, onChange, placeho
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => handlePick(a)}
             >
-              {a.name}
+              <span>{a.name}</span>
+              {balances && a.id in balances && (
+                <span className={styles.optionBalance}>{formatByCurrency(balances[a.id], a.currency || 'COP')}</span>
+              )}
             </button>
           ))}
           {filtered.length === 0 && <p className={styles.empty}>Sin coincidencias.</p>}

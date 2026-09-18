@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient.js'
+import { buildPocketIndex, resolvePocketKey } from './currencyPockets.js'
 
 // Plata que salió de cada cuenta por transferencia en el set de filas dado.
 // Una transferencia no es un gasto a nivel consolidado (mover plata no la
@@ -9,19 +10,21 @@ import { supabase } from './supabaseClient.js'
 //
 // Excluye las que vuelven a la cuenta madre (devolver plata sobrante no es
 // usar el presupuesto) y las que el usuario marcó como `consumes_budget =
-// false` al crearlas, o sea puro reacomodo entre bolsillos. Y solo cuenta la
-// fila si su moneda coincide con la de la cuenta de origen, igual que el resto
-// de las vistas por cuenta.
+// false` al crearlas, o sea puro reacomodo entre bolsillos. Resuelve la
+// misma clave "plana vs. accountId:currency" que fetchBalancesForMonth (ver
+// currencyPockets.js), para que la plata que sale del bolsillo EUR de una
+// cuenta multi-moneda consuma el "% usado" de ESE bolsillo, no del primario.
 export function sumOutgoingByAccount(transfers, accounts) {
   const madreId = accounts.find((a) => a.kind === 'madre')?.id
-  const currencyByAccountId = Object.fromEntries(accounts.map((a) => [a.id, a.currency || 'COP']))
+  const pocketIndex = buildPocketIndex(accounts)
 
   const outgoing = {}
   for (const row of transfers) {
     if (!row.from_account_id || row.to_account_id === madreId) continue
     if (row.consumes_budget === false) continue
-    if ((row.currency || 'COP') !== currencyByAccountId[row.from_account_id]) continue
-    outgoing[row.from_account_id] = (outgoing[row.from_account_id] ?? 0) + Number(row.amount)
+    const key = resolvePocketKey(pocketIndex, row.from_account_id, row.currency)
+    if (!key) continue
+    outgoing[key] = (outgoing[key] ?? 0) + Number(row.amount)
   }
   return outgoing
 }

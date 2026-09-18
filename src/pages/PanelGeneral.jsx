@@ -7,8 +7,8 @@ import {
 import Card from '../components/ui/Card.jsx'
 import StatTile from '../components/ui/StatTile.jsx'
 import { formatCOP, formatCompact, formatByCurrency } from '../lib/format.js'
-import { listAccounts, fetchBalancesForMonth } from '../lib/accountsApi.js'
-import { lastNMonths, fetchMonthlyTrend, fetchTotalDebt, fetchAlerts } from '../lib/panelApi.js'
+import { listAccounts, fetchBalancesForMonth, totalBalanceInCOP } from '../lib/accountsApi.js'
+import { lastNMonths, fetchMonthlyTrend, fetchTotalDebt, fetchAlerts, findFirstDataMonth } from '../lib/panelApi.js'
 import { getRates, toCOP } from '../lib/exchangeRatesApi.js'
 
 const STATUS_DOT = {
@@ -66,6 +66,7 @@ export default function PanelGeneral() {
   const [alerts, setAlerts] = useState([])
   const [yoyCurrent, setYoyCurrent] = useState(null)
   const [yoyPrevious, setYoyPrevious] = useState(null)
+  const [yoyStartMonth, setYoyStartMonth] = useState(1)
   const [error, setError] = useState(null)
 
   useEffect(() => {
@@ -74,12 +75,26 @@ export default function PanelGeneral() {
         const accs = await listAccounts()
         setAccounts(accs)
         const ids = accs.map((a) => a.id)
-        const currentYearMonths = Array.from({ length: MONTH }, (_, i) => ({ year: YEAR, month: i + 1 }))
-        const previousYearMonths = Array.from({ length: MONTH }, (_, i) => ({ year: YEAR - 1, month: i + 1 }))
+
+        // No graficar meses anteriores al primer registro real (saldo inicial,
+        // transacción o transferencia) como si fueran "0 gastado" — eso se ve
+        // idéntico a un mes real sin movimientos y confunde.
+        const firstData = await findFirstDataMonth()
+        const firstDataKey = firstData ? firstData.year * 12 + firstData.month : null
+        const startMonth = firstData && firstData.year === YEAR ? firstData.month : 1
+        setYoyStartMonth(startMonth)
+
+        const currentYearMonths = Array.from({ length: MONTH - startMonth + 1 }, (_, i) => ({ year: YEAR, month: startMonth + i }))
+        const previousYearMonths = currentYearMonths.map((m) => ({ year: YEAR - 1, month: m.month }))
+        let trendMonths = lastNMonths(YEAR, MONTH, TREND_MONTHS)
+        if (firstDataKey != null) {
+          trendMonths = trendMonths.filter((m) => m.year * 12 + m.month >= firstDataKey)
+        }
+
         const [{ balances: b }, currentRates, trendRows, debt, alertRows, yoyCurrentRows, yoyPreviousRows] = await Promise.all([
           fetchBalancesForMonth(accs, YEAR, MONTH),
           getRates(),
-          fetchMonthlyTrend(ids, lastNMonths(YEAR, MONTH, TREND_MONTHS)),
+          fetchMonthlyTrend(ids, trendMonths),
           fetchTotalDebt(),
           fetchAlerts(),
           fetchMonthlyTrend(ids, currentYearMonths),
@@ -108,7 +123,7 @@ export default function PanelGeneral() {
   }
 
   const hijas = accounts.filter((a) => a.kind === 'hija')
-  const balanceTotal = accounts.reduce((sum, a) => sum + toCOP(balances[a.id] ?? 0, a.currency, rates), 0)
+  const balanceTotal = accounts.reduce((sum, a) => sum + totalBalanceInCOP(a, balances, rates, toCOP), 0)
 
   const netWorthTrend = trend.map((t) => ({
     month: MONTH_LABELS[t.month - 1],
@@ -126,7 +141,7 @@ export default function PanelGeneral() {
   const prevMonth = trend[trend.length - 2]
   const gastoDelta = prevMonth ? lastMonth.gastos - prevMonth.gastos : 0
 
-  const yoyChartData = MONTH_LABELS.slice(0, MONTH).map((label, i) => ({
+  const yoyChartData = MONTH_LABELS.slice(yoyStartMonth - 1, MONTH).map((label, i) => ({
     month: label,
     gastosActual: yoyCurrent?.[i]?.gastos ?? 0,
     gastosAnterior: yoyPrevious?.[i]?.gastos ?? 0,
@@ -180,7 +195,7 @@ export default function PanelGeneral() {
 
         <Card title="Distribución por cuenta">
           <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={hijas.map((a) => ({ name: a.name, balance: toCOP(balances[a.id] ?? 0, a.currency, rates) }))} layout="vertical" margin={{ left: 8 }}>
+            <BarChart data={hijas.map((a) => ({ name: a.name, balance: totalBalanceInCOP(a, balances, rates, toCOP) }))} layout="vertical" margin={{ left: 8 }}>
               <CartesianGrid horizontal={false} stroke="var(--gridline)" />
               <XAxis type="number" hide />
               <YAxis type="category" dataKey="name" width={70} tick={{ fill: 'var(--text-secondary)', fontSize: 12 }} axisLine={false} tickLine={false} />
@@ -221,7 +236,7 @@ export default function PanelGeneral() {
           </ResponsiveContainer>
         </Card>
 
-        <Card title={`Comparativa año a año (ene–${MONTH_LABELS[MONTH - 1]})`} className="span-3">
+        <Card title={`Comparativa año a año (${MONTH_LABELS[yoyStartMonth - 1]}–${MONTH_LABELS[MONTH - 1]})`} className="span-3">
           <div className="kpi-row" style={{ marginBottom: 'var(--space-2)' }}>
             <StatTile
               label={`Ingresos ${YEAR}`}

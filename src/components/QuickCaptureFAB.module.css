@@ -1,4 +1,4 @@
-/* Clúster inferior izquierdo: "+" (carga manual) y buscar, en una píldora
+/* Clúster inferior izquierdo: buscar y "+" (carga manual), en una píldora
    -- y el micrófono como botón grande propio a la derecha, siempre visible
    en todas las páginas (no escondido dentro de la hoja de "+"), inspirado
    en el layout de MonIA. */
@@ -7,6 +7,7 @@
   left: var(--space-2);
   bottom: calc(64px + env(safe-area-inset-bottom) + var(--space-2));
   display: flex;
+  align-items: center;
   gap: 8px;
   z-index: 40;
 }
@@ -28,6 +29,48 @@
   transform: scale(0.94);
 }
 
+/* "+" ya no comparte fila con la cámara — la agrupa como burbuja satélite
+   que aparece arriba recién al tocarlo (referencia del usuario:
+   other recursos/referencia boton.mp4), así que necesita un contenedor
+   posicionado para anclar esa burbuja encima del botón sin mover el resto
+   del clúster. */
+.fabPlusWrap {
+  position: relative;
+}
+
+.fabPlusActive {
+  background: var(--series-1);
+  border-color: var(--series-1);
+  color: #fff;
+}
+
+.fabSatellite {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  transform: translateX(-50%);
+  width: 48px;
+  height: 48px;
+  border-radius: 24px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-hairline);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 14px -2px rgba(0, 0, 0, 0.22);
+  animation: fabSatelliteIn 0.15s ease-out;
+}
+
+.fabSatellite:active {
+  transform: translateX(-50%) scale(0.94);
+}
+
+@keyframes fabSatelliteIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(6px) scale(0.8); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+}
+
 .fabMic {
   position: fixed;
   right: var(--space-2);
@@ -40,7 +83,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 4px 18px -2px color-mix(in srgb, var(--series-1) 55%, transparent);
   z-index: 40;
 }
 
@@ -83,31 +126,288 @@
 .sheet {
   background: var(--surface-raised);
   border: 1px solid var(--border-hairline);
-  border-radius: var(--radius-card) var(--radius-card) 0 0;
-  padding: var(--space-3) var(--space-2) calc(var(--space-3) + env(safe-area-inset-bottom));
+  border-radius: 28px 28px 0 0;
+  padding: 10px var(--space-2) calc(var(--space-3) + env(safe-area-inset-bottom));
   width: 100%;
   max-width: 420px;
   max-height: 85dvh;
   overflow-y: auto;
+  box-shadow: 0 -16px 40px -12px color-mix(in srgb, var(--series-1) 16%, transparent);
 }
 
 @media (min-width: 768px) {
   .sheet {
-    border-radius: var(--radius-card);
+    border-radius: 28px;
     padding: var(--space-3);
+  }
+}
+
+/* Barrita de "arrastrar" decorativa arriba de la hoja — afordancia estándar
+   de bottom sheet, no es funcional (no hay drag-to-dismiss implementado). */
+.dragHandle {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--gridline);
+  margin: 0 auto var(--space-2);
+}
+
+@media (min-width: 768px) {
+  .dragHandle {
+    display: none;
   }
 }
 
 .header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   margin-bottom: var(--space-2);
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.titleDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--series-1);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--series-1) 20%, transparent);
+  flex-shrink: 0;
 }
 
 .title {
   font: var(--font-headline);
   margin: 0;
+}
+
+.subtitle {
+  font: var(--font-caption);
+  color: var(--text-muted);
+  margin: 2px 0 0 16px;
+}
+
+.titleRowInline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.receiptIconBadge {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--series-1) 14%, transparent);
+  color: var(--series-1);
+}
+
+.receiptBadgePill {
+  font: var(--font-caption);
+  font-weight: 700;
+  color: var(--series-1);
+  background: color-mix(in srgb, var(--series-1) 12%, transparent);
+  border-radius: 20px;
+  padding: 1px 8px;
+}
+
+/* ---- Pantalla dedicada "Escanear recibo" (reemplaza el formulario de
+   gasto/ingreso/traslado mientras receiptMode es true, no un botón/input
+   escondido adentro del form) ---- */
+.receiptView {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.receiptPreviewCard {
+  position: relative;
+  border-radius: 16px;
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-1);
+  min-height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.receiptPreviewImg {
+  width: 100%;
+  max-height: 260px;
+  object-fit: contain;
+}
+
+.receiptPreviewEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: var(--space-3) var(--space-2);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.receiptPreviewEmpty p {
+  font: var(--font-caption);
+  margin: 0;
+}
+
+.receiptProcessingOverlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: color-mix(in srgb, var(--surface-raised) 85%, transparent);
+  font: var(--font-caption);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.receiptSourceRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.receiptSourceButton {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-1);
+  text-align: left;
+}
+
+.receiptSourceButton:disabled {
+  opacity: 0.5;
+}
+
+.receiptSourceIcon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--series-1) 16%, transparent);
+  color: var(--series-1);
+}
+
+.receiptSourceText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.receiptSourceLabel {
+  font: var(--font-caption);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.receiptSourceSub {
+  font: var(--font-caption);
+  color: var(--text-muted);
+}
+
+.receiptResultCard {
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--status-good) 35%, var(--border-hairline));
+  background: var(--surface-1);
+  padding: var(--space-1) var(--space-1) 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.receiptResultHeader {
+  font: var(--font-caption);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+}
+
+.receiptResultAmountRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.receiptResultLabel {
+  font: var(--font-caption);
+  color: var(--text-muted);
+  display: block;
+}
+
+.receiptResultAmount {
+  font: var(--font-title);
+  font-weight: 800;
+  color: var(--status-good);
+}
+
+.receiptResultCategory {
+  flex-shrink: 0;
+  font: var(--font-caption);
+  font-weight: 600;
+  color: var(--series-4);
+  background: color-mix(in srgb, var(--series-4) 16%, transparent);
+  border-radius: 10px;
+  padding: 4px 8px;
+}
+
+.receiptResultPurpose {
+  font: var(--font-subheadline);
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.receiptFooter {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.receiptRetake {
+  flex: 1;
+  min-height: var(--touch-target);
+  border-radius: 14px;
+  border: 1px solid var(--border-hairline);
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.receiptRetake:disabled {
+  opacity: 0.4;
+}
+
+.receiptConfirm {
+  flex: 2;
+  min-height: var(--touch-target);
+  border-radius: 14px;
+  background: var(--series-1);
+  color: #fff;
+  font-weight: 700;
+  box-shadow: 0 6px 20px -6px color-mix(in srgb, var(--series-1) 55%, transparent);
+}
+
+.receiptConfirm:disabled {
+  opacity: 0.4;
+  box-shadow: none;
 }
 
 .closeButton {
@@ -146,6 +446,7 @@
 .segmentActive {
   background: var(--series-1);
   color: #fff;
+  box-shadow: 0 4px 16px -2px color-mix(in srgb, var(--series-1) 50%, transparent);
 }
 
 .amountInput {
@@ -157,6 +458,73 @@
   font: var(--font-headline);
   background: var(--surface-1);
   color: var(--text-primary);
+}
+
+/* Tarjeta "hero" del monto — label + moneda arriba, número grande abajo con
+   un "$" fijo, mismo peso visual que el resto del formulario le da a esta
+   pieza (es el dato más importante de la fila). El glow al enfocar reusa
+   --series-1 vía color-mix en vez de un hex nuevo. */
+.amountCard {
+  background: var(--surface-1);
+  border: 1px solid var(--border-hairline);
+  border-radius: 16px;
+  padding: 10px var(--space-1) 8px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.amountCard:focus-within {
+  border-color: var(--series-1);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--series-1) 18%, transparent);
+}
+
+.amountCardLabel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font: var(--font-caption);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+.amountCardCurrency {
+  font: var(--font-caption);
+  font-weight: 700;
+  color: var(--series-1);
+  background: color-mix(in srgb, var(--series-1) 12%, transparent);
+  border-radius: 20px;
+  padding: 2px 9px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.amountCardRow {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.amountCardSign {
+  font: var(--font-title);
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.amountCardInput {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font: var(--font-largetitle);
+  color: var(--text-primary);
+  padding: 0;
+}
+
+.amountCardInput::placeholder {
+  color: var(--text-muted);
 }
 
 .chipRow {
@@ -189,6 +557,81 @@
   background: var(--series-1);
   border-color: var(--series-1);
   color: #fff;
+}
+
+/* Selector de cuenta en gasto/ingreso — fila horizontal deslizable de
+   chips con avatar de color + saldo del mes, mismo ciclo de color que
+   "Distribución por cuenta" (ACCOUNT_COLORS), no un hex por cuenta. */
+.accountSection {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.accountSectionHeader {
+  display: flex;
+  align-items: center;
+}
+
+.accountChipRow {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+
+.accountChipRow::-webkit-scrollbar {
+  display: none;
+}
+
+.accountChip {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 6px 6px;
+  border-radius: 14px;
+  border: 1.5px solid var(--border-hairline);
+  background: var(--surface-1);
+  text-align: left;
+}
+
+.accountChipActive {
+  border-color: var(--series-1);
+  background: color-mix(in srgb, var(--series-1) 10%, var(--surface-1));
+  box-shadow: 0 2px 10px -2px color-mix(in srgb, var(--series-1) 35%, transparent);
+}
+
+.accountAvatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font: var(--font-caption);
+  font-weight: 800;
+}
+
+.accountChipText {
+  display: flex;
+  flex-direction: column;
+}
+
+.accountChipName {
+  font: var(--font-caption);
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.accountChipBalance {
+  font: var(--font-caption);
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .moreToggle {
@@ -245,11 +688,12 @@
 
 .submit {
   min-height: var(--touch-target);
-  border-radius: 10px;
+  border-radius: 14px;
   background: var(--series-1);
   color: #fff;
-  font-weight: 600;
+  font-weight: 700;
   margin-top: var(--space-1);
+  box-shadow: 0 6px 20px -6px color-mix(in srgb, var(--series-1) 55%, transparent);
 }
 
 .submit:disabled {
@@ -279,11 +723,191 @@
   margin: 0;
 }
 
+/* Pantalla de escucha simplificada, sin recuadro/tarjeta — solo la onda, lo
+   que se va transcribiendo (real, no relleno) y las dos píldoras de acción.
+   Todo lo demás (categoría, cuenta, entidades reconocidas) aparece recién
+   después de "Aceptar", ya con el formulario normal abajo. */
+.voiceListeningPlain {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0 4px;
+}
+
+/* Badge "EN VIVO" en el header de la hoja mientras el micrófono está
+   realmente grabando (rojo solo en ese caso, mismo criterio que
+   .micListening). */
+.voiceLiveBadge {
+  font: var(--font-caption);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--status-critical);
+  background: color-mix(in srgb, var(--status-critical) 14%, transparent);
+  border-radius: 20px;
+  padding: 1px 8px;
+}
+
+/* El punto rojo pulsante de "Leyendo recibo…" (receiptView) reusa esta
+   misma animación .pulse — no es exclusivo de la voz. */
+.voiceLiveDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--status-critical);
+  flex-shrink: 0;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+/* Barras con la amplitud real del micrófono (ver startAudioVisualizer en
+   QuickCaptureFAB.jsx) — la altura de cada una viene de un inline style
+   calculado en vivo, no de una animación CSS de relleno. */
+.voiceWaveRow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 32px;
+}
+
+.voiceWaveBar {
+  width: 3px;
+  min-height: 3px;
+  border-radius: 2px;
+  background: var(--series-1);
+  transition: height 0.1s ease-out;
+}
+
+.voiceTranscript {
+  font: var(--font-subheadline);
+  color: var(--text-primary);
+  text-align: center;
+  margin: 0;
+}
+
+.voiceExamples {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.voiceExamplesHint {
+  font: var(--font-caption);
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.voiceExampleRow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+}
+
+.voiceExampleChip {
+  font: var(--font-caption);
+  color: var(--text-secondary);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-hairline);
+  border-radius: 20px;
+  padding: 3px 10px;
+}
+
+.voicePillRow {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.voicePillStop {
+  min-height: 40px;
+  padding: 0 20px;
+  border-radius: 20px;
+  border: 1px solid var(--border-hairline);
+  color: var(--text-secondary);
+  font: var(--font-subheadline);
+  font-weight: 600;
+}
+
+.voicePillAccept {
+  min-height: 40px;
+  padding: 0 20px;
+  border-radius: 20px;
+  background: var(--series-1);
+  color: #fff;
+  font: var(--font-subheadline);
+  font-weight: 700;
+  box-shadow: 0 4px 14px -4px color-mix(in srgb, var(--series-1) 55%, transparent);
+}
+
+.voicePillAccept:disabled {
+  opacity: 0.4;
+  box-shadow: none;
+}
+
+/* Tarjeta de "entidades reconocidas" — aparece apenas voice-parse devuelve
+   un resultado y se queda visible junto con el formulario ya precargado
+   (que el usuario igual revisa antes de guardar), no reemplaza el form. */
+.voiceResultCard {
+  background: var(--surface-1);
+  border: 1px solid var(--border-hairline);
+  border-radius: 14px;
+  padding: var(--space-1);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.voiceResultHeader {
+  font: var(--font-caption);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+}
+
+.voiceResultPills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.voiceResultPill {
+  font: var(--font-caption);
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-hairline);
+  border-radius: 10px;
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.voiceResultPillLabel {
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.voiceResultPill[data-tone="amount"] { border-color: color-mix(in srgb, var(--status-good) 35%, var(--border-hairline)); }
+.voiceResultPill[data-tone="amount"] .voiceResultPillLabel { color: var(--status-good); }
+.voiceResultPill[data-tone="category"] { border-color: color-mix(in srgb, var(--series-4) 35%, var(--border-hairline)); }
+.voiceResultPill[data-tone="category"] .voiceResultPillLabel { color: var(--series-4); }
+.voiceResultPill[data-tone="account"] { border-color: color-mix(in srgb, var(--series-7) 35%, var(--border-hairline)); }
+.voiceResultPill[data-tone="account"] .voiceResultPillLabel { color: var(--series-7); }
+.voiceResultPill[data-tone="type"] { border-color: color-mix(in srgb, var(--series-8) 35%, var(--border-hairline)); }
+.voiceResultPill[data-tone="type"] .voiceResultPillLabel { color: var(--series-8); }
+
 /* Descripción/Monto grandes y sin chrome, como en la referencia de MonIA —
    son los primeros campos que se ven, en vez de estar escondidos en "Más
    opciones". */
 .bigInput {
   border: none;
+  outline: none;
   background: transparent;
   font: var(--font-title);
   padding: 8px 2px;
@@ -315,7 +939,7 @@
   width: var(--touch-target);
   height: var(--touch-target);
   flex-shrink: 0;
-  border-radius: 10px;
+  border-radius: 12px;
   border: 1px solid var(--border-hairline);
   color: var(--text-secondary);
   font-weight: 700;
@@ -325,11 +949,12 @@
   background: var(--series-1);
   border-color: var(--series-1);
   color: #fff;
+  box-shadow: 0 2px 10px -2px color-mix(in srgb, var(--series-1) 45%, transparent);
 }
 
 .dateInput {
   min-height: var(--touch-target);
-  border-radius: 10px;
+  border-radius: 12px;
   border: 1px solid var(--border-hairline);
   padding: 0 8px;
   font: var(--font-caption);

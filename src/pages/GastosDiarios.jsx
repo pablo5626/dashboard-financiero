@@ -5,6 +5,7 @@ import ConfirmDialog from '../components/ui/ConfirmDialog.jsx'
 import { formatCOP, formatByCurrency } from '../lib/format.js'
 import { listAccounts } from '../lib/accountsApi.js'
 import { getRates, toCOP } from '../lib/exchangeRatesApi.js'
+import { buildPocketIndex, resolvePocketKey, flattenAccountPockets } from '../lib/currencyPockets.js'
 import { listCategories } from '../lib/categoriesApi.js'
 import { getAllocationsForMonth } from '../lib/allocationsApi.js'
 import { getTransfersForMonth, sumOutgoingByAccount } from '../lib/transfersApi.js'
@@ -203,16 +204,20 @@ export default function GastosDiarios() {
     return <p style={{ color: 'var(--status-critical)' }}>Error cargando gastos diarios: {error}</p>
   }
 
-  // Los tags que nombran una cuenta ya están representados en el desglose por
-  // cuenta; contarlos acá duplicaría el monto de la misma compra, que suele
-  // traer además un tag descriptivo.
-  const accountNameTags = new Set(hijas.map((h) => h.name.toLowerCase()))
+  // Los tags que nombran una cuenta (o un bolsillo de una cuenta multi-moneda,
+  // ej. "arq eur") ya están representados en el desglose por cuenta; contarlos
+  // acá duplicaría el monto de la misma compra, que suele traer además un tag
+  // descriptivo.
+  const accountNameTags = new Set([
+    ...hijas.map((h) => h.name.toLowerCase()),
+    ...hijas.flatMap((h) => (h.extraCurrencies ?? []).map((c) => c.tag.toLowerCase())),
+  ])
 
   // Vistas por cuenta (spentByAccount/incomeByAccount) van en la moneda propia
-  // de la cuenta, igual que los saldos; las consolidadas (categoría y tag,
+  // de cada bolsillo, igual que los saldos; las consolidadas (categoría y tag,
   // que cruzan cuentas de distinta moneda) convierten a COP con la tasa
   // vigente, igual que el Panel general.
-  const currencyByAccountId = Object.fromEntries(accounts.map((a) => [a.id, a.currency || 'COP']))
+  const pocketIndex = buildPocketIndex(accounts)
   const spentByCategory = {}
   const spentByTag = {}
   const spentByAccount = {}
@@ -225,17 +230,17 @@ export default function GastosDiarios() {
   for (const t of monthTransactions ?? []) {
     if (isIgnoredRow(t.tags)) continue
     const currency = t.currency || 'COP'
-    const matchesAccount = t.account_id && currency === currencyByAccountId[t.account_id]
+    const pocketKey = t.account_id ? resolvePocketKey(pocketIndex, t.account_id, currency) : null
     if (Number(t.amount) >= 0) {
-      if (matchesAccount) incomeByAccount[t.account_id] = (incomeByAccount[t.account_id] ?? 0) + Number(t.amount)
+      if (pocketKey) incomeByAccount[pocketKey] = (incomeByAccount[pocketKey] ?? 0) + Number(t.amount)
       continue
     }
     const amount = -Number(t.amount)
     const amountCOP = toCOP(amount, currency, rates)
     spentByCategory[t.category_id] = (spentByCategory[t.category_id] ?? 0) + amountCOP
-    if (matchesAccount) {
-      spentByAccount[t.account_id] = (spentByAccount[t.account_id] ?? 0) + amount
-      if (t.currency_pending) pendingByAccount[t.account_id] = (pendingByAccount[t.account_id] ?? 0) + 1
+    if (pocketKey) {
+      spentByAccount[pocketKey] = (spentByAccount[pocketKey] ?? 0) + amount
+      if (t.currency_pending) pendingByAccount[pocketKey] = (pendingByAccount[pocketKey] ?? 0) + 1
     }
     for (const tag of t.tags ?? []) {
       if (accountNameTags.has(tag)) continue
@@ -449,18 +454,18 @@ export default function GastosDiarios() {
           <table className="simple-table">
             <thead><tr><th>Cuenta</th><th>Gastado este mes</th><th>Movido a otras cuentas</th><th>Asignado este mes</th><th>Ingresos este mes</th><th>% usado</th></tr></thead>
             <tbody>
-              {hijas.map((h) => {
-                const currency = h.currency || 'COP'
-                const spent = spentByAccount[h.id] ?? 0
-                const pendingCount = pendingByAccount[h.id] ?? 0
-                const movido = transferredOut[h.id] ?? 0
-                const allocated = allocations[h.id]
-                const income = incomeByAccount[h.id] ?? 0
+              {flattenAccountPockets(hijas).map((p) => {
+                const currency = p.currency
+                const spent = spentByAccount[p.key] ?? 0
+                const pendingCount = pendingByAccount[p.key] ?? 0
+                const movido = transferredOut[p.key] ?? 0
+                const allocated = allocations[p.key]
+                const income = incomeByAccount[p.key] ?? 0
                 const disponible = (allocated ?? 0) + income
                 const pct = disponible > 0 ? Math.round(((spent + movido) / disponible) * 100) : null
                 return (
-                  <tr key={h.id}>
-                    <td>{h.name}</td>
+                  <tr key={p.key}>
+                    <td>{p.label}</td>
                     <td>
                       {pendingCount > 0 && (
                         <span

@@ -5,10 +5,14 @@
 > superadas por la implementación real: la app no es un artifact sino un
 > proyecto Vite desplegado en GitHub Pages, el multi-moneda incluye EUR además
 > de COP y USD, la tasa de cambio no es "un valor" sino una fila por par de
-> monedas, y el proyecto de Supabase hace rato que existe. **Para el estado
-> vigente de cualquier cosa, mandá `CLAUDE.md`, no este archivo.** Lo que sí
-> sigue siendo normativo acá es la tabla de mapeo categorías→cuentas, mantenida
-> al día (ver `.claude/rules/nomenclatura.md`).
+> monedas (editable tanto en Cuentas como en Ajustes → Tasas de cambio, con un
+> botón para traerla del día desde una API real), una cuenta multi-moneda
+> (como `arq`) es **una sola fila** con varios bolsillos de moneda
+> (`is_multi_currency` + `account_currencies`), no dos cuentas separadas como
+> describe más abajo, y el proyecto de Supabase hace rato que existe. **Para
+> el estado vigente de cualquier cosa, mandá `CLAUDE.md`, no este archivo.**
+> Lo que sí sigue siendo normativo acá es la tabla de mapeo categorías→cuentas,
+> mantenida al día (ver `.claude/rules/nomenclatura.md`).
 
 ## 🎯 Objetivo general
 Construir una **app web interactiva** (React/HTML como artifact) que funcione como panel de control financiero personal, consolidando cuentas, gastos, deudas y metas de ahorro en un único lugar, con gráficos visuales para entender el comportamiento financiero mes a mes.

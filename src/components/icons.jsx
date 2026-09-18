@@ -123,3 +123,12 @@ export function IconTag(props) {
     </svg>
   )
 }
+
+export function IconExchange(props) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M4 8h14M14 4l4 4-4 4" />
+      <path d="M20 16H6M10 20l-4-4 4-4" />
+    </svg>
+  )
+}

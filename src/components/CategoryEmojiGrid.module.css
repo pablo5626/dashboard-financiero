@@ -7,6 +7,16 @@
   overflow-x: auto;
   padding-bottom: 2px;
   -webkit-overflow-scrolling: touch;
+  /* Sin esto, Windows/desktop Chrome dibuja una scrollbar horizontal con
+     flechitas de navegación siempre visible debajo de la fila — se nota
+     poco con una sola fila deslizable, pero se ve como "todo duplicado"
+     apenas hay dos filas de este tipo una debajo de la otra (ver
+     .accountChipRow en QuickCaptureFAB.module.css, mismo fix ahí). */
+  scrollbar-width: none;
+}
+
+.grid::-webkit-scrollbar {
+  display: none;
 }
 
 .tile {

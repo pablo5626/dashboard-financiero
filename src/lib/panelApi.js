@@ -88,6 +88,38 @@ export async function fetchMonthlyTrend(accountIds, months, { convertToCOP = tru
   })
 }
 
+// Primer mes con algún registro financiero real (saldo inicial, transacción
+// o transferencia) — usado para no graficar como "0" meses anteriores a que
+// el usuario empezara a usar el dashboard, que de otro modo se ven idénticos
+// a un mes real sin gasto ni ingreso. Devuelve null si no hay ningún dato aún.
+export async function findFirstDataMonth() {
+  const [{ data: balances, error: e1 }, { data: transactions, error: e2 }, { data: transfers, error: e3 }] =
+    await Promise.all([
+      supabase.from('monthly_initial_balances').select('year, month').order('year', { ascending: true }).order('month', { ascending: true }).limit(1),
+      supabase.from('transactions').select('occurred_at').order('occurred_at', { ascending: true }).limit(1),
+      supabase.from('account_transfers').select('transfer_date').order('transfer_date', { ascending: true }).limit(1),
+    ])
+  if (e1) throw e1
+  if (e2) throw e2
+  if (e3) throw e3
+
+  const candidates = []
+  if (balances.length) candidates.push({ year: balances[0].year, month: balances[0].month })
+  if (transactions.length) {
+    const d = new Date(transactions[0].occurred_at)
+    candidates.push({ year: d.getUTCFullYear(), month: d.getUTCMonth() + 1 })
+  }
+  if (transfers.length) {
+    const d = new Date(transfers[0].transfer_date)
+    candidates.push({ year: d.getUTCFullYear(), month: d.getUTCMonth() + 1 })
+  }
+  if (candidates.length === 0) return null
+
+  return candidates.reduce((earliest, c) =>
+    c.year * 12 + c.month < earliest.year * 12 + earliest.month ? c : earliest
+  )
+}
+
 export async function fetchTotalDebt() {
   const [{ data, error }, rates] = await Promise.all([
     supabase.from('debts').select('remaining_amount, currency').eq('is_active', true).eq('direction', 'debo'),

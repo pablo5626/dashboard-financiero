@@ -318,29 +318,82 @@ until the user sets it — a warning banner above the accounts grid in
 `Cuentas.jsx` surfaces this case (moved there when the standalone rate card
 was removed, same underlying check).
 
-**Grouping sibling-currency accounts into one card (`accounts.currency_group_id`)**:
-`Cuentas.jsx` can now display two or more `accounts` rows that represent
-"the same real account, different currency pockets" (the running example is
-always `arq`/`arq eur`) as a single card with a currency-pill switcher,
-instead of one card per row. This is **purely a display grouping** — every
-underlying invariant in this file (one `accounts` row per currency, its own
-balance/transactions/`monthly_initial_balances`, matched by
-`fetchBalancesForMonth`/`getAccountFlowsForMonth` exactly as documented
-above) is untouched; `accountsApi.js`, the bank-assignment engine,
-`transfersApi.js`, and every other money-math function have **zero
-awareness** of this grouping and don't need any. The link is set via
-`accountsApi.setCurrencyGroup(accountId, primaryAccountId)` (or `null` to
-ungroup), exposed as a "¿Es otra moneda de...?" `<select>` in each account's
-edit form — set on the *secondary* row, pointing at the *primary* row's id
-(e.g., `arq eur`'s `currency_group_id` = `arq`'s `id`). `Cuentas.jsx`
-computes `groupKey = row.currency_group_id ?? row.id` and groups hijas by
-that key; since a row can only reference an *already-existing* account's
-id, the primary always sorts first within its group (`listAccounts`'s
-`created_at asc` order), so `group[0]` is always safely assumed to be the
-primary when rendering the card title. A local `activePocket` state
-(`{ [groupKey]: accountId }`) tracks which pocket's balance/%usado/rate row
-is currently shown; switching pockets is instant (no refetch, the data for
-every pocket in the group was already loaded). A dedicated `CurrencyExchangeSection.jsx` widget (rendered in
+**Multi-currency accounts are a real single row now, not two linked rows**
+(`accounts.is_multi_currency` + the `account_currencies` table) — this
+replaced the older `currency_group_id` design (two separate `accounts` rows,
+e.g. `arq` and `arq eur`, linked only for display) after the user explicitly
+asked for "one account that really holds several currencies, each with its
+own balance," not just a shared card. `arq` is the running example: it's now
+a single `accounts` row (`is_multi_currency = true`, `currency = 'USD'` as
+its *primary* pocket) with one child row in `account_currencies` per
+additional pocket (`{ account_id: arq.id, currency: 'EUR', tag: 'arq eur' }`).
+`accountsApi.listAccounts()` attaches those child rows to each account as
+`account.extraCurrencies = [{ currency, tag }]`.
+
+Every money-math function that used to assume "one `accounts` row = one
+currency" now resolves a **pocket key** instead of a bare account id — see
+`src/lib/currencyPockets.js` (`buildPocketIndex`, `resolvePocketKey`,
+`flattenAccountPockets`), a small dependency-free module so `accountsApi.js`,
+`transfersApi.js` and `transactionsApi.js` can all import it without a
+circular import (`accountsApi.js` already imports from `transfersApi.js`).
+The convention: a pocket in the account's **primary** currency keeps the old
+"plain" key (`accountId`) — fully backward-compatible with any code still
+doing `balances[account.id]` — and a pocket in any **additional** currency
+gets the composite key `` `${accountId}:${currency}` ``.
+`accountsApi.fetchBalancesForMonth`, `accountsApi.totalBalanceInCOP` (new —
+sums every pocket of a multi-currency account into one COP figure for
+consolidated totals in Panel General/Deudas, since those used to read only
+`balances[account.id]` and silently drop the other pockets),
+`transfersApi.sumOutgoingByAccount`, and `transactionsApi.getAccountFlowsForMonth`
+all use this same convention, as does `GastosDiarios.jsx`'s own inline
+per-account spend/income loop (it doesn't call `getAccountFlowsForMonth`,
+it recomputes similarly from `monthTransactions`).
+
+The **bank-assignment engine** resolves a *pocket* (`{ accountId, currency }`),
+not just an account id: a bare tag (`arq`) matches the account's primary
+currency, and each additional pocket's own `tag` (`account_currencies.tag`,
+e.g. `"arq eur"`) matches that specific currency on the *same* `accountId` —
+see `pocketByTag`/`pocketsByCurrency` in `transactionsApi.js`'s
+`importTransactions`. This is the one place a multi-currency account still
+needs a secondary identifier per pocket (the `tag` column) — MonIA can only
+ever send one tag per row, so something has to disambiguate which pocket a
+tag like `arq_eur` (normalized to `"arq eur"`) targets on an account that
+otherwise has a single id. `isReservedTag` also checks `extraCurrencies[].tag`
+now, so a manually-typed `"arq eur"` tag is still recognized as reserved.
+
+**Editing** happens on the account as a whole in `Cuentas.jsx` (name, primary
+currency, and a "Cuenta multi-moneda" checkbox that reveals an add/remove list
+of extra `{ currency, tag }` pockets, calling `accountsApi.addAccountCurrency`/
+`removeAccountCurrency`) — there's no more separate "¿Es otra moneda de...?"
+picker on a second account row, since there is no second row. **Creating** a
+multi-currency account from scratch also happens in one step: the "Agregar
+cuenta hija" form's currency `<select>` has a `Multi-moneda` option that
+reveals checkboxes for each of `CURRENCIES` (`COP`/`USD`/`EUR`, min. 2) plus
+an optional "cuánto tiene hoy" amount per checked currency — `createAccount`
+inserts the `account_currencies` rows and seeds `monthly_initial_balances`
+for the current month from those amounts in the same call, so standing up
+something like arq no longer requires creating one account then editing a
+second one to link it. A pill switcher inside the card
+(`flattenAccountPockets([account])` fed into a local `activePocket` state,
+`{ [accountId]: pocketKey }`) still lets the user flip between an account's
+pockets instantly, same UX as the old grouped-card design, just backed by
+one real row instead of two.
+
+**Known gaps left by this change** (documented rather than silently
+unsupported): `QuickCaptureFAB.jsx`'s manual gasto/ingreso/transferencia
+sheet and `MetasAhorro.jsx`'s `'proposito'` goals still resolve a chosen
+account to its **primary** currency only (`currencyOf(id)` /
+`balances[g.account_id]`) — there's no pocket picker in those two surfaces
+yet, so logging a manual EUR expense against arq, or pointing a savings goal
+at arq's EUR pocket specifically, isn't possible from there today (the CSV
+import path, `TransferHistorySection`, and `CurrencyExchangeSection` **are**
+pocket-aware, via the same `flattenAccountPockets` picker). `TransferHistorySection`'s
+transfer-history *table* also still renders the bare account name for a past
+transfer's origin/destination, not which pocket — the row's own
+`formatByCurrency(amount, currency)` is what actually tells you which pocket
+was involved.
+
+A dedicated `CurrencyExchangeSection.jsx` widget (rendered in
 `Cuentas.jsx`, above `TransferHistorySection`) exists specifically to
 register a currency swap between two accounts quickly: it prefills the
 destination amount via `convertAmount` using whatever rate is configured
@@ -477,18 +530,41 @@ instead of reaching for `window.confirm`.
 navigating to `GastosDiarios.jsx`/`Cuentas.jsx` — it calls
 `transactionsApi.createManualTransaction`/`transfersApi.createTransfers`
 directly, the same functions the full pages use. **The floating buttons are
-a 3-piece cluster now, not a single "+"**, redesigned to match a MonIA
-screenshot the user shared mid-session: a bottom-left pill with "+" (opens
-the manual-capture sheet, unchanged) and a search icon, and a separate,
+a 2-piece cluster now** (bottom-left: search icon + "+"), plus a separate,
 always-visible circular mic button at bottom-right (`styles.fabMic`,
-`var(--series-1)` at rest — kept blue rather than matching the reference's
-warm/red at-rest color, since this app reserves red/`--status-critical` for
-destructive/critical state, turning red only while actively `listening` via
-the pre-existing `.micListening` pulse). Tapping the mic button
-(`handleMicButtonClick`) resets the form, opens the sheet, and starts
-`SpeechRecognition` in one tap — no more opening "+" first and finding a
-smaller mic icon buried inside the amount row (that inline button was
-removed; the standalone one fully replaces it).
+`var(--series-1)` at rest — kept blue rather than matching a MonIA
+screenshot's warm/red at-rest color, since this app reserves red/
+`--status-critical` for destructive/critical state, turning red only while
+actively `listening` via the pre-existing `.micListening` pulse). Tapping the
+mic button (`handleMicButtonClick`) resets the form, opens the sheet, and
+starts `SpeechRecognition` in one tap — no more opening "+" first and
+finding a smaller mic icon buried inside the amount row (that inline button
+was removed; the standalone one fully replaces it).
+
+**"+" groups the camera as a satellite bubble instead of a third icon in the
+row**: the cluster used to be 3 always-visible icons ("+", lupa, cámara) in
+one pill — the user later shared a short reference video
+(`other recursos/referencia boton.mp4`, a screen recording of a different
+app) showing a single "+" that, on tap, pops a camera bubble directly above
+it before opening anything, and asked for that same grouping instead of a
+static row. `plusExpanded` (boolean state) gates a `.fabSatellite` button
+rendered inside a `.fabPlusWrap` (a `position: relative` wrapper anchoring
+the bubble with `position: absolute; bottom: 100%` above "+", with a small
+scale/opacity entrance animation) — **the exact tap sequence was a deliberate
+choice, confirmed with the user via `AskUserQuestion`** over the alternative
+of gating it behind a long-press: a first tap on "+" while collapsed only
+sets `plusExpanded = true` (reveals the camera bubble, tints "+" with
+`--series-1` via `.fabPlusActive` to signal the armed state, opens nothing
+yet); a second tap on "+" while already expanded (`handlePlusButtonClick`)
+collapses it and opens the normal manual-capture sheet — so "+" is still the
+direct path to logging a gasto/ingreso/transferencia, the camera is the
+extra option that surfaces first. Tapping the satellite itself
+(`handleCameraButtonClick`, unchanged) collapses `plusExpanded` and opens the
+dedicated receipt-scan screen directly. Any other entry point that opens the
+sheet (the mic button, the lupa) also collapses `plusExpanded` first, so the
+bubble never lingers stuck open over an unrelated screen. The lupa kept its
+own always-visible spot in the pill, to the left of the "+"/camera group —
+only "+" and the camera regrouped, per what the video specifically showed.
 
 **The search icon's behavior was reversed mid-session**: it used to call
 `navigate('/gastos')` as "a shortcut into the existing 'Buscar movimientos'
@@ -506,19 +582,118 @@ duplicating the same search UI in two places (a page card and a global
 popup) wasn't worth the upkeep once the popup covered the same need from
 anywhere in the app, so this is the one and only copy of the feature now.
 
-Voice capture itself is unchanged: a Web Speech API transcript goes to the
-`voice-parse` Supabase Edge Function (`supabase/functions/voice-parse/index.ts`)
-— a small Deno function with no DB access that calls Claude Haiku 4.5 with
-the exact category/account list and Colombian amount slang rules
-("mil"/"lucas"=×1.000, "palo(s)"=×1.000.000) and returns
-`{ mode, amount, categoryName, accountName, purpose, tag }`; the component
-maps those names to ids via `normalizeName` (accent/case-insensitive) and
-only ever **prefills** the form — same "never guess and save" principle as
+The `voice-parse` pipeline itself is unchanged: a Web Speech API transcript
+goes to the `voice-parse` Supabase Edge Function
+(`supabase/functions/voice-parse/index.ts`) — a small Deno function with no
+DB access that calls Claude Haiku 4.5 with the exact category/account list
+and Colombian amount slang rules ("mil"/"lucas"=×1.000, "palo(s)"=×1.000.000)
+and returns `{ mode, amount, categoryName, accountName, purpose, tag }`; the
+component maps those names to ids via `normalizeName` (accent/case-insensitive)
+and only ever **prefills** the form — same "never guess and save" principle as
 the rest of the app, the user still has to review "Más opciones" and tap
 "Guardar". Unlike `quick-capture` (used by the iOS Shortcuts with no
 session), `voice-parse` is called from the browser with the user's real
 session, so it's deliberately **not** listed in `supabase/config.toml` and
 deploys with default JWT verification.
+
+**Live transcript while listening**: adapted from a Google Stitch mockup the
+user dropped in `other recursos/` (`entrada_de_voz_registro_inteligente.html`)
+— the mockup's literal neon/gradient Tailwind visuals were NOT copied (they
+clash with this app's flat `--series-N`/`--status-*` token system), only the
+UX idea. `startVoiceCapture` now sets `recognition.interimResults = true`
+(was `false`) and `onresult` accumulates interim + final chunks into a new
+`voiceTranscript` state, shown live in a small card under the segmented
+control while `voiceStatus === 'listening'` — real text the browser already
+recognized, not a decorative waveform animation. Before any speech is
+detected, that card shows a static `VOICE_EXAMPLES` hint list ("Probá
+diciendo: 'Gasté 25.000 en Rappi'"), styled as pills — plain text, not
+tappable, since there's no way to "simulate" the user having said it.
+
+**The waveform got built after all, but reading the real microphone** —
+after the user asked again (with a reference screenshot) to match the
+mockup's audio-wave visual, `startAudioVisualizer` opens a *second*
+`getUserMedia({ audio: true })` stream (separate from the one
+`SpeechRecognition` uses internally — neither API exposes its raw audio to
+the other) into a Web Audio `AnalyserNode` (`fftSize = 64`), and a
+`requestAnimationFrame` loop reads `getByteFrequencyData` into the
+`audioLevels` state driving 24 bar heights (`.voiceWaveBar`, flat
+`var(--series-1)`, no canvas/gradient). This is still real amplitude data,
+not the mockup's fake canvas sine-wave animation — the "don't fake what the
+mic is actually doing" principle held, just extended to cover the waveform
+too once real audio access made it possible. Started in `startVoiceCapture`
+right alongside `recognition.start()`; stopped (tracks closed,
+`AudioContext` closed, `audioLevels` reset to a flat baseline) in
+`recognition.onend`/`onerror` and in `close()` — if `getUserMedia` fails or
+isn't supported, `startAudioVisualizer`'s catch silently no-ops and the
+card still works with flat bars, since the real transcript never depended
+on this second stream.
+
+**Entities-recognized pills**: once `voice-parse` returns, `handleVoiceResult`
+stores the raw `result` in a new `voiceResult` state (separate from the
+`form` it also prefills) and a `.voiceResultCard` renders Monto/Categoría/
+Cuenta/Tipo as colored pills — real values from that same response, shown
+alongside the already-prefilled form below it, not a gate the user has to
+tap through (unlike the receipt-scan flow's "Confirmar y continuar", voice
+already prefilled the form directly before this pass and kept doing so;
+the pills are a recap, not a new confirmation step). Cleared by `reset()`,
+so switching tabs or opening a new voice/photo capture doesn't leave a
+stale result showing.
+
+**Listening screen simplified into two explicit stages, on the user's own
+follow-up request**: stage 1 (while listening) dropped the bordered/
+background card (`.voiceListeningCard` → `.voiceListeningPlain`, no border,
+no fill) and the "Escuchando…"/"EN VIVO" header — it's now just the
+waveform, the live transcript (or the example hints before anything's been
+said), and two pill buttons, "Detener" and "Aceptar". This also changed
+*when* processing happens: `recognition.continuous` is now `true` (was
+implicitly `false`) so the browser no longer auto-stops and auto-processes
+the moment it detects a pause — that used to cut a transcript short if the
+user paused mid-sentence. `onresult` now just keeps rebuilding the full
+accumulated `voiceTranscript` from every result each time (interim and
+final mixed, no more separating them); nothing gets sent to `voice-parse`
+until the user explicitly taps a pill. "Aceptar" (`handleVoiceAccept`)
+aborts recognition and calls `handleVoiceResult(voiceTranscript)` with
+whatever was captured; "Detener" (`handleVoiceStop`) aborts and discards it,
+back to idle, no `voice-parse` call at all. Stage 2 (the entities pills +
+the actual editable gasto/ingreso/traslado form, category grid included)
+still only appears once `voice-parse` has actually returned — categorías,
+cuenta and the rest of the form were never part of the listening screen to
+begin with, so "solo después de aceptar" fell out of the existing
+`voiceStatus` gating almost for free once stage 1 stopped auto-advancing.
+
+**That gating had a gap the user caught**: the two stages above were still
+both branches *inside* the same gasto/ingreso/traslado `<form>`, gated only
+by `voiceStatus` — so a mic error (or just closing the sheet before the
+first result) fell through to the full form underneath instead of staying
+on the wave screen. Fixed the same way `receiptMode` already works: a real
+`voiceMode` boolean now gates a third top-level branch in the sheet (voice
+screen vs. receipt screen vs. the normal form), not a status flag nested
+inside the form. `handleMicButtonClick` sets `voiceMode = true`;
+`handleVoiceResult` only sets it back to `false` in the success path,
+*after* `voice-parse` actually returns data — an error leaves `voiceMode`
+untouched, so the screen stays on the wave with the error message and
+"Reintentar"/"Aceptar" pills instead of dropping to an empty form. The
+sheet header also swaps identity for this branch now ("Escuchando…"/
+"Movimiento por voz" + the EN VIVO badge move here from the old
+`.voiceListeningCard`, since that card doesn't exist as a separate box
+anymore), same pattern as the receipt header swap. `reset()` clears
+`voiceMode` (and `recognition.onerror` now also filters `'aborted'`/
+`'no-speech'` out of the error message — those fire on every intentional
+`.abort()` from "Detener"/"Aceptar" and on plain silence, neither is a real
+error worth showing).
+
+**Account balance shown while picking an account**: also from a Stitch
+mockup (`movimiento_r_pido_redise_o_modal.html`), which showed each account
+as a chip with its balance underneath. Rather than fork `AccountAutocomplete`
+into a second, chip-based picker (it's a shared component with `Diario.jsx`,
+and CLAUDE.md already documents keeping entry surfaces consistent), the
+existing dropdown-list picker gained an optional `balances` prop — each
+option now shows the account's month balance (`formatByCurrency`) right-
+aligned, sourced from `accountsApi.fetchBalancesForMonth` (fetched once
+alongside `listAccounts()` when the FAB sheet opens). `Diario.jsx`'s copy of
+the same component still works exactly as before without the prop (balances
+is optional) — it wasn't wired there, to keep this change scoped to the
+FAB's primary entry flow.
 
 **A manual transaction saved for "today" now gets the real timestamp**
 (`occurredAt: form.date === today() ? new Date().toISOString() : ...T12:00:00Z`)
@@ -555,6 +730,34 @@ and date moved inline next to "Guardar" in a compact bottom row instead of
 living in "Más opciones" — "Más opciones" itself now only exists for
 transferencia mode (nota + date).
 
+**Both `.bigInput` and `.amountCardInput` need `outline: none`** — a real bug
+the user caught: `transferencia` mode's Monto field has `autoFocus` (it's the
+first field there, unlike gasto/ingreso where Descripción is first), so the
+browser's own default focus ring rendered as a second, misaligned blue box on
+top of `.amountCard`'s own custom `:focus-within` glow, immediately visible
+the moment the sheet opened. Both classes now suppress the native outline —
+`.amountCard`/the chrome-free `.bigInput` treatment already provide their own
+focus affordance, so the native one was always redundant, just invisible
+everywhere `autoFocus` isn't used.
+
+**Transferencia mode now suggests "Monto recibido" for a cross-currency
+transfer** (COP hija → `arq`'s USD/EUR pocket, or between arq's own pockets)
+the same way `CurrencyExchangeSection.jsx`'s "Cambio de divisa" in Cuentas
+already does — this existed as a manual-only field before (`crossCurrency`
+block, present since the multi-currency-accounts work) but never used the
+saved `exchange_rates` at all, so every such transfer required typing both
+amounts by hand even though a rate was already on file. A `useEffect`
+(gated by `form.mode === 'transferencia' && crossCurrency && form.amount &&
+!toAmountTouchedByUser`) calls the same `exchangeRatesApi.convertAmount` and
+fills `form.toAmount`; a `toAmountTouchedByUser` flag (reset whenever the
+user picks a different "Desde"/"Hacia" chip or via `reset()`) stops
+re-suggesting once the user edits that field by hand, for the same reason
+`CurrencyExchangeSection.jsx` needs it — a one-off exchange's real rate
+(bank spread, cash house) often doesn't match the saved manual rate exactly.
+`QuickCaptureFAB.jsx` now fetches `exchangeRatesApi.getRates()` alongside
+accounts/categories when the sheet first opens, since it never needed rates
+before this.
+
 **Category picking and account picking both converged on shared components**
 (also used the same way by `Diario.jsx`, so behavior stays consistent
 across every entry surface):
@@ -566,6 +769,17 @@ across every entry surface):
   changed from the original `grid-template-columns: repeat(auto-fill,...)`)
   — always shows every category, "swipeable panels" per the user's own
   words, so there's never a need to hide categories behind a toggle.
+  `.grid` also sets `scrollbar-width: none` + a hidden `::-webkit-scrollbar`
+  — without it, desktop Chrome on Windows draws a visible horizontal
+  scrollbar with click arrows under the row, easy to miss with just one such
+  row on screen but read as "everything is duplicated" once
+  `QuickCaptureFAB.jsx`'s account chip row (below) added a second
+  horizontally-scrolling row right above it, each with its own copy of that
+  scrollbar. Same fix applied to `.accountChipRow` in
+  `QuickCaptureFAB.module.css` and `.categoryBarsRow` in `Diario.module.css`
+  (the "Gasto de hoy por categoría" bars) — any future horizontally-scrolling
+  decorative row (not a data table — `.table-scroll` keeps its native
+  scrollbar on purpose, that one's a real table) should get this too.
   `QuickCaptureFAB.jsx` reorders (never filters/shortens) the full category
   list every keystroke in Descripción, putting categories matched via
   `listRecentPurposes` substring-matching first — same live-reorder idea as
@@ -617,7 +831,7 @@ panel can grow — the user was explicit that categories won't be the only
 thing living here — without the root screen turning into an ever-longer
 single form; adding a new setting later means adding one entry to
 `SETTINGS_SECTIONS` plus its own content block, not restructuring the
-existing ones. Today there's exactly one section, `'categorias'`: the full
+existing ones. The first section is `'categorias'`: the full
 category CRUD (create with emoji/color/`is_ambiguous`, inline edit of
 name/emoji/color/`is_ambiguous`/`monthly_budget`, archive via
 `ConfirmDialog`) and the relocated "Aprender categoría/tag de tu historial"
@@ -631,6 +845,29 @@ everywhere else — an edit made here shows up next time that page/sheet
 loads, not live while both are open simultaneously. Don't add a new section
 to this menu unless the user asks for one.
 
+**Second section, `'cuentas'`**: creating a new hija account (including a
+multi-currency one) moved here from the "Agregar cuenta hija" card that used
+to live inline in `Cuentas.jsx` — the user asked for account creation to be
+a Settings section, same relocation reasoning as categories. `Cuentas.jsx`
+keeps everything else (the account cards, balances, edit/archive, the
+monthly ritual, transfers) — only *creating a new one* moved. `Cuentas.jsx`,
+`Deudas.jsx` and `MetasAhorro.jsx` briefly showed a one-line pointer card
+("Para agregar uno nuevo, andá a Ajustes → X") where the old inline form used
+to be — the user asked to remove those too, since once the move is known
+they read as clutter rather than help, so those pages now simply have no
+card there at all instead of a placeholder pointing elsewhere.
+Multi-currency's "which currencies and how much of each" step is a
+dropdown-based add-one-at-a-time builder (a `<select>` "+ moneda…" + an
+optional amount + "Agregar", listing already-added pockets with "Quitar"),
+not a row of always-visible checkboxes — the checkbox-per-currency version
+this replaced didn't fit well on a narrow phone screen. `Cuentas.jsx`'s own
+"¿Es otra moneda de...?" edit-time picker already used this same dropdown
+pattern, so this made the create and edit flows consistent instead of two
+different UI idioms for the same concept. Submitting calls
+`accountsApi.createAccount` directly (no need to `listAccounts()` again
+afterward to find the new row, unlike the old inline form — `createAccount`
+already returns the inserted row).
+
 `ColorSwatchPicker` (previously a component defined locally inside
 `GastosDiarios.jsx`) moved to `src/components/ui/ColorSwatchPicker.jsx` as a
 shared component (used by both `SettingsPanel.jsx` and, historically, the
@@ -639,6 +876,74 @@ swatches to 16: the same 8 tokens plus a lighter tint of each
 (`color-mix(in srgb, var(--series-N) 55%, white)`), still deriving every
 swatch mechanically from the already-validated palette rather than
 inventing new hex values, per `diseno-ui.md`'s categorical-color rule.
+
+**Third and fourth sections, `'deudas'` and `'metas'`**: creating a new debt
+(either direction — `'debo'`/`'me_deben'`, via a `.segmentRow` two-button
+toggle instead of a `<select>`, more legible for a binary choice on a phone)
+moved here from `Deudas.jsx`'s "Agregar deuda"/"Registrar préstamo" card, and
+creating a new savings goal moved here from `MetasAhorro.jsx`'s "Agregar meta
+de ahorro" card — same relocation reasoning as `'cuentas'`, and the same
+optimization: the old cards laid out every field in a `flex-wrap` row with
+fixed pixel widths (`formInput`/`width: 130` etc.), which was the original,
+un-refactored style from before the Settings panel existed and didn't wrap
+well on a narrow phone; the Settings versions use the panel's own stacked
+`.createForm`/`.textInput`/`.editFormRow` classes instead, same idiom as
+`'cuentas'`. Both pages keep everything else — editing, cuotas/abonos,
+contribuciones, archive — only *creating a new one* moved, and each shows a
+one-line pointer to its Ajustes section instead of the old form.
+
+`Deudas.jsx`'s "Préstamos detectados sin registrar" queue still lives on
+that page (it's a review queue tied to imported transactions, not just "add
+a debt"), but its "Precargar" button no longer fills a local form — since
+that form doesn't live on this page anymore, it now dispatches a
+`dashboard:open-settings` window `CustomEvent` (`detail: { section: 'deudas',
+prefill: {...} }`) that `SettingsPanel.jsx` listens for: it opens itself,
+jumps straight to the Deudas section, and seeds `newDebt` with the real
+transaction's name/amount/date/currency plus `sourceTransactionId` (so
+`handleCreateDebt` still calls `markLoanTransactionReviewed` on save, same as
+before the move). This is the same "siblings under `AppShell` talk through a
+window event, not a prop" pattern `onOpenSearch`/`dashboard:transactions-changed`
+already established — `SettingsPanel.jsx` is mounted once in `AppShell.jsx`,
+not a child of `Deudas.jsx`, so there's no `reload()`/`setForm()` to pass
+down directly. The same problem exists in reverse too: `Deudas.jsx` and
+`MetasAhorro.jsx` stay mounted underneath the Settings sheet while a debt or
+goal is created there, so on success `SettingsPanel.jsx` dispatches
+`dashboard:debts-changed` / `dashboard:goals-changed` (plain `Event`s, no
+payload needed) and each page subscribes in a `useEffect` calling its own
+`reload()` — same shape as `Diario.jsx`'s existing
+`dashboard:transactions-changed` listener.
+
+**Fifth section, `'tasas'`**: a centralized "Tasas de cambio" editor for the
+3 fixed pairs (`RATE_PAIRS` — `CURRENCIES` only has COP/USD/EUR, so this
+list is hardcoded rather than derived from active accounts, unlike
+`Cuentas.jsx`'s own version of these rows which only shows a pair when some
+account actually uses that currency). This **duplicates**, rather than
+replaces, `Cuentas.jsx`'s existing inline `renderRateRow` per account card —
+the user explicitly asked to add it to Settings "también" (as well), not to
+move it away from the account cards, so both UIs write the same
+`exchange_rates` rows and stay in sync via a new `dashboard:rates-changed`
+event (`Cuentas.jsx` subscribes and calls `reload()`, same shape as the
+`debts-changed`/`goals-changed` pair above — needed here too since
+`Cuentas.jsx` stays mounted under the Settings sheet while a rate is saved
+from there).
+
+**"Buscar" fetches today's rate from a real FX-rate API, not from an AI
+model** — the user's first ask was for "an AI system" to look up the day's
+USD rate, but a live exchange rate is exactly the kind of fact a language
+model shouldn't be trusted to answer from training data (no real-time
+access, easy to hallucinate a plausible-looking but wrong number) — the
+same "never invent a conversion" principle `toCOP`/`convertAmount` already
+follow elsewhere in this app. `exchangeRatesApi.fetchLiveRate(base, quote)`
+instead calls `https://open.er-api.com/v6/latest/{quote}` directly from the
+browser (free, no API key, `Access-Control-Allow-Origin: *` so no CORS
+issue and no Edge Function/deploy step needed) and reads `rates[base]` —
+matching `renderRateRow`'s own "1 quote = rate base" convention exactly, so
+fetching with `(base, quote)` swapped the same way `setRate` expects avoids
+the inversion mistake documented under "Multi-currency" above. Same
+prefill-only discipline as voice/receipt parsing: the fetched value only
+fills the manual rate input (`rateInputs`), the user still has to review and
+tap "Guardar" — nothing is written to `exchange_rates` directly from the
+fetch.
 
 **Global search popup (`SearchPanel.jsx`)**: mounted once in `AppShell.jsx`
 next to `SettingsPanel`/`QuickCaptureFAB`, controlled from there via a
@@ -664,6 +969,46 @@ dedicated state (`searchFilters`, `searchResults`, `searching`, the
 `?focus=buscar` query-param-driven scroll-and-focus effect that briefly
 existed to jump to it from the lupa) were deleted once this panel existed —
 there's no more search UI on that page at all.
+
+**Redesigned to search live instead of on submit**: the original version
+had 6 always-visible fields (query, categoría, cuenta, tag, 2 dates) plus a
+"Buscar" button — the user flagged it as too cluttered for something meant
+to be fast. Now there's one chrome-free query input (`.bigInput`, same
+visual idiom as `QuickCaptureFAB`'s Descripción/Monto fields) that searches
+as you type via a 350ms-debounced effect watching `filters`, no submit
+button; categoría/cuenta/tag/fechas moved behind a "Filtros" toggle button
+(badge shows the count of active secondary filters) that's collapsed by
+default — same "don't show what isn't being used" reasoning as
+`QuickCaptureFAB`'s tag `#` toggle. No filter at all means no query runs
+(`hasAnyFilter` check), so opening the panel doesn't dump the 200 most
+recent transactions before the user has typed anything.
+
+**Voice search**: a mic button inside the query field (visible only when
+`SpeechRecognitionCtor` exists, same browser-support check as
+`QuickCaptureFAB`) starts a `SpeechRecognition` with `interimResults = true`
+and writes straight into `filters.query` — no `voice-parse` call, since free
+text needs no field extraction, just dictation. Adapted from the same Stitch
+mockup batch as the FAB's voice card
+(`buscar_movimientos_redise_o_modal.html` had a mic icon inside its search
+input); the mockup's own filter layout (all fields always visible) was
+**not** adopted since it's the exact design this section replaced above.
+
+**Filter rows visually adapted from the same mockup, kept collapsed behind
+"Filtros"**: categoría and cuenta are still real `<select>`s (nothing about
+how filtering works changed), but each is now wrapped in a
+`.filterPickerRow` — a colored icon badge (`IconTag`/`IconAccounts`, tokens
+not hex) + the select (transparent, native arrow hidden via
+`appearance: none`) + a decorative chevron — so it reads as a tappable
+picker row instead of a bare dropdown, matching the mockup's look without
+reintroducing its always-visible layout. The tag field also gained
+tappable suggestion chips below it — but sourced from
+`transactionsApi.listTopTags()` (most-frequent real tags across the last
+500 transactions, excluding `IGNORED_TAGS` and any tag that's actually an
+account name, filtered client-side against `accounts` the same way
+`GastosDiarios.jsx`'s `accountNameTags` does), never the mockup's hardcoded
+`#rappi`/`#supermercado`/`#servicios`/`#salud` — this app doesn't put
+placeholder data in front of the user, only real numbers/tags, even for a
+"suggestion" UI element.
 
 **Every create/log action needs a matching delete**: transactions, savings
 contributions, transfers, accounts, debts (+ installments), fixed
@@ -714,16 +1059,49 @@ Supabase, no sample data left anywhere:
   "+"/mic buttons existed on every page: the user's reasoning was that the
   "+" already makes it obvious where to add a movement, so a second,
   collapsed entry point on this specific page was redundant chrome, not a
-  convenience. **This orphaned the receipt-photo feature**: `IconCamera`
-  (`icons.jsx`), `src/lib/imageUtils.js` (`resizeImageFileToBase64`) and the
-  `supabase/functions/receipt-parse/index.ts` Edge Function (mirrors
-  `voice-parse`'s architecture — same model, same prefill-only philosophy —
-  and was already written but deliberately never deployed, to avoid
-  incurring API usage before the feature was finished) are all still in the
-  repo with **zero UI caller left anywhere**. They were kept rather than
-  deleted since the feature was fully designed and might get a new home
-  later (e.g. as a FAB action) — don't delete them without asking, and
-  don't treat their presence as a bug to fix.
+  convenience. **This orphaned the receipt-photo feature** on this page, but
+  it later got the "new home" this section used to speculate about, through
+  a couple of iterations: first a text-link inside `QuickCaptureFAB.jsx`'s
+  gasto/ingreso sheet, then an always-visible camera button in `fabCluster`
+  (next to "+" and the lupa) that jumped straight to the native file picker,
+  and finally its own **dedicated screen** — a Google Stitch mockup the user
+  dropped in `other recursos/escanear_recibo_registro_inteligente 2.html`
+  was the reference for this last shape, adapted to the app's own tokens
+  rather than the mockup's literal neon/gradient Tailwind. Tapping the
+  camera button (`handleCameraButtonClick`) opens the same bottom sheet but
+  with `receiptMode = true`, which swaps out the whole
+  gasto/ingreso/traslado segmented form for a standalone view: an icon
+  badge + "IA" pill in the header (replacing the usual title-dot), a preview
+  card (empty hint state, or the actual chosen photo via
+  `URL.createObjectURL` — a real image, not a placeholder), two source
+  buttons ("Tomar foto" with `capture="environment"` / "Subir recibo"
+  without it, two separate hidden `<input type="file">`s), and once
+  `receipt-parse` returns, a result card (monto + categoría detectada) with
+  a "Reintentar"/"Confirmar y continuar" footer. The mockup itself showed a
+  live camera viewfinder with a scanning-laser animation and OCR bounding
+  boxes over a fake receipt graphic — deliberately not built: this app has
+  no live camera feed (no `getUserMedia` video element, just a file input),
+  so animating a fake scan over a static mockup image would misrepresent
+  what's actually happening, the same reasoning that kept voice capture from
+  getting a fake waveform. "Confirmar y continuar" does **not** save
+  directly like the mockup's "Confirmar y registrar" suggests — same
+  prefill-only principle as `voice-parse` everywhere else in this app: it
+  fills the normal gasto form (mode forced to `'gasto'`,
+  amount/categoría/descripción) and drops `receiptMode` back to `false`, so
+  the user still reviews and taps the real "Guardar". `reset()` (called on
+  every tab switch and on `close()`) also exits `receiptMode` and revokes
+  the preview's object URL, so switching to Ingreso/Traslado — or opening
+  voice via the mic button, which calls `reset('gasto')` too — cleanly
+  leaves the receipt screen instead of leaving it stuck open underneath.
+  **The Edge Function itself is still deliberately not deployed** — this
+  wiring makes the client-side call ready, but until someone runs `npx
+  supabase functions deploy receipt-parse --project-ref
+  qxiqqozogggfynkanevt` and sets `ANTHROPIC_API_KEY` in its secrets (same
+  billed key as `voice-parse`, see "Known deferred scope" below), picking a
+  photo fails with the same clear "ANTHROPIC_API_KEY no configurada" error
+  the function already returns, not a crash — the user asked explicitly to
+  leave deployment for later, mirroring how `voice-parse` was
+  deployed-but-unconfigured for a while.
 
   Top-to-bottom the page is now: a chrome-free "Total de hoy" hero (big
   signed net amount + red/green gasto/ingreso pills, no `Card` wrapper —
@@ -800,10 +1178,11 @@ Supabase, no sample data left anywhere:
   vs. same months last year via `panelApi.fetchMonthlyTrend`, 2 StatTiles +
   a 4-line chart with dashed lines for the prior year).
 - **`Cuentas.jsx`**: cuenta madre + hijas CRUD (name, currency, and
-  optionally `currency_group_id` to group sibling-currency accounts like
-  `arq`/`arq eur` into one card — see "Multi-currency" above for the full
+  optionally `is_multi_currency` + extra `account_currencies` pockets so one
+  account (like `arq`) can hold several real currency balances at once — see
+  "Multi-currency accounts are a real single row now" above for the full
   mechanics; no standalone "Tasa de cambio" card anymore, each account's
-  rate row now renders inline in its own/its group's card), a monthly
+  rate row now renders inline in its own card), a monthly
   initial-balances editor covering every active account
   (`MonthlyInitialBalancesSection.jsx` — manual entry or via the iPhone
   Shortcut described in `prompt-dashboard-financiero.md`'s "Fase 2"; both
@@ -836,6 +1215,21 @@ Supabase, no sample data left anywhere:
   per-month paid status (`FixedExpensesSection.jsx`), and the
   exchange-rate card (now one row per currency pair, see "Multi-currency"
   above).
+
+  **`MonthlyInitialBalancesSection.jsx`: a multi-currency account is one
+  table row, not one per pocket.** It used to list every pocket as its own
+  always-visible row (e.g. "Arq" and "Arq (EUR)" as two separate lines),
+  which the user flagged as clutter once there were several such accounts —
+  now `accountRows` groups `flattenAccountPockets` back by account, and an
+  account with more than one pocket renders as a single row with a small
+  currency `<select>` next to the amount input instead of a permanent row
+  per currency. `values`/`existing` stay indexed by the same per-pocket key
+  as before (`p.key`, `accountId` or `accountId:currency`) — only the render
+  grouped, so switching the dropdown and back doesn't lose whatever was
+  already typed in the other currency, and `handleSave` is unchanged (it
+  still iterates the flat, ungrouped pocket list). Single-currency accounts
+  render exactly as before (plain row, no dropdown, since there's nothing to
+  pick).
 - **`GastosDiarios.jsx`**: this page shrank a lot mid-session — both its
   category CRUD (moved to `SettingsPanel.jsx`) and its manual entry form and
   search card (see below) are gone, leaving it focused on the MonIA
@@ -1051,6 +1445,14 @@ unprompted, they're deliberate cuts, not oversights:
   (`SpeechRecognition` needs a secure context, so it won't fire over
   `http://<lan-ip>:5173`; testing from a phone needs the deployed GitHub
   Pages HTTPS URL instead).
+- **Receipt scanning has a UI caller now but the Edge Function still isn't
+  deployed at all** (see "Diario.jsx" above for the `QuickCaptureFAB.jsx`
+  wiring) — one step further behind than voice: `npx supabase functions
+  deploy receipt-parse --project-ref qxiqqozogggfynkanevt` hasn't been run
+  yet, so "Escanear recibo" always fails today, not just when the key is
+  missing. Once deployed, it can reuse the exact same `ANTHROPIC_API_KEY`
+  secret voice-parse uses (same Supabase project, same secret name) — no
+  separate key needed, just the deploy command.
 
 ## Importable external-agent config detected
 

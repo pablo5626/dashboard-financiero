@@ -3,13 +3,13 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Toolti
 import Card from '../components/ui/Card.jsx'
 import ConfirmDialog from '../components/ui/ConfirmDialog.jsx'
 import StatTile from '../components/ui/StatTile.jsx'
-import { formatCOP, formatByCurrency, CURRENCIES } from '../lib/format.js'
-import { listAccounts, fetchBalancesForMonth } from '../lib/accountsApi.js'
+import { formatCOP, formatByCurrency } from '../lib/format.js'
+import { listAccounts, fetchBalancesForMonth, totalBalanceInCOP } from '../lib/accountsApi.js'
 import { getRates, toCOP } from '../lib/exchangeRatesApi.js'
 import { listCategories } from '../lib/categoriesApi.js'
 import { createManualTransaction, listUnreviewedLoanTransactions, markLoanTransactionReviewed } from '../lib/transactionsApi.js'
 import {
-  listDebts, createDebt, updateDebt, archiveDebt,
+  listDebts, updateDebt, archiveDebt,
   listInstallments, createInstallment, deleteInstallment, toggleInstallmentPaid,
   createInstallmentsBulk, generateAmortizationSchedule, deleteUnpaidInstallments,
   addAbono, deleteAbono,
@@ -18,11 +18,6 @@ import {
 const now = new Date()
 const YEAR = now.getFullYear()
 const MONTH = now.getMonth() + 1
-
-const emptyDebtForm = {
-  creditorName: '', totalAmount: '', remainingAmount: '', interestRate: '', monthlyPayment: '', termMonths: '', startDate: '',
-  counterpartyRelationship: '', contactInfo: '', expectedPaymentDate: '', notes: '', currency: 'COP',
-}
 
 const RELATIONSHIP_OPTIONS = [
   { value: 'amigo', label: 'Amigo' },
@@ -79,10 +74,8 @@ export default function Deudas() {
   const [error, setError] = useState(null)
 
   const [activeDirection, setActiveDirection] = useState('debo')
-  const [form, setForm] = useState(emptyDebtForm)
-  const [saving, setSaving] = useState(false)
   const [editingId, setEditingId] = useState(null)
-  const [editForm, setEditForm] = useState(emptyDebtForm)
+  const [editForm, setEditForm] = useState({})
   const [installmentForm, setInstallmentForm] = useState({}) // debtId -> { dueDate, amount, accountId }
   const [savingAbono, setSavingAbono] = useState(null) // debtId | null
   const [confirmArchive, setConfirmArchive] = useState(null) // { id, name, direction } | null
@@ -91,12 +84,6 @@ export default function Deudas() {
 
   const [prestamoCategoryId, setPrestamoCategoryId] = useState(null)
   const [loanCandidates, setLoanCandidates] = useState([])
-  const [prefillSourceTxId, setPrefillSourceTxId] = useState(null)
-
-  // Evita que datos escritos en campos ocultos de una pestaña (ej. "tasa" en
-  // Debo) queden pegados en el form al cambiar a la otra pestaña y se manden
-  // por accidente al crear el siguiente registro.
-  useEffect(() => { setForm(emptyDebtForm); setPrefillSourceTxId(null) }, [activeDirection])
 
   async function reload() {
     try {
@@ -115,7 +102,7 @@ export default function Deudas() {
         getRates(),
       ])
       setRates(currentRates)
-      setPatrimonio(accountsList.reduce((sum, a) => sum + toCOP(balances[a.id] ?? 0, a.currency, currentRates), 0))
+      setPatrimonio(accountsList.reduce((sum, a) => sum + totalBalanceInCOP(a, balances, currentRates, toCOP), 0))
     } catch (err) {
       setError(err.message)
     }
@@ -123,48 +110,37 @@ export default function Deudas() {
 
   useEffect(() => { reload() }, [])
 
-  async function handleCreate(e) {
-    e.preventDefault()
-    if (!form.creditorName.trim() || !form.totalAmount || !form.remainingAmount) return
-    setSaving(true)
-    try {
-      await createDebt({
-        creditorName: form.creditorName.trim(),
-        totalAmount: Number(form.totalAmount),
-        remainingAmount: Number(form.remainingAmount),
-        interestRate: form.interestRate ? Number(form.interestRate) : null,
-        monthlyPayment: form.monthlyPayment ? Number(form.monthlyPayment) : null,
-        termMonths: form.termMonths ? Number(form.termMonths) : null,
-        startDate: form.startDate,
-        direction: activeDirection,
-        counterpartyRelationship: form.counterpartyRelationship || null,
-        contactInfo: form.contactInfo || null,
-        expectedPaymentDate: form.expectedPaymentDate || null,
-        notes: form.notes || null,
-        sourceTransactionId: prefillSourceTxId,
-        currency: form.currency,
-      })
-      if (prefillSourceTxId) await markLoanTransactionReviewed(prefillSourceTxId)
-      setForm(emptyDebtForm)
-      setPrefillSourceTxId(null)
-      await reload()
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setSaving(false)
-    }
-  }
+  // "Agregar deuda"/"Registrar préstamo" vive en Ajustes → Deudas desde acá
+  // (mismo criterio que "Cuentas" — ver CLAUDE.md), así que esta página, que
+  // sigue montada debajo del panel de Ajustes mientras se crea, necesita
+  // enterarse cuando eso pasa para refrescar la lista sin recargar toda la
+  // página — mismo patrón de evento global que `dashboard:transactions-changed`.
+  useEffect(() => {
+    window.addEventListener('dashboard:debts-changed', reload)
+    return () => window.removeEventListener('dashboard:debts-changed', reload)
+  }, [])
 
+  // "Precargar" ya no llena un formulario en esta misma página — el
+  // formulario de creación se mudó a Ajustes → Deudas (ver SettingsPanel.jsx)
+  // — así que esto abre ese panel en la sección correcta con los datos reales
+  // del movimiento ya listos para confirmar, vía el mismo tipo de evento
+  // global que usa `onOpenSearch`/`dashboard:transactions-changed` para que
+  // dos componentes hermanos bajo AppShell se hablen sin un store global.
   function handlePrefillFromCandidate(tx) {
-    setForm({
-      ...emptyDebtForm,
-      creditorName: tx.purpose,
-      totalAmount: Math.abs(Number(tx.amount)),
-      remainingAmount: Math.abs(Number(tx.amount)),
-      startDate: tx.occurred_at.slice(0, 10),
-      currency: tx.currency || 'COP',
-    })
-    setPrefillSourceTxId(tx.id)
+    window.dispatchEvent(new CustomEvent('dashboard:open-settings', {
+      detail: {
+        section: 'deudas',
+        prefill: {
+          direction: 'me_deben',
+          creditorName: tx.purpose,
+          totalAmount: String(Math.abs(Number(tx.amount))),
+          remainingAmount: String(Math.abs(Number(tx.amount))),
+          startDate: tx.occurred_at.slice(0, 10),
+          currency: tx.currency || 'COP',
+          sourceTransactionId: tx.id,
+        },
+      },
+    }))
   }
 
   async function handleDismissCandidate(id) {
@@ -647,11 +623,11 @@ export default function Deudas() {
                   </table>
                   </div>
 
-                  <div style={{ display: 'flex', gap: 8 }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                     <input
                       type="date" value={draft.dueDate}
                       onChange={(e) => setInstallmentForm({ ...installmentForm, [d.id]: { ...draft, dueDate: e.target.value } })}
-                      style={formInput}
+                      style={{ ...formInput, minWidth: 0 }}
                     />
                     <input
                       type="number" placeholder="Monto" value={draft.amount}
@@ -670,45 +646,6 @@ export default function Deudas() {
             </Card>
           )
         })}
-
-        <Card title={activeDirection === 'me_deben' ? 'Registrar préstamo' : 'Agregar deuda'} className="span-3">
-          {prefillSourceTxId && (
-            <p style={{ font: 'var(--font-caption)', color: 'var(--series-1)', margin: '0 0 var(--space-1)' }}>
-              Precargado desde un movimiento importado — revisa los datos y confirma para registrarlo.{' '}
-              <button type="button" onClick={() => { setForm(emptyDebtForm); setPrefillSourceTxId(null) }} style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', textDecoration: 'underline' }}>Cancelar precarga</button>
-            </p>
-          )}
-          <form onSubmit={handleCreate} style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            <input placeholder={activeDirection === 'me_deben' ? 'Nombre de la persona' : 'Acreedor'} value={form.creditorName} onChange={(e) => setForm({ ...form, creditorName: e.target.value })} style={{ ...formInput, flex: '1 1 160px' }} />
-            <input type="number" placeholder={activeDirection === 'me_deben' ? 'Monto prestado' : 'Monto total'} value={form.totalAmount} onChange={(e) => setForm({ ...form, totalAmount: e.target.value })} style={{ ...formInput, width: 130 }} />
-            <input type="number" placeholder="Restante" value={form.remainingAmount} onChange={(e) => setForm({ ...form, remainingAmount: e.target.value })} style={{ ...formInput, width: 130 }} />
-            <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })} style={{ ...formInput, width: 90 }}>
-              {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-            {activeDirection === 'me_deben' ? (
-              <>
-                <select value={form.counterpartyRelationship} onChange={(e) => setForm({ ...form, counterpartyRelationship: e.target.value })} style={{ ...formInput, width: 150 }}>
-                  <option value="">Relación (opcional)</option>
-                  {RELATIONSHIP_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-                <input placeholder="Contacto (opcional)" value={form.contactInfo} onChange={(e) => setForm({ ...form, contactInfo: e.target.value })} style={{ ...formInput, width: 150 }} />
-                <input type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} style={formInput} />
-                <input type="date" value={form.expectedPaymentDate} onChange={(e) => setForm({ ...form, expectedPaymentDate: e.target.value })} style={formInput} />
-                <input placeholder="Motivo (opcional)" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} style={{ ...formInput, flex: '1 1 160px' }} />
-              </>
-            ) : (
-              <>
-                <input type="number" placeholder="Cuota mensual" value={form.monthlyPayment} onChange={(e) => setForm({ ...form, monthlyPayment: e.target.value })} style={{ ...formInput, width: 130 }} />
-                <input type="number" placeholder="Tasa % mensual (opcional)" value={form.interestRate} onChange={(e) => setForm({ ...form, interestRate: e.target.value })} style={{ ...formInput, width: 150 }} />
-                <input type="number" placeholder="Plazo (# cuotas, opcional)" value={form.termMonths} onChange={(e) => setForm({ ...form, termMonths: e.target.value })} style={{ ...formInput, width: 150 }} />
-                <input type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} style={formInput} />
-              </>
-            )}
-            <button type="submit" disabled={saving} style={{ minHeight: 'var(--touch-target)', padding: '0 var(--space-2)', borderRadius: 10, background: 'var(--series-1)', color: '#fff', fontWeight: 600, opacity: saving ? 0.6 : 1 }}>
-              {activeDirection === 'me_deben' ? 'Registrar préstamo' : 'Agregar'}
-            </button>
-          </form>
-        </Card>
 
         {visibleDebts.length === 0 && (
           <Card className="span-3"><p style={{ color: 'var(--text-muted)' }}>

@@ -3,8 +3,9 @@ import Card from './ui/Card.jsx'
 import ConfirmDialog from './ui/ConfirmDialog.jsx'
 import { formatByCurrency } from '../lib/format.js'
 import { getTransfersForMonth, createTransfers, deleteTransfer, updateConsumesBudget } from '../lib/transfersApi.js'
+import { flattenAccountPockets } from '../lib/currencyPockets.js'
 
-const emptyForm = { fromAccountId: '', toAccountId: '', amount: '', toAmount: '', note: '', consumesBudget: true }
+const emptyForm = { fromKey: '', toKey: '', amount: '', toAmount: '', note: '', consumesBudget: true }
 
 export default function TransferHistorySection({ accounts, year, month, onSaved }) {
   const [transfers, setTransfers] = useState(null)
@@ -13,6 +14,12 @@ export default function TransferHistorySection({ accounts, year, month, onSaved 
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(null) // { id } | null
   const [savingConsumesId, setSavingConsumesId] = useState(null)
+
+  // Un "bolsillo" por moneda de cada cuenta (una cuenta normal aporta uno,
+  // una multi-moneda uno por cada moneda que soporta) — así se puede elegir
+  // como origen/destino específicamente el bolsillo EUR de una cuenta como
+  // arq, no solo la cuenta en su moneda primaria.
+  const pockets = flattenAccountPockets(accounts)
 
   async function reload() {
     try {
@@ -29,34 +36,36 @@ export default function TransferHistorySection({ accounts, year, month, onSaved 
     return accounts.find((a) => a.id === id)?.name ?? '—'
   }
 
-  function currencyOf(id) {
-    return accounts.find((a) => a.id === id)?.currency || 'COP'
+  function pocketOf(key) {
+    return pockets.find((p) => p.key === key)
   }
 
-  const toOptions = form.fromAccountId
-    ? accounts.filter((a) => a.id !== form.fromAccountId)
-    : accounts
+  const toOptions = form.fromKey
+    ? pockets.filter((p) => p.key !== form.fromKey)
+    : pockets
 
-  const crossCurrency = !!(form.fromAccountId && form.toAccountId && currencyOf(form.toAccountId) !== currencyOf(form.fromAccountId))
+  const fromPocket = pocketOf(form.fromKey)
+  const toPocket = pocketOf(form.toKey)
+  const crossCurrency = !!(fromPocket && toPocket && toPocket.currency !== fromPocket.currency)
 
   // Devolver plata a la madre nunca consume presupuesto, así que ahí ni se
   // pregunta; entre hijas sí, porque puede ser plata que se va a gastar desde
   // la otra cuenta o puro reacomodo entre bolsillos.
   const madreId = accounts.find((a) => a.kind === 'madre')?.id
-  const askConsumesBudget = !!(form.fromAccountId && form.fromAccountId !== madreId && form.toAccountId && form.toAccountId !== madreId)
+  const askConsumesBudget = !!(fromPocket && fromPocket.accountId !== madreId && toPocket && toPocket.accountId !== madreId)
 
   async function handleCreate(e) {
     e.preventDefault()
-    if (!form.fromAccountId || !form.toAccountId || !form.amount) return
+    if (!fromPocket || !toPocket || !form.amount) return
     if (crossCurrency && !form.toAmount) return
     setSaving(true)
     try {
       await createTransfers([{
-        fromAccountId: form.fromAccountId,
-        toAccountId: form.toAccountId,
+        fromAccountId: fromPocket.accountId,
+        toAccountId: toPocket.accountId,
         amount: Number(form.amount),
-        currency: currencyOf(form.fromAccountId),
-        ...(crossCurrency ? { toAmount: Number(form.toAmount), toCurrency: currencyOf(form.toAccountId) } : {}),
+        currency: fromPocket.currency,
+        ...(crossCurrency ? { toAmount: Number(form.toAmount), toCurrency: toPocket.currency } : {}),
         consumesBudget: askConsumesBudget ? form.consumesBudget : true,
         transferDate: new Date().toISOString().slice(0, 10),
         note: form.note.trim() || null,
@@ -144,25 +153,25 @@ export default function TransferHistorySection({ accounts, year, month, onSaved 
 
       <form onSubmit={handleCreate} style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
         <select
-          value={form.fromAccountId}
-          onChange={(e) => setForm({ ...form, fromAccountId: e.target.value, toAccountId: '' })}
+          value={form.fromKey}
+          onChange={(e) => setForm({ ...form, fromKey: e.target.value, toKey: '' })}
           style={formInput}
         >
           <option value="">Cuenta origen</option>
-          {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          {pockets.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
         </select>
         <select
-          value={form.toAccountId}
-          onChange={(e) => setForm({ ...form, toAccountId: e.target.value })}
-          disabled={!form.fromAccountId}
+          value={form.toKey}
+          onChange={(e) => setForm({ ...form, toKey: e.target.value })}
+          disabled={!form.fromKey}
           style={formInput}
         >
           <option value="">Cuenta destino</option>
-          {toOptions.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          {toOptions.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
         </select>
         <input
           type="number"
-          placeholder={crossCurrency ? `Monto enviado (${currencyOf(form.fromAccountId)})` : 'Monto'}
+          placeholder={crossCurrency ? `Monto enviado (${fromPocket?.currency})` : 'Monto'}
           value={form.amount}
           onChange={(e) => setForm({ ...form, amount: e.target.value })}
           style={{ ...formInput, width: crossCurrency ? 170 : 120 }}
@@ -170,7 +179,7 @@ export default function TransferHistorySection({ accounts, year, month, onSaved 
         {crossCurrency && (
           <input
             type="number"
-            placeholder={`Monto recibido (${currencyOf(form.toAccountId)})`}
+            placeholder={`Monto recibido (${toPocket?.currency})`}
             value={form.toAmount}
             onChange={(e) => setForm({ ...form, toAmount: e.target.value })}
             style={{ ...formInput, width: 170 }}
@@ -194,7 +203,7 @@ export default function TransferHistorySection({ accounts, year, month, onSaved 
               onChange={(e) => setForm({ ...form, consumesBudget: e.target.checked })}
               style={{ width: 20, height: 20 }}
             />
-            Descontar del presupuesto de {accountName(form.fromAccountId)} — desmarcá si es solo mover plata entre cuentas, sin gastarla
+            Descontar del presupuesto de {fromPocket?.label ?? accountName(fromPocket?.accountId)} — desmarcá si es solo mover plata entre cuentas, sin gastarla
           </label>
         )}
       </form>

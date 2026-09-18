@@ -110,6 +110,11 @@
   gap: 10px;
   overflow-x: auto;
   padding: 4px 2px 2px;
+  scrollbar-width: none;
+}
+
+.categoryBarsRow::-webkit-scrollbar {
+  display: none;
 }
 
 .categoryBar {

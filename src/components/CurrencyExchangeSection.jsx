@@ -3,8 +3,9 @@ import Card from './ui/Card.jsx'
 import { formatByCurrency } from '../lib/format.js'
 import { convertAmount } from '../lib/exchangeRatesApi.js'
 import { createTransfers } from '../lib/transfersApi.js'
+import { flattenAccountPockets } from '../lib/currencyPockets.js'
 
-const emptyForm = { fromAccountId: '', toAccountId: '', amount: '', toAmount: '', consumesBudget: true }
+const emptyForm = { fromKey: '', toKey: '', amount: '', toAmount: '', consumesBudget: true }
 
 // Acceso rápido para registrar un cambio de divisa entre dos cuentas (ej.
 // arq-USD <-> arq-EUR, o una hija COP <-> arq) — a diferencia del
@@ -12,43 +13,49 @@ const emptyForm = { fromAccountId: '', toAccountId: '', amount: '', toAmount: ''
 // destino se sugiere solo a partir de la tasa guardada para ese par, y el
 // usuario solo la ajusta si la tasa real de esa operación puntual fue
 // distinta. Las filas creadas quedan en la misma tabla account_transfers,
-// así que aparecen igual en el historial de abajo.
+// así que aparecen igual en el historial de abajo. Origen/destino se eligen
+// por BOLSILLO (una cuenta multi-moneda aporta uno por moneda), no por
+// cuenta, para poder mover plata específicamente entre, por ejemplo, el
+// bolsillo USD y el bolsillo EUR de la misma cuenta arq.
 export default function CurrencyExchangeSection({ accounts, rates, onSaved }) {
   const [form, setForm] = useState(emptyForm)
   const [amountTouchedByUser, setAmountTouchedByUser] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
 
-  function currencyOf(id) {
-    return accounts.find((a) => a.id === id)?.currency || 'COP'
+  const pockets = flattenAccountPockets(accounts)
+  function pocketOf(key) {
+    return pockets.find((p) => p.key === key)
   }
 
-  const fromCurrency = form.fromAccountId ? currencyOf(form.fromAccountId) : null
-  const toCurrency = form.toAccountId ? currencyOf(form.toAccountId) : null
+  const fromPocket = pocketOf(form.fromKey)
+  const toPocket = pocketOf(form.toKey)
+  const fromCurrency = fromPocket?.currency ?? null
+  const toCurrency = toPocket?.currency ?? null
   const crossCurrency = !!(fromCurrency && toCurrency && fromCurrency !== toCurrency)
 
   // Un cambio de divisa no siempre es para comprar: si estás guardando dólares
   // la plata sigue disponible, así que el descuento del presupuesto se
   // pregunta. Devolver a la madre nunca descuenta, así que ahí no se pregunta.
   const madreId = accounts.find((a) => a.kind === 'madre')?.id
-  const askConsumesBudget = !!(form.fromAccountId && form.fromAccountId !== madreId && form.toAccountId && form.toAccountId !== madreId)
+  const askConsumesBudget = !!(fromPocket && fromPocket.accountId !== madreId && toPocket && toPocket.accountId !== madreId)
 
   useEffect(() => {
     if (!crossCurrency || !form.amount || amountTouchedByUser) return
     const suggested = convertAmount(Number(form.amount), fromCurrency, toCurrency, rates)
     if (suggested != null) setForm((f) => ({ ...f, toAmount: String(Math.round(suggested * 100) / 100) }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.amount, form.fromAccountId, form.toAccountId])
+  }, [form.amount, form.fromKey, form.toKey])
 
   async function handleSubmit(e) {
     e.preventDefault()
-    if (!form.fromAccountId || !form.toAccountId || !form.amount) return
+    if (!fromPocket || !toPocket || !form.amount) return
     if (crossCurrency && !form.toAmount) return
     setSaving(true)
     try {
       await createTransfers([{
-        fromAccountId: form.fromAccountId,
-        toAccountId: form.toAccountId,
+        fromAccountId: fromPocket.accountId,
+        toAccountId: toPocket.accountId,
         amount: Number(form.amount),
         currency: fromCurrency,
         ...(crossCurrency ? { toAmount: Number(form.toAmount), toCurrency } : {}),
@@ -71,12 +78,12 @@ export default function CurrencyExchangeSection({ accounts, rates, onSaved }) {
       {error && <p style={{ color: 'var(--status-critical)' }}>{error}</p>}
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
         <select
-          value={form.fromAccountId}
-          onChange={(e) => { setForm({ ...emptyForm, fromAccountId: e.target.value }); setAmountTouchedByUser(false) }}
+          value={form.fromKey}
+          onChange={(e) => { setForm({ ...emptyForm, fromKey: e.target.value }); setAmountTouchedByUser(false) }}
           style={formInput}
         >
           <option value="">Cuenta origen</option>
-          {accounts.map((a) => <option key={a.id} value={a.id}>{a.name} ({a.currency || 'COP'})</option>)}
+          {pockets.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
         </select>
         <input
           type="number" placeholder={fromCurrency ? `Monto que sale (${fromCurrency})` : 'Monto que sale'}
@@ -86,12 +93,12 @@ export default function CurrencyExchangeSection({ accounts, rates, onSaved }) {
         />
         <span style={{ color: 'var(--text-muted)' }}>→</span>
         <select
-          value={form.toAccountId}
-          onChange={(e) => { setForm({ ...form, toAccountId: e.target.value, toAmount: '' }); setAmountTouchedByUser(false) }}
+          value={form.toKey}
+          onChange={(e) => { setForm({ ...form, toKey: e.target.value, toAmount: '' }); setAmountTouchedByUser(false) }}
           style={formInput}
         >
           <option value="">Cuenta destino</option>
-          {accounts.filter((a) => a.id !== form.fromAccountId).map((a) => <option key={a.id} value={a.id}>{a.name} ({a.currency || 'COP'})</option>)}
+          {pockets.filter((p) => p.key !== form.fromKey).map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
         </select>
         {crossCurrency && (
           <input
