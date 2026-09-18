@@ -299,6 +299,15 @@
   flex-shrink: 0;
 }
 
+.gotoGastosLink {
+  min-height: 32px;
+  padding: 0 var(--space-1);
+  color: var(--series-1);
+  font: var(--font-caption);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
 .results {
   display: flex;
   flex-direction: column;

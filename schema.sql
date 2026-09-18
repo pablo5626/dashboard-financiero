@@ -321,6 +321,12 @@ create table savings_contributions (
   contributed_at date not null default current_date,
   amount numeric not null,
   note text,
+  -- Cuenta de origen del aporte y la transacción real que descontó de ahí —
+  -- solo se usan para metas 'puntual' (sin cuenta vinculada); en 'proposito'
+  -- el avance ya viene del saldo real de la cuenta vinculada, así que crear
+  -- una transacción ahí duplicaría el conteo (ver MetasAhorro.jsx).
+  account_id uuid references accounts(id),
+  linked_transaction_id uuid references transactions(id),
   created_at timestamptz not null default now()
 );
 

@@ -192,7 +192,14 @@ the viewport instead of scrolling on its own, because `.grid-auto`/
 `index.css`) to allow shrinking; `body` also has `overflow-x: hidden` as a
 last-resort guard. This was a real bug hit on mobile mid-session — keep
 both parts (`min-width: 0` on grid children + `table-scroll` wrapper) when
-adding new tables or charts.
+adding new tables or charts. **A money `<td>` needs `className="amount-cell"`**
+(also defined in `index.css`, next to `.simple-table` — just
+`white-space: nowrap`) — `Intl.NumberFormat`'s COP formatting inserts a
+literal space between the sign and the digits (`formatCOP(-100000)` →
+`"-$ 100.000"`), and without `nowrap` a narrow column can wrap the line
+exactly there, splitting "-$" onto its own line. Applied to every `<td>`
+that renders `formatCOP`/`formatByCurrency` across the app now — keep doing
+so for any new money cell.
 
 **Money math**: an account's current balance is never stored directly — it's
 computed as `monthly_initial_balance + net account_transfers + sum of that
@@ -381,16 +388,17 @@ pockets instantly, same UX as the old grouped-card design, just backed by
 one real row instead of two.
 
 **Known gaps left by this change** (documented rather than silently
-unsupported): `QuickCaptureFAB.jsx`'s manual gasto/ingreso/transferencia
-sheet and `MetasAhorro.jsx`'s `'proposito'` goals still resolve a chosen
-account to its **primary** currency only (`currencyOf(id)` /
-`balances[g.account_id]`) — there's no pocket picker in those two surfaces
-yet, so logging a manual EUR expense against arq, or pointing a savings goal
-at arq's EUR pocket specifically, isn't possible from there today (the CSV
-import path and `TransferHistorySection` **are** pocket-aware, via the same
-`flattenAccountPockets` picker). `TransferHistorySection`'s transfer-history
-*table* also still renders the bare account name for a past transfer's
-origin/destination, not which pocket — the row's own
+unsupported): `QuickCaptureFAB.jsx`'s manual **gasto/ingreso** branch and
+`MetasAhorro.jsx`'s `'proposito'` goals still resolve a chosen account to
+its **primary** currency only (`currencyOf(id)` / `balances[g.account_id]`)
+— there's no pocket picker in those two surfaces yet, so logging a manual
+EUR expense against arq, or pointing a savings goal at arq's EUR pocket
+specifically, isn't possible from there today (the CSV import path,
+`TransferHistorySection`, and — since a later pass, see "Quick capture
+(FAB)" below — the FAB's own **transferencia** branch **are** pocket-aware,
+via the same `flattenAccountPockets` picker). `TransferHistorySection`'s
+transfer-history *table* also still renders the bare account name for a
+past transfer's origin/destination, not which pocket — the row's own
 `formatByCurrency(amount, currency)` is what actually tells you which pocket
 was involved.
 
@@ -635,7 +643,10 @@ anywhere in the app, so this is the one and only copy of the feature now.
 The `voice-parse` pipeline itself is unchanged: a Web Speech API transcript
 goes to the `voice-parse` Supabase Edge Function
 (`supabase/functions/voice-parse/index.ts`) — a small Deno function with no
-DB access that calls Claude Haiku 4.5 with the exact category/account list
+DB access that calls Gemini 2.5 Flash (`GEMINI_API_KEY`, switched from
+Claude Haiku 4.5 at the user's request — same direct single-fetch pattern,
+no multi-provider abstraction layer, since a future provider swap is just as
+small an edit as this one was) with the exact category/account list
 and Colombian amount slang rules ("mil"/"lucas"=×1.000, "palo(s)"=×1.000.000)
 and returns `{ mode, amount, categoryName, accountName, purpose, tag }`; the
 component maps those names to ids via `normalizeName` (accent/case-insensitive)
@@ -810,6 +821,32 @@ currency swap still gets a rate-based suggestion, just from this FAB or
 accounts/categories when the sheet first opens, since it never needed rates
 before this.
 
+**Transferencia mode became pocket-aware, closing the gap noted above**:
+`form.fromAccountId`/`form.toAccountId` became `form.fromKey`/`form.toKey`
+(pocket keys, same `{accountId}` / `` `${accountId}:${currency}` `` shape as
+`currencyPockets.js`), `pockets = flattenAccountPockets(accounts)` replaces
+the flat `accounts` list feeding the "Desde"/"Hacia" chips and `toOptions`,
+and `fromPocket`/`toPocket` (resolved via a local `pocketOf(key)`) replace
+every `currencyOf(form.fromAccountId)`/`currencyOf(form.toAccountId)` call
+in `crossCurrency`, `askConsumesBudget`, `canSubmit`, the rate-suggestion
+effect above, and `handleSubmit`'s `createTransfers` payload — directly
+mirroring the pattern `TransferHistorySection.jsx` already used, so a
+traslado from the "+" can now target, say, arq's EUR pocket specifically,
+not just its primary currency. `handleVoiceResult` needed no change for
+this: for `mode === 'transferencia'` it never assigned
+`fromAccountId`/`toAccountId` to begin with (only a singular `accountId`
+that mode doesn't read), so a voice-dictated traslado already required
+picking both accounts by hand before this pass too — a preexisting gap, not
+one this pass introduced or fixed.
+
+**`TransferHistorySection.jsx`'s own inline add-transfer form was removed**
+once the FAB above covered the exact same ground (including the pocket
+picker) — the component now only renders the transfer-history table, the
+per-row `consumes_budget` checkbox, and delete; `pockets`/`flattenAccountPockets`
+were dropped from this file entirely since nothing here needs them anymore.
+The "+" FAB's traslado mode is the only surface left for registering a new
+transfer (see two paragraphs above).
+
 **Category picking and account picking both converged on shared components**
 (also used the same way by `Diario.jsx`, so behavior stays consistent
 across every entry surface):
@@ -956,6 +993,18 @@ different UI idioms for the same concept. Submitting calls
 afterward to find the new row, unlike the old inline form — `createAccount`
 already returns the inserted row).
 
+**This section can also create the madre**, added once an onboarding audit
+found there was no UI path for it at all (the only way to seed the first
+`kind='madre'` row used to be a manual `insert` in the Supabase SQL Editor,
+which `Cuentas.jsx` used to point the user to directly — that message now
+points here instead). A checkbox "Es la cuenta madre" only renders while
+`!accounts.some(a => a.kind === 'madre')` (there's only ever one, so it
+hides itself once one exists) — checking it hides the currency `<select>`
+and multi-moneda builder entirely (the madre is always a single COP account,
+per the monthly madre→hijas ritual) and `handleCreateAccount` calls
+`createAccount({ kind: 'madre', parentAccountId: null, currency: 'COP' })`
+instead of the `kind: 'hija'` branch.
+
 `ColorSwatchPicker` (previously a component defined locally inside
 `GastosDiarios.jsx`) moved to `src/components/ui/ColorSwatchPicker.jsx` as a
 shared component (used by both `SettingsPanel.jsx` and, historically, the
@@ -1000,6 +1049,19 @@ goal is created there, so on success `SettingsPanel.jsx` dispatches
 payload needed) and each page subscribes in a `useEffect` calling its own
 `reload()` — same shape as `Diario.jsx`'s existing
 `dashboard:transactions-changed` listener.
+
+**A `'gastos-fijos'` section** (between `'metas'` and `'tasas'` in
+`SETTINGS_SECTIONS`) covers just the alta — the same relocation as
+`'cuentas'`/`'deudas'`/`'metas'`, moved out of the create form that used to
+live inline at the bottom of `FixedExpensesSection.jsx` (`Cuentas.jsx`).
+`handleCreateFixedExpense` calls `fixedExpensesApi.createFixedExpense`
+directly (deriving `currency` from whichever account is picked, same
+pattern as everywhere else that creates a transaction/expense tied to an
+account) and dispatches `dashboard:fixed-expenses-changed` on success, which
+`FixedExpensesSection.jsx` listens for to `reload()` — same shape as
+`dashboard:debts-changed`/`dashboard:goals-changed`. `Cuentas.jsx` keeps
+everything else about fixed expenses (list, inline edit, toggle paid,
+archive) — only *creating* one moved.
 
 **Fifth section, `'tasas'`**: a centralized "Tasas de cambio" editor for the
 3 fixed pairs (`RATE_PAIRS` — `CURRENCIES` only has COP/USD/EUR, so this
@@ -1246,90 +1308,122 @@ Supabase, no sample data left anywhere:
   the preview's object URL, so switching to Ingreso/Traslado — or opening
   voice via the mic button, which calls `reset('gasto')` too — cleanly
   leaves the receipt screen instead of leaving it stuck open underneath.
-  **The Edge Function itself is still deliberately not deployed** — this
-  wiring makes the client-side call ready, but until someone runs `npx
-  supabase functions deploy receipt-parse --project-ref
-  qxiqqozogggfynkanevt` and sets `ANTHROPIC_API_KEY` in its secrets (same
-  billed key as `voice-parse`, see "Known deferred scope" below), picking a
-  photo fails with the same clear "ANTHROPIC_API_KEY no configurada" error
-  the function already returns, not a crash — the user asked explicitly to
-  leave deployment for later, mirroring how `voice-parse` was
-  deployed-but-unconfigured for a while.
+  **The Edge Function is now deployed and configured** (`receipt-parse`,
+  calling Gemini 2.5 Flash via the same `GEMINI_API_KEY` secret as
+  `voice-parse` — see "Known deferred scope" below) — picking a photo goes
+  through the real round trip now, not just the client-side wiring.
 
-  Top-to-bottom the page is now: a chrome-free "Total de hoy" hero (big
-  signed net amount + red/green gasto/ingreso pills, no `Card` wrapper —
-  matches a MonIA screenshot the user shared mid-session), a "Gasto de hoy
-  por categoría" bar strip (see below — also chrome-free, no `Card`), then
-  **"Movimientos de hoy" before "Tendencia (últimos 7 días)"** — that order
-  was flipped from an earlier pass at the user's request, tendencia now
-  comes last. `CategoryEmojiGrid.jsx`/`AccountAutocomplete.jsx` are still
-  imported here purely for the inline edit row of "Movimientos de hoy" (see
-  below), not for any create form.
+  **Reworked again for a period selector (Hoy/Semana/Mes), a real budget
+  indicator, and to drop the 7-day trend chart** — a later pass, driven by a
+  MonIA reference screenshot the user shared (mockup's literal look not
+  copied, same "structure/UX only" rule as every other reference screenshot
+  in this app). Top-to-bottom the page is now: `.pageHeader` (title +
+  `PERIODS` segmented control — `hoy`/`semana`/`mes`, local state `period`,
+  no shared component with `PanelGeneral.jsx`'s `MonthYearPicker` since Panel
+  navigates calendar months and Diario needs relative windows like "last 7
+  days"), a chrome-free hero (small "presupuesto restante" caption above the
+  big signed total when any category has a budget — see below — then the
+  total/pills, same style as before just relabeled "Total de {período}"),
+  a horizontal row of **category chips** (not bars anymore — see below), and
+  `Card title="Movimientos — {período}"`. **The trend chart is gone
+  entirely** (`buildTrendData`, `trendData` state, `TREND_DAYS`, and the
+  `Tendencia (últimos N días)` `Card` were all removed) — the user asked
+  explicitly for this page to be "así de limpio y sin gráficas".
 
-  **"Gasto de hoy por categoría" is a standalone block, not a `Card`** — the
-  user wanted it to read as an extension of the hero total (same
-  chrome-free treatment), with "Tendencia" the only one of the two still in
-  its own card. Each category renders as a **vertical bar whose height is
-  proportional to its spend** (`heightPx = Math.max(52, (value /
-  maxCategorySpend) * 140)`, a fixed 52px floor so emoji+monto always fit
-  inside even for the smallest bar) — replacing an earlier version that used
-  fixed-size "píldora" chips with no size-value encoding at all, which the
-  user flagged directly ("no hay ninguna proporción tamaño valor"). Each bar
-  is 70px wide with a 10px gap (`.categoryBarsRow`, `overflow-x: auto`),
-  sized so a ~360-390px phone shows about 4 full bars with a 5th peeking at
-  the edge as a scroll affordance — swipeable, same "swipeable panels" idiom
-  as `CategoryEmojiGrid.jsx`. The emoji + `formatCompact` amount render
-  **inside** the colored bar itself, stacked and anchored to its bottom
-  (`justify-content: flex-end` in `.categoryBarFill`), not as separate
-  labels outside it. This is a decorative sized-chip idiom, not a formal
-  Recharts chart — `diseno-ui.md`'s "part-whole → horizontal bar, never
-  vertical" rule still governs actual chart components elsewhere (Panel's
-  "Distribución por cuenta", `GastosDiarios.jsx`'s category/tag charts,
-  untouched) and wasn't relaxed; this view was already a non-chart pill
-  strip before this pass; it just gained proportional sizing.
-  "Tendencia (últimos 7 días)" is still a genuine vertical Recharts bar
-  chart in its own `Card`, day-of-week on the x-axis — legitimately vertical
-  since a day-over-day trend isn't the part-whole comparison that rule
-  governs.
+  **`loadAll` fetches a different range per `period`**: `hoy` →
+  `listTransactionsForDay(today())` (unchanged); `semana` → last 7 days
+  (`WEEK_DAYS`) via the new `transactionsApi.listTransactionsForDateRange`
+  (full joins, unlike the now-deleted `listTransactionsForRange`, which was
+  a lighter no-joins variant only the old trend chart needed and got deleted
+  alongside it — Diario needs to *list* the movements, not just sum them);
+  `mes` → `listTransactionsForMonth(year, month)` of the real current month
+  (no year/month picker of its own, always "this month", unlike Panel).
+  State/variable names were renamed from the old "today"-only assumption
+  (`todayTransactions`→`periodTransactions`, `visibleToday`→`visiblePeriod`,
+  `gastoHoy`/`ingresoHoy`/`netHoy`→`gastoPeriodo`/`ingresoPeriodo`/
+  `netPeriodo`) since "hoy" stopped being always true.
 
-  **"Movimientos de hoy" now supports inline editing, not just delete**: a
-  small "✎" button next to each row's "×" sets `editingId`/`editDraft` and
-  swaps that row for a small form (descripción, monto, `AccountAutocomplete`,
-  `CategoryEmojiGrid`, tag) with Guardar/Cancelar — calls the new
-  `transactionsApi.updateTransaction(id, fields)` (a generic partial-update
-  passthrough, same shape as `categoriesApi.updateCategory`), then patches
-  the edited row into local state and adjusts that day's `trendData` bucket
-  by the delta between the old and new gasto amount (same "don't
-  `reload()` everything" reasoning as `handleToggleInstallment` in
-  `Deudas.jsx`). The edit keeps the transaction's original sign (gasto stays
-  gasto) and its original date — changing the date isn't supported here,
-  since that would move the row out of "today" entirely; that's still a
-  case for `GastosDiarios.jsx`'s "Movimientos" table. `listTransactionsForDay`
-  (`listTransactionsForRange` for the trend) still local-appends/patches
-  rather than `reload()`ing on every save/edit/delete, same hot-path
-  rationale as before.
+  **Category chips replace the old proportional vertical bars**
+  (`.categoryChipsRow`, same horizontal-scroll-with-hidden-scrollbar trick as
+  `CategoryEmojiGrid.jsx`) — each chip is emoji + `formatCompact` amount,
+  with a **colored border indicating proximity to that category's
+  `categories.monthly_budget`** for the selected period:
+  `% usado = gasto de esa categoría en el período / monthly_budget`, mapped
+  to `--status-good` (<70%), `--status-warning` (70-99%), `--status-serious`
+  (100-119%), `--status-critical` (≥120%) — a category with no budget
+  configured gets a neutral `--border-hairline` border, never a color,
+  since there's nothing to measure proximity against. Tapping a chip
+  (`selectedCategoryId`, toggles off on a second tap) shows a caption below
+  ("$X restantes de $Y" / "$X excedido" / "sin presupuesto configurado" for
+  one without a budget). The hero's "presupuesto restante" caption is the
+  aggregate of the same idea: `Σ(monthly_budget of categories that have one
+  configured) − Σ(spend in those same categories, same period)` — categories
+  without a budget are excluded from the sum entirely, never treated as a
+  $0 budget (same principle `panelApi.fetchAlerts`'s `presupuesto_categoria`
+  alert already used). This needed no schema change —
+  `categories.monthly_budget` already existed and was already editable from
+  Ajustes → Categorías; only the visualization was missing before.
 
-  **Live refresh via a window event, not a prop**: since this page's own
-  entry form is gone, the *only* way to add a movement while viewing
-  `/diario` is the floating FAB — but `QuickCaptureFAB` and the routed page
-  are siblings under `AppShell`, not parent/child, so there's no `reload()`
-  to pass down as a prop. `AppShell.jsx`'s `refreshPendingCount` (already
-  called as `QuickCaptureFAB`'s `onSaved`) now also does
+  **"Movimientos — {período}" groups by date when `period !== 'hoy'`**
+  (`groupTransactionsByDate`, a `Map` keyed by `occurred_at.slice(0,10)`,
+  newest day first) — a small header row per day (`.txDateHeader`, e.g.
+  "lun, 11 sept") between groups; for `period === 'hoy'` the list renders
+  flat with no header, since grouping a single day is a no-op UX-wise. Same
+  `renderTxRow` function (unchanged from before: inline "✎" edit via
+  `transactionsApi.updateTransaction`, "×" delete, both still patch local
+  state instead of `reload()`ing) is shared by both render paths. The edit
+  still keeps the transaction's original sign and date, same as before.
+
+  **Live refresh via a window event, not a prop, is unchanged**: since this
+  page's own entry form is gone, the *only* way to add a movement while
+  viewing `/diario` is the floating FAB — but `QuickCaptureFAB` and the
+  routed page are siblings under `AppShell`, not parent/child, so there's no
+  `reload()` to pass down as a prop. `AppShell.jsx`'s `refreshPendingCount`
+  (already called as `QuickCaptureFAB`'s `onSaved`) also does
   `window.dispatchEvent(new Event('dashboard:transactions-changed'))`, and
-  `Diario.jsx` wraps its whole fetch (`loadAll`, via `useCallback`) in a
-  `useEffect` that both runs it once on mount and subscribes to that event
-  — so saving from the FAB while `/diario` is open refreshes it live instead
-  of requiring a manual page reload, which was a real regression the user
-  caught right after the manual form (and its own local-append logic) was
-  removed. This is a narrow, deliberate exception to "no global store": it's
-  a pure "something changed, go refetch" signal, no data travels through
-  the event itself.
+  `Diario.jsx` wraps its whole fetch (`loadAll`, a `useCallback` depending on
+  `[period]` now, so switching the segmented control re-triggers it too) in
+  a `useEffect` that both runs it once on mount and subscribes to that event
+  — so saving from the FAB while `/diario` is open refreshes it live. This
+  remains a narrow, deliberate exception to "no global store": it's a pure
+  "something changed, go refetch" signal, no data travels through the event
+  itself.
 - **`PanelGeneral.jsx`**: consolidated KPIs (balance total, patrimonio
   neto, ingresos/gastos del mes), the alerts list above (including the
-  category-anomaly alert), account distribution bar chart, 6-month trend
-  line + comparison table, and a "Comparativa año a año" card (current YTD
-  vs. same months last year via `panelApi.fetchMonthlyTrend`, 2 StatTiles +
-  a 4-line chart with dashed lines for the prior year).
+  category-anomaly alert), a "Próximos pagos" card (see below), account
+  distribution bar chart, 6-month trend line + comparison table, and a
+  "Comparativa año a año" card (current YTD vs. same months last year via
+  `panelApi.fetchMonthlyTrend`, 2 StatTiles + a 4-line chart with dashed
+  lines for the prior year).
+
+  **Month/year selector, added later**: `YEAR`/`MONTH` module constants
+  became `year`/`month` state (`MonthYearPicker`, a new shared component
+  extracted from the month `<select>` + year `<input type="number">` that
+  used to live inline in `GastosDiarios.jsx`'s CSV-import card — that card
+  now uses the same extracted component, zero behavior change there), shown
+  next to the page title. The load `useEffect` depends on `[year, month]`
+  and propagates them to `fetchBalancesForMonth`, `fetchMonthlyTrend` (via
+  `lastNMonths(year, month, TREND_MONTHS)`), and the 3 YoY month-range
+  calculations. **`fetchTotalDebt()` was deliberately left unparametrized**
+  — it has no date filter at all (it's a snapshot of debt *right now*, not
+  historical), so "Patrimonio neto" for a past month still subtracts today's
+  debt, not that month's — a known, documented limitation, not a bug to fix
+  here. **`fetchAlerts()` was also deliberately left unparametrized** — the
+  "Alertas" card always shows "today real" regardless of which month the
+  rest of the page is navigating, since "what needs my attention now" isn't
+  a function of which period you're browsing in the charts.
+
+  **"Próximos pagos" card**: filters the same `alerts` array (already
+  fetched) down to `kind === 'gasto_fijo'` and renders each with a "Marcar
+  pagado" button calling `fixedExpensesApi.setPaidStatus` directly (against
+  `REAL_YEAR`/`REAL_MONTH`, same "always today" reasoning as Alertas, not
+  the selected `year`/`month`), then patches `upcomingFixedExpenses` locally
+  instead of a full `reload()` — same hot-path pattern as
+  `handleToggleInstallment` in `Deudas.jsx`. Sourced from a new
+  `fixedExpensesApi.listUpcomingFixedExpenses(year, month, dueSoonDays)`
+  rather than re-deriving from `fetchAlerts`'s composite `fx-${id}` alert
+  id, so this card gets the real uuid directly instead of string-parsing an
+  id that alert objects only assemble for their own `href` purposes.
 - **`Cuentas.jsx`**: cuenta madre + hijas CRUD (name, currency, and
   optionally `is_multi_currency` + extra `account_currencies` pockets so one
   account (like `arq`) can hold several real currency balances at once — see
@@ -1368,7 +1462,11 @@ Supabase, no sample data left anywhere:
   add-transfer form and the "+" FAB's traslado mode (which also
   pre-fills "Monto recibido" from the saved rate, see "Quick capture (FAB)")
   are the two remaining ways to register one of these. Also fixed-expenses
-  CRUD with per-month paid status (`FixedExpensesSection.jsx`). There is no
+  list/edit/toggle-paid/archive (`FixedExpensesSection.jsx` — *creating* one
+  moved to Ajustes → Gastos fijos, same relocation pattern as `'cuentas'`/
+  `'deudas'`/`'metas'` below; this component now just listens for
+  `dashboard:fixed-expenses-changed` to refresh after a create there).
+  There is no
   exchange-rate card or inline rate row left on this page at all — every
   pair is edited exclusively from Ajustes → Tasas de cambio (see "Fifth
   section, 'tasas'" above); this page only reads `exchange_rates` for the
@@ -1417,11 +1515,21 @@ Supabase, no sample data left anywhere:
   description repeated in ≥3 of the last 6 months and offers to add it as a
   recurring fixed expense, a "Movimientos — mes" table (editable Tags cell
   via `transactionsApi.updateTransactionTags`, delete via
-  `transactionsApi.deleteTransaction`), and — **moved to the very end of the
-  page** (it used to be the first card) — "Importar CSV de MonIA"
-  (month/year picker, dedup via `monia_id`, the bank-assignment engine
-  above). The reorder was a deliberate priority flip: import is a once-a-
-  month chore, the tables above it are what gets checked far more often, so
+  `transactionsApi.deleteTransaction`, and — added later — a filter row
+  above it for categoría/cuenta/tag, applied **client-side** over the
+  already-fetched `monthTransactions`, not a new Supabase query, so the
+  page's other aggregates (charts, "% usado") keep seeing the unfiltered
+  month; `useSearchParams` reads `?categoryId=&accountId=&tag=` once on
+  mount to prefill it — `SearchPanel.jsx`'s "Ver en Gastos" link is the one
+  place that builds that URL, via `useNavigate`, only for its own structured
+  filters, never its free-text query box, which this table doesn't support),
+  and — **moved to the very end of the page** (it used to be the first
+  card) — "Importar CSV de MonIA" (dedup via `monia_id`, the bank-assignment
+  engine above, using the same `MonthYearPicker` component `PanelGeneral.jsx`
+  uses — extracted from what used to be this card's own inline month
+  `<select>`/year `<input>`, zero behavior change here). The reorder was a
+  deliberate priority flip: import is a once-a-month chore, the tables above
+  it are what gets checked far more often, so
   it no longer has to be scrolled past on every visit.
 
   **The manual expense form is gone** (`createManualTransaction` is no
@@ -1472,6 +1580,22 @@ Supabase, no sample data left anywhere:
   regenerating silently only when there's nothing pending to lose — instead
   of only showing a warning banner and waiting for the user to click the
   button themselves.
+
+  **Marking a `'debo'` installment paid can now debit a real account, added
+  later.** `debt_installments.account_id`/`.linked_transaction_id` already
+  existed (added earlier for `'me_deben'` abonos, see `addAbono` below) but
+  sat unused for this direction — no schema change was needed to wire them
+  up. The installments table gained a "Cuenta" column: unpaid rows show a
+  `<select>` (hijas + a "Dinero externo" option meaning "don't touch any
+  account balance"), paid rows show plain text (the account used, or
+  "Dinero externo"). `handleToggleInstallment` went async: marking paid with
+  an account chosen first calls `createManualTransaction` (negative amount,
+  same pattern as `handleAddAbono` below) and passes its id into
+  `debtsApi.toggleInstallmentPaid(installment, debt, { accountId,
+  linkedTransactionId })`; unmarking passes neither — the function resolves
+  the revert itself from `installment.linked_transaction_id` (deletes that
+  transaction, clears both columns), so the caller never has to remember
+  which account a past payment used.
 - **`MetasAhorro.jsx`**: both goal kinds — `'proposito'` (tied to a hija
   account, progress = that account's real balance, contribution log is
   annotation-only) and `'puntual'` (progress = sum of logged
@@ -1481,6 +1605,24 @@ Supabase, no sample data left anywhere:
   `target_date` are set). Contributions can be deleted
   (`savingsApi.deleteContribution`); for `'puntual'` goals this also
   decrements `current_amount` to keep it matching the log.
+
+  **A `'puntual'` contribution can now debit a real account too, added
+  later — `'proposito'` was deliberately left untouched.** Unlike the debt
+  case above, `savings_contributions` had no `account_id`/
+  `linked_transaction_id` columns yet, so this needed a real schema change
+  (`schema.sql` + a 2-statement live-DB snippet, see `esquema-datos.md`'s
+  "Cambios de esquema..." procedure). The account selector in "Agregar
+  aporte" only renders `g.kind === 'puntual'` — a `'proposito'` goal's
+  progress already comes from the linked account's real balance
+  (`fetchMonthlyTrend`), so creating a transaction there too would double-
+  count the same money once via the real balance and once via the
+  "aporte". `handleAddContribution`, when an account is chosen, creates the
+  transaction first (`createManualTransaction`, negative amount,
+  `currency` derived from the chosen account, **no category** — the user
+  explicitly declined adding a new "Ahorro" category for this) and passes
+  its id to `savingsApi.addContribution`; `deleteContribution` reverses it
+  the same way `deleteAbono`/the debt case above do, deleting the linked
+  transaction before decrementing `current_amount`.
 
 **Category/account naming is constrained**: only the categories and
 accounts listed in `prompt-dashboard-financiero.md`'s mapping table (plus
@@ -1592,10 +1734,13 @@ unprompted, they're deliberate cuts, not oversights:
 - **Voice capture is written and deployed but not yet fully verified**: the
   `voice-parse` function has been deployed
   (`npx supabase functions deploy voice-parse --project-ref qxiqqozogggfynkanevt`)
-  but the `ANTHROPIC_API_KEY` secret (separate from any Claude Code
-  subscription — a billed key from console.anthropic.com) still needs to be
-  created and registered
-  (`npx supabase secrets set ANTHROPIC_API_KEY=sk-ant-xxxxx --project-ref qxiqqozogggfynkanevt`,
+  and calls **Gemini 2.5 Flash** (switched from Claude Haiku 4.5 at the
+  user's request — same direct single-fetch-to-the-provider's-REST-API
+  pattern, just a different endpoint/key/response shape, no abstraction
+  layer added since a future provider swap is just as small an edit) — but
+  the `GEMINI_API_KEY` secret (a key from aistudio.google.com, separate from
+  any Claude Code subscription) still needs to be created and registered
+  (`npx supabase secrets set GEMINI_API_KEY=xxxxx --project-ref qxiqqozogggfynkanevt`,
   no redeploy needed afterward) before the mic button does anything but show
   its "API key no configurada" error. The full round trip (mic → transcript →
   Edge Function → prefilled form) has not been exercised end-to-end in a
@@ -1603,14 +1748,12 @@ unprompted, they're deliberate cuts, not oversights:
   (`SpeechRecognition` needs a secure context, so it won't fire over
   `http://<lan-ip>:5173`; testing from a phone needs the deployed GitHub
   Pages HTTPS URL instead).
-- **Receipt scanning has a UI caller now but the Edge Function still isn't
-  deployed at all** (see "Diario.jsx" above for the `QuickCaptureFAB.jsx`
-  wiring) — one step further behind than voice: `npx supabase functions
-  deploy receipt-parse --project-ref qxiqqozogggfynkanevt` hasn't been run
-  yet, so "Escanear recibo" always fails today, not just when the key is
-  missing. Once deployed, it can reuse the exact same `ANTHROPIC_API_KEY`
-  secret voice-parse uses (same Supabase project, same secret name) — no
-  separate key needed, just the deploy command.
+- **Receipt scanning is now deployed too** (`receipt-parse`, same Gemini 2.5
+  Flash swap as `voice-parse`) — `GEMINI_API_KEY` is already set on the
+  project (same secret both functions share), so "Escanear recibo" should
+  work end-to-end. Like voice capture, the full round trip (foto → Edge
+  Function → prefilled form) hasn't been exercised in a real browser session
+  yet — worth a manual test on `npm run dev`.
 
 ## Importable external-agent config detected
 

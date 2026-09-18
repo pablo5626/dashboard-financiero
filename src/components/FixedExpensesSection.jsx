@@ -3,7 +3,7 @@ import Card from './ui/Card.jsx'
 import ConfirmDialog from './ui/ConfirmDialog.jsx'
 import { formatByCurrency } from '../lib/format.js'
 import {
-  listFixedExpenses, createFixedExpense, updateFixedExpense, archiveFixedExpense,
+  listFixedExpenses, updateFixedExpense, archiveFixedExpense,
   getMonthStatuses, setPaidStatus,
 } from '../lib/fixedExpensesApi.js'
 
@@ -16,8 +16,6 @@ export default function FixedExpensesSection({ accounts }) {
   const [items, setItems] = useState(null)
   const [statuses, setStatuses] = useState({})
   const [error, setError] = useState(null)
-  const [form, setForm] = useState(emptyForm)
-  const [saving, setSaving] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [editForm, setEditForm] = useState(emptyForm)
   const [confirmArchive, setConfirmArchive] = useState(null) // { id, name } | null
@@ -38,23 +36,14 @@ export default function FixedExpensesSection({ accounts }) {
 
   useEffect(() => { reload() }, [])
 
-  async function handleCreate(e) {
-    e.preventDefault()
-    if (!form.name.trim() || !form.amount || !form.dueDay) return
-    setSaving(true)
-    try {
-      await createFixedExpense({
-        name: form.name.trim(), amount: Number(form.amount), dueDay: Number(form.dueDay),
-        frequency: form.frequency, accountId: form.accountId || null, currency: currencyOf(form.accountId),
-      })
-      setForm(emptyForm)
-      await reload()
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setSaving(false)
-    }
-  }
+  // El alta se mudó a Ajustes → Gastos fijos — esta sección sigue mostrando
+  // la lista, edición inline, toggle "pagado" y archivar, y se refresca sola
+  // cuando se crea uno nuevo desde ahí (mismo patrón que
+  // dashboard:debts-changed/dashboard:goals-changed).
+  useEffect(() => {
+    window.addEventListener('dashboard:fixed-expenses-changed', reload)
+    return () => window.removeEventListener('dashboard:fixed-expenses-changed', reload)
+  }, [])
 
   function startEdit(item) {
     setEditingId(item.id)
@@ -147,7 +136,7 @@ export default function FixedExpensesSection({ accounts }) {
             return (
               <tr key={f.id}>
                 <td>{f.name}</td>
-                <td>{formatByCurrency(f.amount, f.currency)}</td>
+                <td className="amount-cell">{formatByCurrency(f.amount, f.currency)}</td>
                 <td>Día {f.due_day}</td>
                 <td>{f.frequency === 'anual' ? 'Anual' : 'Mensual'}</td>
                 <td>{f.accounts?.name ?? '—'}</td>
@@ -172,23 +161,6 @@ export default function FixedExpensesSection({ accounts }) {
         </tbody>
       </table>
       </div>
-
-      <form onSubmit={handleCreate} style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-        <input placeholder="Nombre" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={{ ...formInput, flex: '1 1 140px' }} />
-        <input type="number" placeholder="Monto" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} style={{ ...formInput, width: 120 }} />
-        <input type="number" min="1" max="31" placeholder="Día" value={form.dueDay} onChange={(e) => setForm({ ...form, dueDay: e.target.value })} style={{ ...formInput, width: 70 }} />
-        <select value={form.frequency} onChange={(e) => setForm({ ...form, frequency: e.target.value })} style={formInput}>
-          <option value="mensual">Mensual</option>
-          <option value="anual">Anual</option>
-        </select>
-        <select value={form.accountId} onChange={(e) => setForm({ ...form, accountId: e.target.value })} style={formInput}>
-          <option value="">Sin cuenta específica</option>
-          {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-        </select>
-        <button type="submit" disabled={saving} style={{ minHeight: 'var(--touch-target)', padding: '0 var(--space-2)', borderRadius: 10, background: 'var(--series-1)', color: '#fff', fontWeight: 600, opacity: saving ? 0.6 : 1 }}>
-          Agregar
-        </button>
-      </form>
     </Card>
 
     <ConfirmDialog
@@ -205,4 +177,3 @@ export default function FixedExpensesSection({ accounts }) {
 }
 
 const cellInput = { width: '100%', minHeight: 32, borderRadius: 6, border: '1px solid var(--border-hairline)', padding: '0 6px' }
-const formInput = { minHeight: 'var(--touch-target)', borderRadius: 10, border: '1px solid var(--border-hairline)', padding: '0 var(--space-1)' }

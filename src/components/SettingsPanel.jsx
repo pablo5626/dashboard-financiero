@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { IconSettings, IconClose, IconChevronRight, IconTag, IconHash, IconAccounts, IconDebts, IconGoals, IconExchange } from './icons.jsx'
+import { IconSettings, IconClose, IconChevronRight, IconTag, IconHash, IconAccounts, IconDebts, IconGoals, IconExchange, IconExpenses } from './icons.jsx'
 import ColorSwatchPicker from './ui/ColorSwatchPicker.jsx'
 import ConfirmDialog from './ui/ConfirmDialog.jsx'
 import { listCategories, createCategory, updateCategory, archiveCategory } from '../lib/categoriesApi.js'
@@ -8,6 +8,7 @@ import { listTags, createTag, deleteTag } from '../lib/tagsApi.js'
 import { listAccounts, createAccount, saveMonthlyInitialBalances } from '../lib/accountsApi.js'
 import { createDebt } from '../lib/debtsApi.js'
 import { createSavingsGoal } from '../lib/savingsApi.js'
+import { createFixedExpense } from '../lib/fixedExpensesApi.js'
 import { getRates, setRate, fetchLiveRate } from '../lib/exchangeRatesApi.js'
 import { formatByCurrency, CURRENCIES } from '../lib/format.js'
 import styles from './SettingsPanel.module.css'
@@ -21,7 +22,7 @@ const RATE_PAIRS = [['COP', 'USD'], ['COP', 'EUR'], ['USD', 'EUR']]
 const emptyNewCategory = { name: '', emoji: '', color: '', isAmbiguous: true }
 const emptyEditDraft = { name: '', emoji: '', color: '', isAmbiguous: true, monthlyBudget: '' }
 const MULTI = 'MULTI' // valor del <select> de tipo de cuenta para "multi-moneda"
-const emptyNewAccount = { name: '', type: 'COP', pockets: [], draftCurrency: '', draftAmount: '' }
+const emptyNewAccount = { name: '', type: 'COP', pockets: [], draftCurrency: '', draftAmount: '', isMadre: false }
 
 const RELATIONSHIP_OPTIONS = [
   { value: 'amigo', label: 'Amigo' },
@@ -41,6 +42,8 @@ const emptyNewDebt = {
 
 const emptyNewGoal = { kind: 'puntual', name: '', accountId: '', targetAmount: '', targetDate: '' }
 
+const emptyNewFixedExpense = { name: '', amount: '', dueDay: '', frequency: 'mensual', accountId: '' }
+
 // Menú raíz de "Ajustes" — una fila por sección, patrón lista de Ajustes de
 // iOS (glifo + título + subtítulo + chevron). Agregar una sección nueva es
 // agregar una entrada acá con su propio `key` y un bloque de contenido en
@@ -52,6 +55,7 @@ const SETTINGS_SECTIONS = [
   { key: 'cuentas', label: 'Cuentas', subtitle: 'Agregar una cuenta hija, incluida multi-moneda', Icon: IconAccounts },
   { key: 'deudas', label: 'Deudas', subtitle: 'Agregar una deuda o un préstamo dado', Icon: IconDebts },
   { key: 'metas', label: 'Metas de ahorro', subtitle: 'Agregar una meta puntual o con propósito', Icon: IconGoals },
+  { key: 'gastos-fijos', label: 'Gastos fijos', subtitle: 'Agregar un gasto fijo recurrente', Icon: IconExpenses },
   { key: 'tasas', label: 'Tasas de cambio', subtitle: 'COP/USD/EUR, a mano o buscadas automáticamente', Icon: IconExchange },
 ]
 
@@ -103,6 +107,10 @@ export default function SettingsPanel() {
   const [newGoal, setNewGoal] = useState(emptyNewGoal)
   const [creatingGoal, setCreatingGoal] = useState(false)
   const [goalCreated, setGoalCreated] = useState(null)
+
+  const [newFixedExpense, setNewFixedExpense] = useState(emptyNewFixedExpense)
+  const [creatingFixedExpense, setCreatingFixedExpense] = useState(false)
+  const [fixedExpenseCreated, setFixedExpenseCreated] = useState(null)
 
   const [rates, setRates] = useState([])
   const [rateInputs, setRateInputs] = useState({}) // "base_quote" -> string
@@ -284,13 +292,17 @@ export default function SettingsPanel() {
   async function handleCreateAccount(e) {
     e.preventDefault()
     if (!newAccount.name.trim()) return
-    if (newAccount.type === MULTI && newAccount.pockets.length < 2) return
+    if (!newAccount.isMadre && newAccount.type === MULTI && newAccount.pockets.length < 2) return
     const madreId = accounts.find((a) => a.kind === 'madre')?.id ?? null
     setCreatingAccount(true)
     setError(null)
     setAccountCreated(null)
     try {
-      if (newAccount.type === MULTI) {
+      if (newAccount.isMadre) {
+        // La madre es siempre una sola cuenta COP (el ritual mensual
+        // madre→hijas la asume así) — sin multi-moneda ni cuenta padre.
+        await createAccount({ name: newAccount.name.trim(), kind: 'madre', parentAccountId: null, currency: 'COP' })
+      } else if (newAccount.type === MULTI) {
         const [primary, ...rest] = newAccount.pockets
         const created = await createAccount({
           name: newAccount.name.trim(), kind: 'hija', parentAccountId: madreId,
@@ -380,6 +392,28 @@ export default function SettingsPanel() {
       setError(err.message)
     } finally {
       setCreatingGoal(false)
+    }
+  }
+
+  async function handleCreateFixedExpense(e) {
+    e.preventDefault()
+    if (!newFixedExpense.name.trim() || !newFixedExpense.amount || !newFixedExpense.dueDay) return
+    setCreatingFixedExpense(true)
+    setError(null)
+    setFixedExpenseCreated(null)
+    try {
+      const currency = accounts.find((a) => a.id === newFixedExpense.accountId)?.currency || 'COP'
+      await createFixedExpense({
+        name: newFixedExpense.name.trim(), amount: Number(newFixedExpense.amount), dueDay: Number(newFixedExpense.dueDay),
+        frequency: newFixedExpense.frequency, accountId: newFixedExpense.accountId || null, currency,
+      })
+      setFixedExpenseCreated(newFixedExpense.name.trim())
+      setNewFixedExpense(emptyNewFixedExpense)
+      window.dispatchEvent(new Event('dashboard:fixed-expenses-changed'))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setCreatingFixedExpense(false)
     }
   }
 
@@ -625,26 +659,40 @@ export default function SettingsPanel() {
             <>
             <h3 className={styles.sectionTitle}>Cuentas</h3>
             <p className={styles.hint}>
-              Creá una cuenta hija nueva — para renombrar, archivar o editar saldos de una ya existente, andá a la
-              página "Cuentas".
+              {accounts.some((a) => a.kind === 'madre')
+                ? 'Creá una cuenta hija nueva — para renombrar, archivar o editar saldos de una ya existente, andá a la página "Cuentas".'
+                : 'Todavía no tenés una cuenta madre — creála primero (marcá la casilla de abajo) antes de agregar hijas.'}
             </p>
 
             <form onSubmit={handleCreateAccount} className={styles.createForm} style={{ borderTop: 'none', paddingTop: 0 }}>
               <input
-                placeholder="Nombre (ej. Pibank)" value={newAccount.name}
+                placeholder={newAccount.isMadre ? 'Nombre (ej. Bold)' : 'Nombre (ej. Pibank)'} value={newAccount.name}
                 onChange={(e) => setNewAccount({ ...newAccount, name: e.target.value })}
                 className={styles.textInput}
               />
-              <select
-                value={newAccount.type}
-                onChange={(e) => setNewAccount({ ...newAccount, type: e.target.value, pockets: [], draftCurrency: '', draftAmount: '' })}
-                className={styles.textInput}
-              >
-                {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                <option value={MULTI}>Multi-moneda</option>
-              </select>
 
-              {newAccount.type === MULTI && (
+              {!accounts.some((a) => a.kind === 'madre') && (
+                <label className={styles.checkboxRow}>
+                  <input
+                    type="checkbox" checked={newAccount.isMadre}
+                    onChange={(e) => setNewAccount({ ...newAccount, isMadre: e.target.checked })}
+                  />
+                  Es la cuenta madre (de donde sale la distribución mensual hacia las hijas)
+                </label>
+              )}
+
+              {!newAccount.isMadre && (
+                <select
+                  value={newAccount.type}
+                  onChange={(e) => setNewAccount({ ...newAccount, type: e.target.value, pockets: [], draftCurrency: '', draftAmount: '' })}
+                  className={styles.textInput}
+                >
+                  {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                  <option value={MULTI}>Multi-moneda</option>
+                </select>
+              )}
+
+              {!newAccount.isMadre && newAccount.type === MULTI && (
                 <div className={styles.editForm} style={{ border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 8 }}>
                   <p className={styles.hint} style={{ margin: 0 }}>
                     Agregá cada moneda que tiene esta cuenta (mínimo 2) y cuánto tiene hoy — opcional, se carga como saldo inicial de este mes.
@@ -683,10 +731,10 @@ export default function SettingsPanel() {
 
               <button
                 type="submit"
-                disabled={creatingAccount || !newAccount.name.trim() || (newAccount.type === MULTI && newAccount.pockets.length < 2)}
+                disabled={creatingAccount || !newAccount.name.trim() || (!newAccount.isMadre && newAccount.type === MULTI && newAccount.pockets.length < 2)}
                 className={styles.saveButton}
               >
-                {creatingAccount ? 'Creando…' : 'Crear cuenta'}
+                {creatingAccount ? 'Creando…' : newAccount.isMadre ? 'Crear cuenta madre' : 'Crear cuenta'}
               </button>
             </form>
 
@@ -895,6 +943,66 @@ export default function SettingsPanel() {
 
             {goalCreated && (
               <p className={styles.hint}>Meta "{goalCreated}" creada — ya aparece en la página "Metas".</p>
+            )}
+            </>
+            )}
+
+            {activeSection?.key === 'gastos-fijos' && (
+            <>
+            <h3 className={styles.sectionTitle}>Gastos fijos</h3>
+            <p className={styles.hint}>
+              Creá un gasto fijo recurrente nuevo — para editar, marcar pagado o archivar uno ya existente, andá a la
+              página "Cuentas".
+            </p>
+
+            <form onSubmit={handleCreateFixedExpense} className={styles.createForm} style={{ borderTop: 'none', paddingTop: 0 }}>
+              <input
+                placeholder="Nombre (ej. Netflix)" value={newFixedExpense.name}
+                onChange={(e) => setNewFixedExpense({ ...newFixedExpense, name: e.target.value })}
+                className={styles.textInput}
+              />
+              <div className={styles.editFormRow}>
+                <input
+                  type="number" placeholder="Monto" value={newFixedExpense.amount}
+                  onChange={(e) => setNewFixedExpense({ ...newFixedExpense, amount: e.target.value })}
+                  className={styles.textInput} style={{ flex: 1, minWidth: 0 }}
+                />
+                <input
+                  type="number" min="1" max="31" placeholder="Día del mes" value={newFixedExpense.dueDay}
+                  onChange={(e) => setNewFixedExpense({ ...newFixedExpense, dueDay: e.target.value })}
+                  className={styles.textInput} style={{ flex: '0 0 100px' }}
+                />
+              </div>
+              <div className={styles.editFormRow}>
+                <select
+                  value={newFixedExpense.frequency}
+                  onChange={(e) => setNewFixedExpense({ ...newFixedExpense, frequency: e.target.value })}
+                  className={styles.textInput} style={{ flex: 1, minWidth: 0 }}
+                >
+                  <option value="mensual">Mensual</option>
+                  <option value="anual">Anual</option>
+                </select>
+                <select
+                  value={newFixedExpense.accountId}
+                  onChange={(e) => setNewFixedExpense({ ...newFixedExpense, accountId: e.target.value })}
+                  className={styles.textInput} style={{ flex: 1, minWidth: 0 }}
+                >
+                  <option value="">Sin cuenta específica</option>
+                  {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              </div>
+
+              <button
+                type="submit"
+                disabled={creatingFixedExpense || !newFixedExpense.name.trim() || !newFixedExpense.amount || !newFixedExpense.dueDay}
+                className={styles.saveButton}
+              >
+                {creatingFixedExpense ? 'Creando…' : 'Agregar gasto fijo'}
+              </button>
+            </form>
+
+            {fixedExpenseCreated && (
+              <p className={styles.hint}>"{fixedExpenseCreated}" creado — ya aparece en la página "Cuentas".</p>
             )}
             </>
             )}

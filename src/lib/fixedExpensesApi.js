@@ -46,3 +46,27 @@ export async function setPaidStatus(fixedExpenseId, year, month, paid) {
   )
   if (error) throw error
 }
+
+// Vencimientos próximos/atrasados del mes en curso, ya filtrados y con el id
+// real del gasto fijo — a diferencia de panelApi.fetchAlerts (que arma un id
+// compuesto `fx-${id}` solo para su propio href de alerta), esto es lo que
+// necesita la tarjeta "Próximos pagos" de PanelGeneral.jsx para poder llamar
+// setPaidStatus directo sin parsear un string.
+export async function listUpcomingFixedExpenses(year, month, dueSoonDays) {
+  const { data: fixedExpenses, error: e1 } = await supabase
+    .from('fixed_expenses').select('id, name, amount, due_day, currency').eq('is_active', true)
+  if (e1) throw e1
+
+  const fixedIds = fixedExpenses.map((f) => f.id)
+  const { data: statuses, error: e2 } = fixedIds.length
+    ? await supabase.from('fixed_expense_month_status').select('fixed_expense_id, paid').eq('year', year).eq('month', month).in('fixed_expense_id', fixedIds)
+    : { data: [], error: null }
+  if (e2) throw e2
+  const paidMap = Object.fromEntries(statuses.map((s) => [s.fixed_expense_id, s.paid]))
+
+  const dayOfMonth = new Date().getDate()
+  return fixedExpenses
+    .filter((f) => !paidMap[f.id] && f.due_day - dayOfMonth <= dueSoonDays)
+    .map((f) => ({ ...f, daysUntil: f.due_day - dayOfMonth }))
+    .sort((a, b) => a.daysUntil - b.daysUntil)
+}

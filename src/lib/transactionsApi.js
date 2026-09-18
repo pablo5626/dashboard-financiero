@@ -686,16 +686,16 @@ export async function listTransactionsForDay(dateStr) {
   return data
 }
 
-// Rango de fechas liviano (sin joins) para agregados client-side, ej. la
-// tendencia de los últimos N días en Diario.jsx — a diferencia de
-// listTransactionsForDay/listTransactionsForMonth, que traen la fila
-// completa con categories(name)/accounts(name) para listarla en una tabla.
-export async function listTransactionsForRange(startDateStr, endDateStrExclusive) {
+// Rango de varios días con joins completos (Diario.jsx, período "semana") —
+// trae lo mismo que listTransactionsForDay pero para un rango, porque el
+// period picker de Diario necesita listar los movimientos (categoría,
+// cuenta, tags), no solo sumarlos.
+export async function listTransactionsForDateRange(startDateStr, endDateStrExclusive) {
   const { data, error } = await supabase
     .from('transactions')
-    .select('occurred_at, amount, currency, tags')
+    .select('*, categories(name), accounts(name)')
     .gte('occurred_at', startDateStr).lt('occurred_at', endDateStrExclusive)
-    .order('occurred_at', { ascending: true })
+    .order('occurred_at', { ascending: false })
   if (error) throw error
   return data
 }

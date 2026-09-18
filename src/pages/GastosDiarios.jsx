@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell } from 'recharts'
 import Card from '../components/ui/Card.jsx'
 import ConfirmDialog from '../components/ui/ConfirmDialog.jsx'
+import MonthYearPicker, { MONTH_NAMES } from '../components/ui/MonthYearPicker.jsx'
 import { formatCOP, formatByCurrency } from '../lib/format.js'
 import { listAccounts } from '../lib/accountsApi.js'
 import { getRates, toCOP } from '../lib/exchangeRatesApi.js'
@@ -20,7 +22,6 @@ import {
 
 const now = new Date()
 
-const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
 const PATTERN_MONTHS_BACK = 6
 const CHART_COLORS = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)', 'var(--series-5)', 'var(--series-6)', 'var(--series-7)', 'var(--series-8)']
 
@@ -29,8 +30,21 @@ function formatDate(iso) {
 }
 
 export default function GastosDiarios() {
+  const [searchParams] = useSearchParams()
   const [year, setYear] = useState(now.getFullYear())
   const [month, setMonth] = useState(now.getMonth() + 1)
+
+  // Filtro de la tabla "Movimientos — mes", client-side (monthTransactions
+  // ya trae todo con joins) para no duplicar una consulta a Supabase — el
+  // resto de la página (gráficos, "% usado") sigue viendo el mes completo
+  // sin filtrar. Se puede precargar de un deep-link desde la lupa
+  // (SearchPanel.jsx → "Ver en Gastos"), leído una sola vez al montar para
+  // no pelear con que el usuario edite los filtros a mano después.
+  const [txFilters, setTxFilters] = useState(() => ({
+    categoryId: searchParams.get('categoryId') || '',
+    accountId: searchParams.get('accountId') || '',
+    tag: searchParams.get('tag') || '',
+  }))
 
   const [accounts, setAccounts] = useState([])
   const [categories, setCategories] = useState([])
@@ -89,6 +103,16 @@ export default function GastosDiarios() {
   useEffect(() => { reload() }, [year, month])
 
   const hijas = accounts.filter((a) => a.kind === 'hija')
+
+  const filteredMonthTransactions = (monthTransactions ?? []).filter((t) => {
+    if (txFilters.categoryId && t.category_id !== txFilters.categoryId) return false
+    if (txFilters.accountId) {
+      if (txFilters.accountId === 'pending' ? t.account_id : t.account_id !== txFilters.accountId) return false
+    }
+    if (txFilters.tag && !(t.tags ?? []).includes(txFilters.tag)) return false
+    return true
+  })
+  const hasTxFilters = !!(txFilters.categoryId || txFilters.accountId || txFilters.tag)
 
   function handleFileChange(e) {
     const file = e.target.files?.[0]
@@ -297,7 +321,7 @@ export default function GastosDiarios() {
                     <tr key={t.id}>
                       <td>{formatDate(t.occurred_at)}</td>
                       <td>{t.purpose}</td>
-                      <td>{formatByCurrency(t.amount, t.currency)}</td>
+                      <td className="amount-cell">{formatByCurrency(t.amount, t.currency)}</td>
                       <td>{t.categories?.name ?? '—'}</td>
                       <td>
                         <select
@@ -369,7 +393,7 @@ export default function GastosDiarios() {
                       <td>{formatDate(t.occurred_at)}</td>
                       <td>{t.purpose}</td>
                       <td>{t.accounts?.name ?? '—'}</td>
-                      <td>{formatByCurrency(Number(t.source_amount), t.source_currency)}</td>
+                      <td className="amount-cell">{formatByCurrency(Number(t.source_amount), t.source_currency)}</td>
                       <td style={{ whiteSpace: 'nowrap' }}>
                         <input
                           type="number"
@@ -466,7 +490,7 @@ export default function GastosDiarios() {
                 return (
                   <tr key={p.key}>
                     <td>{p.label}</td>
-                    <td>
+                    <td className="amount-cell">
                       {pendingCount > 0 && (
                         <span
                           title={`Incluye ${pendingCount} monto(s) estimado(s) — confírmalos en "Compras en divisa por confirmar"`}
@@ -477,9 +501,9 @@ export default function GastosDiarios() {
                       )}
                       {formatByCurrency(spent, currency)}
                     </td>
-                    <td>{movido > 0 ? formatByCurrency(movido, currency) : '—'}</td>
-                    <td>{allocated != null ? formatByCurrency(allocated, currency) : 'sin definir'}</td>
-                    <td>{income > 0 ? formatByCurrency(income, currency) : '—'}</td>
+                    <td className="amount-cell">{movido > 0 ? formatByCurrency(movido, currency) : '—'}</td>
+                    <td className="amount-cell">{allocated != null ? formatByCurrency(allocated, currency) : 'sin definir'}</td>
+                    <td className="amount-cell">{income > 0 ? formatByCurrency(income, currency) : '—'}</td>
                     <td style={{ color: pct != null && pct > 100 ? 'var(--status-critical)' : 'inherit' }}>{pct != null ? `${pct}%` : '—'}</td>
                   </tr>
                 )
@@ -527,17 +551,39 @@ export default function GastosDiarios() {
           {monthTransactions === null ? (
             <p style={{ color: 'var(--text-muted)' }}>Cargando…</p>
           ) : (
+            <>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 'var(--space-1)' }}>
+              <select value={txFilters.categoryId} onChange={(e) => setTxFilters({ ...txFilters, categoryId: e.target.value })} style={formInput}>
+                <option value="">Todas las categorías</option>
+                {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              <select value={txFilters.accountId} onChange={(e) => setTxFilters({ ...txFilters, accountId: e.target.value })} style={formInput}>
+                <option value="">Todas las cuentas</option>
+                <option value="pending">Pendiente de banco</option>
+                {accounts.map((a) => <option key={a.id} value={a.id}>{a.kind === 'madre' ? `${a.name} (madre)` : a.name}</option>)}
+              </select>
+              <input
+                placeholder="Tag (ej. rappi)" value={txFilters.tag}
+                onChange={(e) => setTxFilters({ ...txFilters, tag: e.target.value })}
+                style={{ ...formInput, width: 140 }}
+              />
+              {hasTxFilters && (
+                <button type="button" onClick={() => setTxFilters({ categoryId: '', accountId: '', tag: '' })} style={{ font: 'var(--font-caption)', color: 'var(--text-muted)' }}>
+                  Limpiar filtros
+                </button>
+              )}
+            </div>
             <div className="table-scroll">
             <table className="simple-table">
               <thead>
                 <tr><th>Fecha</th><th>Descripción</th><th>Monto</th><th>Categoría</th><th>Cuenta</th><th>Tags</th><th></th></tr>
               </thead>
               <tbody>
-                {monthTransactions.map((t) => (
+                {filteredMonthTransactions.map((t) => (
                   <tr key={t.id}>
                     <td>{formatDate(t.occurred_at)}</td>
                     <td>{t.purpose}</td>
-                    <td>
+                    <td className="amount-cell">
                       {t.currency_pending && (
                         <span
                           title="Monto estimado con la tasa guardada — todavía no confirmado en Compras en divisa por confirmar"
@@ -571,12 +617,17 @@ export default function GastosDiarios() {
                     </td>
                   </tr>
                 ))}
-                {monthTransactions.length === 0 && (
-                  <tr><td colSpan={7} style={{ color: 'var(--text-muted)' }}>No hay movimientos importados para este mes todavía.</td></tr>
+                {filteredMonthTransactions.length === 0 && (
+                  <tr>
+                    <td colSpan={7} style={{ color: 'var(--text-muted)' }}>
+                      {hasTxFilters ? 'Ningún movimiento coincide con esos filtros.' : 'No hay movimientos importados para este mes todavía.'}
+                    </td>
+                  </tr>
                 )}
               </tbody>
             </table>
             </div>
+            </>
           )}
         </Card>
 
@@ -587,13 +638,7 @@ export default function GastosDiarios() {
           </p>
 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 'var(--space-2)' }}>
-            <select value={month} onChange={(e) => setMonth(Number(e.target.value))} style={formInput}>
-              {MONTH_NAMES.map((name, i) => <option key={name} value={i + 1}>{name}</option>)}
-            </select>
-            <input
-              type="number" value={year} onChange={(e) => setYear(Number(e.target.value))}
-              style={{ ...formInput, width: 90 }}
-            />
+            <MonthYearPicker year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m) }} />
             <label style={{
               minHeight: 'var(--touch-target)', display: 'inline-flex', alignItems: 'center', padding: '0 var(--space-2)',
               borderRadius: 10, background: 'var(--series-1)', color: '#fff', fontWeight: 600, cursor: 'pointer',

@@ -1,12 +1,18 @@
 // Interpreta el texto transcripto por la Web Speech API del navegador
 // (botón de micrófono en QuickCaptureFAB) y lo convierte en los campos del
-// formulario de captura rápida vía Claude Haiku 4.5. Nunca escribe en la
+// formulario de captura rápida vía Gemini 2.5 Flash. Nunca escribe en la
 // base de datos ni usa la service role key -- a diferencia de
 // quick-capture/index.ts (llamado por Shortcuts sin sesión), a esta función
 // la invoca el navegador con el JWT real del usuario logueado, así que se
 // despliega con verify_jwt = true (default) y no aparece en config.toml.
-
-const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY')
+//
+// Proveedor cambiado de Anthropic a Gemini a pedido del usuario (por ahora
+// usa la key de Gemini que ya tiene, con posibilidad de volver a cambiar
+// más adelante) -- mismo patrón de "un solo fetch directo a la API REST del
+// proveedor", sin capa de abstracción multi-proveedor, para no anticipar
+// una necesidad que todavía no existe.
+const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')
+const GEMINI_MODEL = 'gemini-2.5-flash'
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -55,8 +61,8 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: 'method not allowed' }, 405)
   }
 
-  if (!ANTHROPIC_API_KEY) {
-    return json({ ok: false, error: 'ANTHROPIC_API_KEY no configurada todavía en los secrets de Supabase' }, 500)
+  if (!GEMINI_API_KEY) {
+    return json({ ok: false, error: 'GEMINI_API_KEY no configurada todavía en los secrets de Supabase' }, 500)
   }
 
   let body: Record<string, unknown>
@@ -72,29 +78,26 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
+        'x-goog-api-key': GEMINI_API_KEY,
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 300,
-        temperature: 0,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: text }],
+        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        contents: [{ role: 'user', parts: [{ text }] }],
+        generationConfig: { temperature: 0, maxOutputTokens: 300, responseMimeType: 'application/json' },
       }),
     })
 
     if (!response.ok) {
       const errText = await response.text()
-      return json({ ok: false, error: `Anthropic API error: ${errText}` }, 502)
+      return json({ ok: false, error: `Gemini API error: ${errText}` }, 502)
     }
 
     const data = await response.json()
-    const rawText = data?.content?.[0]?.text ?? ''
+    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
     const cleaned = rawText.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim()
 
     let parsed: Record<string, unknown>

@@ -3,6 +3,37 @@
   gap: var(--space-2);
 }
 
+.pageHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+}
+
+/* ---- Selector de período (hoy/semana/mes) ---- */
+.periodControl {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--surface-1);
+}
+
+.periodButton {
+  min-height: 32px;
+  padding: 0 var(--space-1);
+  border-radius: 9px;
+  font: var(--font-caption);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.periodButtonActive {
+  background: var(--series-1);
+  color: #fff;
+}
+
 .error {
   color: var(--status-critical);
   font: var(--font-footnote);
@@ -36,6 +67,11 @@
 }
 
 .heroLabel {
+  font: var(--font-caption);
+  color: var(--text-muted);
+}
+
+.heroBudgetCaption {
   font: var(--font-caption);
   color: var(--text-muted);
 }
@@ -97,61 +133,72 @@
   background: var(--status-good);
 }
 
-/* ---- Barras de gasto por categoría (estilo MonIA) ----
+/* ---- Chips de gasto por categoría, con reborde según % de su presupuesto
+   (estilo MonIA para la estructura, tokens propios para el color) ----
    Bloque independiente, sin Card/recuadro — misma idea que .hero, para que
-   se lea como una extensión del total de hoy y no como "otra tarjeta más".
-   Cada barra tiene una altura proporcional a su valor sobre el máximo del
-   día (ver maxCategorySpend en Diario.jsx). Ancho pensado para que un
-   celular angosto (~360-390px) muestre 4 completas y asome un pedazo de la
-   5ta, como pista de que el resto se ve arrastrando (overflow-x: auto). */
-.categoryBarsRow {
+   se lea como una extensión del total del período y no como "otra tarjeta
+   más". Fila horizontal deslizable, mismo truco que CategoryEmojiGrid.jsx
+   (overflow-x: auto + scrollbar oculta). */
+.categoryChipsRow {
   display: flex;
-  align-items: flex-end;
-  gap: 10px;
+  gap: 8px;
   overflow-x: auto;
   padding: 4px 2px 2px;
   scrollbar-width: none;
 }
 
-.categoryBarsRow::-webkit-scrollbar {
+.categoryChipsRow::-webkit-scrollbar {
   display: none;
 }
 
-.categoryBar {
-  display: flex;
-  flex-shrink: 0;
-  width: 70px;
-}
-
-.categoryBarTrack {
-  width: 100%;
-  height: 140px;
-  display: flex;
-  align-items: flex-end;
-}
-
-.categoryBarFill {
-  width: 100%;
+.categoryChip {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-end;
-  gap: 3px;
-  padding-bottom: 10px;
-  border-radius: 12px 12px 4px 4px;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 8px 10px;
+  border-radius: 16px;
+  border: 2px solid var(--border-hairline);
+  background: var(--surface-1);
+}
+
+.categoryChipActive {
+  background: color-mix(in srgb, var(--series-1) 12%, var(--surface-1));
+}
+
+.categoryChipEmoji {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
   color: #fff;
 }
 
-.categoryBarEmoji {
-  font-size: 18px;
-  line-height: 1;
-}
-
-.categoryBarAmount {
+.categoryChipAmount {
   font: var(--font-caption);
   font-weight: 700;
-  color: #fff;
+  color: var(--text-primary);
   white-space: nowrap;
+}
+
+.categorySelectedCaption {
+  font: var(--font-subheadline);
+  color: var(--text-secondary);
+  margin: -4px 0 0;
+}
+
+/* ---- Header de fecha entre grupos de "Movimientos", solo en semana/mes ---- */
+.txDateHeader {
+  font: var(--font-caption);
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin: var(--space-1) 0 4px;
 }
 
 /* ---- Lista de movimientos de hoy (estilo MonIA) ---- */

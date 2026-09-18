@@ -1,11 +1,14 @@
 // Interpreta una foto de un recibo/factura (capturada o subida desde
-// Diario.jsx) y extrae comercio, categoría sugerida y monto vía Claude
-// Haiku 4.5 (vision). Nunca escribe en la base de datos ni usa la service
-// role key -- mismo patrón que voice-parse/index.ts: la invoca el navegador
-// con el JWT real del usuario logueado, así que se despliega con
+// Diario.jsx) y extrae comercio, categoría sugerida y monto vía Gemini 2.5
+// Flash (vision). Nunca escribe en la base de datos ni usa la service role
+// key -- mismo patrón que voice-parse/index.ts: la invoca el navegador con
+// el JWT real del usuario logueado, así que se despliega con
 // verify_jwt = true (default) y no aparece en config.toml.
-
-const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY')
+//
+// Mismo cambio de proveedor que voice-parse/index.ts (Anthropic -> Gemini,
+// misma GEMINI_API_KEY/GEMINI_MODEL) -- ver esa nota para el motivo.
+const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')
+const GEMINI_MODEL = 'gemini-2.5-flash'
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -54,8 +57,8 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: 'method not allowed' }, 405)
   }
 
-  if (!ANTHROPIC_API_KEY) {
-    return json({ ok: false, error: 'ANTHROPIC_API_KEY no configurada todavía en los secrets de Supabase' }, 500)
+  if (!GEMINI_API_KEY) {
+    return json({ ok: false, error: 'GEMINI_API_KEY no configurada todavía en los secrets de Supabase' }, 500)
   }
 
   let body: Record<string, unknown>
@@ -75,35 +78,32 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
+        'x-goog-api-key': GEMINI_API_KEY,
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 300,
-        temperature: 0,
-        system: SYSTEM_PROMPT,
-        messages: [{
+        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        contents: [{
           role: 'user',
-          content: [
-            { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageBase64 } },
-            { type: 'text', text: 'Leé este recibo y devolvé el JSON pedido.' },
+          parts: [
+            { inline_data: { mime_type: mediaType, data: imageBase64 } },
+            { text: 'Leé este recibo y devolvé el JSON pedido.' },
           ],
         }],
+        generationConfig: { temperature: 0, maxOutputTokens: 300, responseMimeType: 'application/json' },
       }),
     })
 
     if (!response.ok) {
       const errText = await response.text()
-      return json({ ok: false, error: `Anthropic API error: ${errText}` }, 502)
+      return json({ ok: false, error: `Gemini API error: ${errText}` }, 502)
     }
 
     const data = await response.json()
-    const rawText = data?.content?.[0]?.text ?? ''
+    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
     const cleaned = rawText.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim()
 
     let parsed: Record<string, unknown>

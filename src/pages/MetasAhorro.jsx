@@ -9,6 +9,7 @@ import {
   listSavingsGoals, updateSavingsGoal, archiveSavingsGoal,
   listContributions, addContribution, deleteContribution,
 } from '../lib/savingsApi.js'
+import { createManualTransaction } from '../lib/transactionsApi.js'
 
 const now = new Date()
 const YEAR = now.getFullYear()
@@ -16,7 +17,7 @@ const MONTH = now.getMonth() + 1
 const TREND_MONTHS = 6
 const MONTH_LABELS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
 
-const emptyContribForm = { amount: '', date: new Date().toISOString().slice(0, 10), note: '' }
+const emptyContribForm = { amount: '', date: new Date().toISOString().slice(0, 10), note: '', accountId: '' }
 
 function monthsUntil(dateStr) {
   if (!dateStr) return null
@@ -156,11 +157,30 @@ export default function MetasAhorro() {
     }
   }
 
+  // El selector de cuenta de origen (y la transacción real que descuenta de
+  // ahí) solo aplica a metas 'puntual' — una 'proposito' ya mide su avance
+  // por el saldo real de la cuenta vinculada, así que crear una transacción
+  // ahí contaría la misma plata dos veces (ver savingsApi.addContribution).
   async function handleAddContribution(goal) {
     const draft = contribForm[goal.id] ?? emptyContribForm
     if (!draft.amount) return
     try {
-      await addContribution(goal, { amount: Number(draft.amount), contributedAt: draft.date, note: draft.note })
+      let linkedTransactionId = null
+      if (goal.kind === 'puntual' && draft.accountId) {
+        const tx = await createManualTransaction({
+          purpose: `Aporte a ${goal.name}`,
+          amount: -Number(draft.amount),
+          occurredAt: `${draft.date}T12:00:00Z`,
+          accountId: draft.accountId,
+          currency: accounts.find((a) => a.id === draft.accountId)?.currency || 'COP',
+        })
+        linkedTransactionId = tx.id
+      }
+      await addContribution(goal, {
+        amount: Number(draft.amount), contributedAt: draft.date, note: draft.note,
+        accountId: goal.kind === 'puntual' ? (draft.accountId || null) : null,
+        linkedTransactionId,
+      })
       setContribForm({ ...contribForm, [goal.id]: emptyContribForm })
       await reload()
     } catch (err) {
@@ -311,8 +331,8 @@ export default function MetasAhorro() {
                       {planVsActualRows.map((r) => (
                         <tr key={r.label}>
                           <td>{r.label}</td>
-                          <td>{formatByCurrency(r.planeado, goalCurrency)}</td>
-                          <td style={{ color: r.aportado != null && r.aportado < r.planeado ? 'var(--status-warning)' : 'inherit' }}>
+                          <td className="amount-cell">{formatByCurrency(r.planeado, goalCurrency)}</td>
+                          <td className="amount-cell" style={{ color: r.aportado != null && r.aportado < r.planeado ? 'var(--status-warning)' : 'inherit' }}>
                             {r.aportado != null ? formatByCurrency(r.aportado, goalCurrency) : '—'}
                           </td>
                         </tr>
@@ -328,12 +348,21 @@ export default function MetasAhorro() {
               </h3>
               <div className="table-scroll" style={{ marginBottom: 'var(--space-1)' }}>
               <table className="simple-table">
-                <thead><tr><th>Fecha</th><th>Monto</th><th>Nota</th><th></th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>Fecha</th><th>Monto</th>
+                    {g.kind === 'puntual' && <th>Cuenta</th>}
+                    <th>Nota</th><th></th>
+                  </tr>
+                </thead>
                 <tbody>
                   {goalContributions.map((c) => (
                     <tr key={c.id}>
                       <td>{c.contributed_at}</td>
-                      <td>{formatCOP(c.amount)}</td>
+                      <td className="amount-cell">{formatCOP(c.amount)}</td>
+                      {g.kind === 'puntual' && (
+                        <td>{c.account_id ? (accounts.find((a) => a.id === c.account_id)?.name ?? '—') : 'Dinero externo'}</td>
+                      )}
                       <td>{c.note ?? '—'}</td>
                       <td>
                         <button onClick={() => handleDeleteContribution(g, c)} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button>
@@ -341,7 +370,7 @@ export default function MetasAhorro() {
                     </tr>
                   ))}
                   {goalContributions.length === 0 && (
-                    <tr><td colSpan={4} style={{ color: 'var(--text-muted)' }}>Sin aportes registrados todavía.</td></tr>
+                    <tr><td colSpan={g.kind === 'puntual' ? 5 : 4} style={{ color: 'var(--text-muted)' }}>Sin aportes registrados todavía.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -350,6 +379,15 @@ export default function MetasAhorro() {
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 <input type="date" value={draft.date} onChange={(e) => setContribForm({ ...contribForm, [g.id]: { ...draft, date: e.target.value } })} style={formInput} />
                 <input type="number" placeholder="Monto" value={draft.amount} onChange={(e) => setContribForm({ ...contribForm, [g.id]: { ...draft, amount: e.target.value } })} style={{ ...formInput, width: 120 }} />
+                {g.kind === 'puntual' && (
+                  <select
+                    value={draft.accountId} onChange={(e) => setContribForm({ ...contribForm, [g.id]: { ...draft, accountId: e.target.value } })}
+                    style={{ ...formInput, flex: '1 1 150px', minWidth: 0 }}
+                  >
+                    <option value="">Dinero externo (no descuenta de ninguna cuenta)</option>
+                    {hijas.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                )}
                 <input placeholder="Nota (opcional)" value={draft.note} onChange={(e) => setContribForm({ ...contribForm, [g.id]: { ...draft, note: e.target.value } })} style={{ ...formInput, flex: '1 1 140px' }} />
                 <button
                   onClick={() => handleAddContribution(g)}

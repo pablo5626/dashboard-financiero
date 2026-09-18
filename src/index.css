@@ -194,3 +194,10 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.02em;
 }
+
+/* Evita que un monto grande (ej. "-$ 100.000") se parta justo en el espacio
+   literal que Intl.NumberFormat inserta entre el signo y la cifra cuando la
+   columna es angosta. */
+.simple-table td.amount-cell {
+  white-space: nowrap;
+}

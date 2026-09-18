@@ -6,6 +6,7 @@ import { listCategories } from '../lib/categoriesApi.js'
 import { createManualTransaction, suggestCategoryForPurpose, listRecentPurposes } from '../lib/transactionsApi.js'
 import { createTransfers } from '../lib/transfersApi.js'
 import { getRates, convertAmount } from '../lib/exchangeRatesApi.js'
+import { flattenAccountPockets } from '../lib/currencyPockets.js'
 import { resizeImageFileToBase64 } from '../lib/imageUtils.js'
 import { formatByCurrency, formatCOP } from '../lib/format.js'
 import { supabase } from '../lib/supabaseClient.js'
@@ -55,8 +56,8 @@ const emptyForm = {
   mode: 'gasto', // 'gasto' | 'ingreso' | 'transferencia'
   amount: '',
   accountId: '',
-  fromAccountId: '',
-  toAccountId: '',
+  fromKey: '', // pocket key ({accountId} o `${accountId}:${currency}`) — ver currencyPockets.js
+  toKey: '',
   toAmount: '',
   categoryId: '',
   tag: '',
@@ -221,10 +222,10 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
   // monto o cuentas de nuevo.
   useEffect(() => {
     if (form.mode !== 'transferencia' || !crossCurrency || !form.amount || toAmountTouchedByUser) return
-    const suggested = convertAmount(Number(form.amount), currencyOf(form.fromAccountId), currencyOf(form.toAccountId), rates)
+    const suggested = convertAmount(Number(form.amount), fromPocket?.currency, toPocket?.currency, rates)
     if (suggested != null) setForm((f) => ({ ...f, toAmount: String(Math.round(suggested * 100) / 100) }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.amount, form.fromAccountId, form.toAccountId, form.mode])
+  }, [form.amount, form.fromKey, form.toKey, form.mode])
 
   function reset(mode) {
     setForm({ ...emptyForm, mode: mode ?? form.mode })
@@ -299,18 +300,29 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
   const hijas = accounts.filter((a) => a.kind === 'hija')
   const madreId = accounts.find((a) => a.kind === 'madre')?.id
   const accountOptions = form.mode === 'ingreso' ? accounts : hijas
-  const toOptions = form.fromAccountId ? accounts.filter((a) => a.id !== form.fromAccountId) : accounts
-  const crossCurrency = !!(form.mode === 'transferencia' && form.fromAccountId && form.toAccountId
-    && currencyOf(form.toAccountId) !== currencyOf(form.fromAccountId))
+
+  // Un "bolsillo" por moneda de cada cuenta — mismo mecanismo que
+  // TransferHistorySection.jsx, para poder elegir como destino de un
+  // traslado específicamente el bolsillo EUR de una cuenta multi-moneda
+  // como arq, no solo su moneda primaria.
+  const pockets = flattenAccountPockets(accounts)
+  function pocketOf(key) {
+    return pockets.find((p) => p.key === key)
+  }
+  const fromPocket = pocketOf(form.fromKey)
+  const toPocket = pocketOf(form.toKey)
+  const toOptions = form.fromKey ? pockets.filter((p) => p.key !== form.fromKey) : pockets
+  const crossCurrency = !!(form.mode === 'transferencia' && fromPocket && toPocket
+    && toPocket.currency !== fromPocket.currency)
   const askConsumesBudget = !!(form.mode === 'transferencia'
-    && form.fromAccountId && form.fromAccountId !== madreId
-    && form.toAccountId && form.toAccountId !== madreId)
+    && fromPocket && fromPocket.accountId !== madreId
+    && toPocket && toPocket.accountId !== madreId)
 
   // La categoría es obligatoria para gasto/ingreso (a diferencia de la
   // cuenta, que puede quedar "pendiente de banco") — decisión explícita del
   // usuario tras ver que MonIA nunca deja guardar sin categoría.
   const canSubmit = form.mode === 'transferencia'
-    ? !!(form.fromAccountId && form.toAccountId && form.amount && (!crossCurrency || form.toAmount))
+    ? !!(fromPocket && toPocket && form.amount && (!crossCurrency || form.toAmount))
     : !!(form.amount && form.categoryId)
 
   // Reordena el catálogo completo de categorías (nunca lo recorta) para que
@@ -345,11 +357,11 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
     try {
       if (form.mode === 'transferencia') {
         await createTransfers([{
-          fromAccountId: form.fromAccountId,
-          toAccountId: form.toAccountId,
+          fromAccountId: fromPocket.accountId,
+          toAccountId: toPocket.accountId,
           amount: Number(form.amount),
-          currency: currencyOf(form.fromAccountId),
-          ...(crossCurrency ? { toAmount: Number(form.toAmount), toCurrency: currencyOf(form.toAccountId) } : {}),
+          currency: fromPocket.currency,
+          ...(crossCurrency ? { toAmount: Number(form.toAmount), toCurrency: toPocket.currency } : {}),
           consumesBudget: askConsumesBudget ? form.consumesBudget : true,
           transferDate: form.date,
           note: form.note.trim() || null,
@@ -424,14 +436,10 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
   }
 
   // Foto de recibo → receipt-parse (misma arquitectura y filosofía que
-  // voice-parse: Claude Haiku 4.5 con visión, nunca escribe en la base,
+  // voice-parse: Gemini 2.5 Flash con visión, nunca escribe en la base,
   // solo devuelve datos para PREFILL — el usuario igual revisa y confirma
-  // antes de "Guardar"). La Edge Function ya existe en el repo pero
-  // deliberadamente no está desplegada todavía (ver CLAUDE.md, "Known
-  // deferred scope") — hasta que se despliegue y se configure
-  // ANTHROPIC_API_KEY en los secrets de Supabase, esto falla con un error
-  // claro ("ANTHROPIC_API_KEY no configurada todavía") en vez de romper la
-  // captura manual normal.
+  // antes de "Guardar"). Ya está desplegada y con GEMINI_API_KEY
+  // configurada (ver CLAUDE.md, "Known deferred scope").
   async function handleReceiptFile(e) {
     const file = e.target.files?.[0]
     e.target.value = '' // permite volver a elegir la misma foto otra vez
@@ -628,7 +636,8 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
       {open && (
         <div className={styles.backdrop} onClick={close}>
           <div
-            className={styles.sheet} role="dialog" aria-modal="true"
+            className={`${styles.sheet} ${(receiptMode || voiceMode) ? styles.sheetFullBleed : ''}`}
+            role="dialog" aria-modal="true"
             aria-labelledby="quick-capture-title" onClick={(e) => e.stopPropagation()}
           >
             <div className={styles.header}>
@@ -848,7 +857,7 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
                     <div className={styles.amountCard}>
                       <div className={styles.amountCardLabel}>
                         <span>Monto</span>
-                        <span className={styles.amountCardCurrency}>{currencyOf(form.fromAccountId) || 'COP'}</span>
+                        <span className={styles.amountCardCurrency}>{fromPocket?.currency || 'COP'}</span>
                       </div>
                       <div className={styles.amountCardRow}>
                         <span className={styles.amountCardSign}>$</span>
@@ -861,32 +870,32 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
                     </div>
                     <div className={styles.chipRow}>
                       <span className={styles.chipLabel}>Desde</span>
-                      {accounts.map((a) => (
+                      {pockets.map((p) => (
                         <button
-                          key={a.id} type="button"
-                          className={form.fromAccountId === a.id ? `${styles.chip} ${styles.chipActive}` : styles.chip}
+                          key={p.key} type="button"
+                          className={form.fromKey === p.key ? `${styles.chip} ${styles.chipActive}` : styles.chip}
                           onClick={() => {
                             setForm({
                               ...form,
-                              fromAccountId: a.id,
-                              toAccountId: form.toAccountId === a.id ? '' : form.toAccountId,
+                              fromKey: p.key,
+                              toKey: form.toKey === p.key ? '' : form.toKey,
                             })
                             setToAmountTouchedByUser(false)
                           }}
                         >
-                          {a.name}
+                          {p.label}
                         </button>
                       ))}
                     </div>
                     <div className={styles.chipRow}>
                       <span className={styles.chipLabel}>Hacia</span>
-                      {toOptions.map((a) => (
+                      {toOptions.map((p) => (
                         <button
-                          key={a.id} type="button" disabled={!form.fromAccountId}
-                          className={form.toAccountId === a.id ? `${styles.chip} ${styles.chipActive}` : styles.chip}
-                          onClick={() => { setForm({ ...form, toAccountId: a.id }); setToAmountTouchedByUser(false) }}
+                          key={p.key} type="button" disabled={!form.fromKey}
+                          className={form.toKey === p.key ? `${styles.chip} ${styles.chipActive}` : styles.chip}
+                          onClick={() => { setForm({ ...form, toKey: p.key }); setToAmountTouchedByUser(false) }}
                         >
-                          {a.name}
+                          {p.label}
                         </button>
                       ))}
                     </div>
@@ -898,7 +907,7 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
                       <div className={styles.amountCard}>
                         <div className={styles.amountCardLabel}>
                           <span>Monto recibido</span>
-                          <span className={styles.amountCardCurrency}>{currencyOf(form.toAccountId)}</span>
+                          <span className={styles.amountCardCurrency}>{toPocket?.currency}</span>
                         </div>
                         <div className={styles.amountCardRow}>
                           <span className={styles.amountCardSign}>$</span>
@@ -913,7 +922,7 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
                     )}
                     {crossCurrency && form.amount && form.toAmount && (
                       <p className={styles.voiceHint}>
-                        {formatByCurrency(Number(form.amount), currencyOf(form.fromAccountId))} → {formatByCurrency(Number(form.toAmount), currencyOf(form.toAccountId))}
+                        {formatByCurrency(Number(form.amount), fromPocket?.currency)} → {formatByCurrency(Number(form.toAmount), toPocket?.currency)}
                         {!toAmountTouchedByUser && ' (sugerido por la tasa guardada, editable)'}
                       </p>
                     )}

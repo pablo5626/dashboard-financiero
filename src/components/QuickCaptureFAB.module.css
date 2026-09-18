@@ -142,6 +142,17 @@
   flex-direction: column;
 }
 
+/* Las pantallas de cámara/voz (receiptMode/voiceMode) son más vacías que el
+   formulario normal — con el fondo var(--surface-raised) de .sheet (un gris
+   más claro que el fondo real de la app, var(--page-plane)) ese gris se nota
+   mucho más ahí que en el formulario, donde el contenido lo tapa casi todo.
+   En mobile (pantalla completa) usan el mismo negro que el resto de la app;
+   en desktop/tablet .sheet vuelve a ser una tarjeta flotante sobre el
+   backdrop, así que ahí se revierte a var(--surface-raised) más abajo. */
+.sheetFullBleed {
+  background: var(--page-plane);
+}
+
 @media (min-width: 768px) {
   .sheet {
     border: 1px solid var(--border-hairline);
@@ -150,6 +161,9 @@
     height: auto;
     max-height: 85dvh;
     box-shadow: 0 -16px 40px -12px color-mix(in srgb, var(--series-1) 16%, transparent);
+  }
+  .sheetFullBleed {
+    background: var(--surface-raised);
   }
 }
 

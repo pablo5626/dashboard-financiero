@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { IconClose, IconMic, IconSearch, IconTag, IconAccounts, IconChevronRight } from './icons.jsx'
 import ConfirmDialog from './ui/ConfirmDialog.jsx'
 import { formatByCurrency } from '../lib/format.js'
@@ -40,6 +41,7 @@ function normalize(text) {
 // "Filtros" — mismo criterio que el tag "#" de QuickCaptureFAB: el campo
 // que se usa siempre queda a la vista, el resto no compite por atención.
 export default function SearchPanel({ open, onClose }) {
+  const navigate = useNavigate()
   const [accounts, setAccounts] = useState([])
   const [categories, setCategories] = useState([])
   const [topTags, setTopTags] = useState([])
@@ -119,6 +121,19 @@ export default function SearchPanel({ open, onClose }) {
     setFilters(emptyFilters)
     setResults(null)
     setShowFilters(false)
+  }
+
+  // Salida hacia el filtro propio de "Movimientos — mes" en Gastos — solo
+  // para los filtros estructurados (categoría/cuenta/tag), que ese filtro
+  // entiende; el texto libre de este cuadro no tiene equivalente ahí, así
+  // que no se manda. GastosDiarios.jsx lee estos mismos params al montar.
+  function handleGoToGastos() {
+    const params = new URLSearchParams()
+    if (filters.categoryId) params.set('categoryId', filters.categoryId)
+    if (filters.accountId) params.set('accountId', filters.accountId)
+    if (filters.tag) params.set('tag', filters.tag)
+    close()
+    navigate(`/gastos?${params.toString()}`)
   }
 
   // Dicta la descripción a buscar — mismo motor (Web Speech API) que
@@ -283,7 +298,12 @@ export default function SearchPanel({ open, onClose }) {
                   ? 'Buscando…'
                   : `${results?.length ?? 0} resultado(s)${results?.length === 200 ? ' — mostrando los 200 más recientes, refina la búsqueda para ver más' : ''}.`}
               </p>
-              <button type="button" onClick={handleClear} className={styles.clearButton}>Limpiar</button>
+              <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                {activeFilterCount > 0 && (
+                  <button type="button" onClick={handleGoToGastos} className={styles.gotoGastosLink}>Ver en Gastos</button>
+                )}
+                <button type="button" onClick={handleClear} className={styles.clearButton}>Limpiar</button>
+              </div>
             </div>
           )}
 

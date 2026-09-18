@@ -156,7 +156,7 @@ export default function Cuentas() {
       ) : (
         <Card className="span-3" style={{ marginBottom: 'var(--space-2)' }}>
           <p style={{ font: 'var(--font-subheadline)', color: 'var(--text-muted)', margin: 0 }}>
-            Todavía no hay una cuenta madre creada en Supabase. Insértala en el SQL Editor (ver `schema.sql`)
+            Todavía no hay una cuenta madre creada. Andá a Ajustes → Cuentas y marcá "Es la cuenta madre" al crearla,
             antes de agregar cuentas hijas.
           </p>
         </Card>

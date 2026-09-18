@@ -164,11 +164,30 @@ export async function deleteUnpaidInstallments(debtId) {
 // cronograma generado) para que pagar cuotas por esta vía nunca desincronice
 // el cronograma — solo editar remaining_amount a mano (fuera de esta
 // función) genera drift, que es la señal que usa la reconciliación.
-export async function toggleInstallmentPaid(installment, debt) {
+//
+// `accountId`/`linkedTransactionId` son opcionales y solo tienen sentido al
+// marcar PAGADA con una cuenta de origen elegida (Deudas.jsx ya creó la
+// transacción real antes de llamar acá, mismo orden que addAbono) — mismas
+// columnas que ya usa addAbono/deleteAbono para 'me_deben', reutilizadas acá
+// para 'debo'. Al DESMARCAR, si la cuota ya tenía una transacción vinculada
+// (installment.linked_transaction_id), se borra acá mismo y se limpian
+// ambas columnas — este handler no depende de que el llamador se acuerde de
+// pasarlas de vuelta.
+export async function toggleInstallmentPaid(installment, debt, { accountId, linkedTransactionId } = {}) {
   const nowPaid = !installment.paid
-  const { error: e1 } = await supabase.from('debt_installments').update({
-    paid: nowPaid, paid_at: nowPaid ? new Date().toISOString() : null,
-  }).eq('id', installment.id)
+  const instFields = { paid: nowPaid, paid_at: nowPaid ? new Date().toISOString() : null }
+  if (nowPaid) {
+    instFields.account_id = accountId || null
+    instFields.linked_transaction_id = linkedTransactionId || null
+  } else {
+    if (installment.linked_transaction_id) {
+      const { error: eTx } = await supabase.from('transactions').delete().eq('id', installment.linked_transaction_id)
+      if (eTx) throw eTx
+    }
+    instFields.account_id = null
+    instFields.linked_transaction_id = null
+  }
+  const { error: e1 } = await supabase.from('debt_installments').update(instFields).eq('id', installment.id)
   if (e1) throw e1
 
   const delta = nowPaid ? -Number(installment.amount) : Number(installment.amount)

@@ -8,7 +8,14 @@
 .content {
   flex: 1;
   min-width: 0;
-  padding: var(--space-2) var(--space-2) calc(var(--space-2) + 64px + env(safe-area-inset-bottom));
+  padding-left: var(--space-2);
+  padding-right: var(--space-2);
+  /* Compensa tanto el tab bar (64px) como el clúster del FAB, que flota
+     encima de él (56px de alto + space-1 de aire) — sin esto, el borde
+     inferior fijo del FAB puede tapar un botón de acción al final de una
+     Card durante el scroll (ver "Agregar cuota"/"Agregar aporte" en
+     Deudas.jsx/MetasAhorro.jsx). */
+  padding-bottom: calc(var(--space-2) + 64px + var(--space-2) + 56px + var(--space-1) + env(safe-area-inset-bottom));
   padding-top: calc(var(--space-2) + env(safe-area-inset-top));
 }
 
@@ -166,7 +173,12 @@
     display: none;
   }
   .content {
-    padding: var(--space-3);
+    padding-left: var(--space-3);
+    padding-right: var(--space-3);
+    padding-top: var(--space-3);
+    /* El FAB en desktop/tablet queda en bottom: var(--space-3), mismo alto
+       (56px) que en móvil. */
+    padding-bottom: calc(var(--space-3) + 56px + var(--space-1));
     max-width: 100%;
   }
 }
@@ -176,6 +188,7 @@
     width: 260px;
   }
   .content {
-    padding: var(--space-3) calc(var(--space-3) * 1.5);
+    padding-left: calc(var(--space-3) * 1.5);
+    padding-right: calc(var(--space-3) * 1.5);
   }
 }

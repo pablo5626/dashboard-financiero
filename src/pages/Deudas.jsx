@@ -78,6 +78,8 @@ export default function Deudas() {
   const [editForm, setEditForm] = useState({})
   const [installmentForm, setInstallmentForm] = useState({}) // debtId -> { dueDate, amount, accountId }
   const [savingAbono, setSavingAbono] = useState(null) // debtId | null
+  const [accountByInstallment, setAccountByInstallment] = useState({}) // installmentId -> accountId ('' = dinero externo), solo cuotas 'debo' aún no pagadas
+  const [togglingInstallmentId, setTogglingInstallmentId] = useState(null)
   const [confirmArchive, setConfirmArchive] = useState(null) // { id, name, direction } | null
   const [confirmRegenerate, setConfirmRegenerate] = useState(null) // { debt, debtInstallments, unpaidCount } | null
   const [confirmComplete, setConfirmComplete] = useState(null) // { debt } | null
@@ -275,21 +277,52 @@ export default function Deudas() {
     }
   }
 
+  // Si se marca pagada y se eligió una cuenta de origen, primero crea la
+  // transacción real (mismo patrón que handleAddAbono) y pasa su id a
+  // toggleInstallmentPaid para poder revertirla si se desmarca — si se
+  // desmarca, toggleInstallmentPaid resuelve sola el revert a partir de
+  // installment.linked_transaction_id, sin que este handler necesite saber
+  // cuál era.
   async function handleToggleInstallment(inst, debt) {
+    setTogglingInstallmentId(inst.id)
     try {
       const nowPaid = !inst.paid
-      const { remainingAmount, scheduleSyncedRemainingAmount } = await toggleInstallmentPaid(inst, debt)
+      let linkedTransactionId = null
+      let accountId = null
+      if (nowPaid) {
+        accountId = accountByInstallment[inst.id] || null
+        if (accountId) {
+          const tx = await createManualTransaction({
+            purpose: `Cuota de ${debt.creditor_name}`,
+            amount: -Number(inst.amount),
+            occurredAt: `${inst.due_date}T12:00:00Z`,
+            categoryId: prestamoCategoryId,
+            accountId,
+            currency: debt.currency,
+          })
+          linkedTransactionId = tx.id
+        }
+      }
+      const { remainingAmount, scheduleSyncedRemainingAmount } = await toggleInstallmentPaid(inst, debt, { accountId, linkedTransactionId })
       // Actualiza estado local en vez de recargar deudas/cuotas/cuentas/saldos
       // completos — marcar una cuota no cambia nada de eso salvo el restante
       // de esta deuda, y un reload() completo se sentía lento en móvil.
       setInstallments((prev) => prev.map((i) => (i.id === inst.id
-        ? { ...i, paid: nowPaid, paid_at: nowPaid ? new Date().toISOString() : null }
+        ? {
+          ...i, paid: nowPaid, paid_at: nowPaid ? new Date().toISOString() : null,
+          account_id: nowPaid ? accountId : null, linked_transaction_id: nowPaid ? linkedTransactionId : null,
+        }
         : i)))
       setDebts((prev) => prev.map((d) => (d.id === debt.id
         ? { ...d, remaining_amount: remainingAmount, schedule_synced_remaining_amount: scheduleSyncedRemainingAmount }
         : d)))
+      if (accountByInstallment[inst.id] !== undefined) {
+        setAccountByInstallment((prev) => { const next = { ...prev }; delete next[inst.id]; return next })
+      }
     } catch (err) {
       setError(err.message)
+    } finally {
+      setTogglingInstallmentId(null)
     }
   }
 
@@ -412,7 +445,7 @@ export default function Deudas() {
                   <tr key={tx.id}>
                     <td>{tx.occurred_at.slice(0, 10)}</td>
                     <td>{tx.purpose}</td>
-                    <td>{formatByCurrency(-Number(tx.amount), tx.currency)}</td>
+                    <td className="amount-cell">{formatByCurrency(-Number(tx.amount), tx.currency)}</td>
                     <td style={{ display: 'flex', gap: 8 }}>
                       <button onClick={() => handlePrefillFromCandidate(tx)} style={{ font: 'var(--font-caption)', color: 'var(--series-1)', fontWeight: 600 }}>Precargar</button>
                       <button onClick={() => handleDismissCandidate(tx.id)} style={{ font: 'var(--font-caption)', color: 'var(--text-muted)' }}>Ignorar</button>
@@ -537,7 +570,7 @@ export default function Deudas() {
                       {debtInstallments.map((i) => (
                         <tr key={i.id}>
                           <td>{i.due_date}</td>
-                          <td>{formatByCurrency(i.amount, d.currency)}</td>
+                          <td className="amount-cell">{formatByCurrency(i.amount, d.currency)}</td>
                           <td>{i.account_id ? (accounts.find((a) => a.id === i.account_id)?.name ?? '—') : 'Pendiente de banco'}</td>
                           <td><button onClick={() => handleDeleteInstallment(i, d)} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button></td>
                         </tr>
@@ -602,22 +635,39 @@ export default function Deudas() {
                   </div>
                   <div className="table-scroll" style={{ marginBottom: 'var(--space-1)' }}>
                   <table className="simple-table">
-                    <thead><tr><th>Vence</th><th>Monto</th><th>Estado</th><th></th></tr></thead>
+                    <thead><tr><th>Vence</th><th>Monto</th><th>Cuenta</th><th>Estado</th><th></th></tr></thead>
                     <tbody>
                       {debtInstallments.map((i) => (
                         <tr key={i.id}>
                           <td>{i.due_date}</td>
-                          <td>{formatByCurrency(i.amount, d.currency)}</td>
+                          <td className="amount-cell">{formatByCurrency(i.amount, d.currency)}</td>
                           <td>
-                            <button onClick={() => handleToggleInstallment(i, d)} style={{ color: i.paid ? 'var(--status-good)' : 'var(--status-warning)', fontWeight: 600 }}>
-                              {i.paid ? 'Pagada' : 'Pendiente'}
+                            {i.paid ? (
+                              i.account_id ? (accounts.find((a) => a.id === i.account_id)?.name ?? '—') : 'Dinero externo'
+                            ) : (
+                              <select
+                                value={accountByInstallment[i.id] ?? ''}
+                                onChange={(e) => setAccountByInstallment({ ...accountByInstallment, [i.id]: e.target.value })}
+                                style={{ ...formInput, width: 150, minHeight: 32 }}
+                              >
+                                <option value="">Dinero externo</option>
+                                {accounts.filter((a) => a.kind === 'hija').map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                              </select>
+                            )}
+                          </td>
+                          <td>
+                            <button
+                              onClick={() => handleToggleInstallment(i, d)} disabled={togglingInstallmentId === i.id}
+                              style={{ color: i.paid ? 'var(--status-good)' : 'var(--status-warning)', fontWeight: 600 }}
+                            >
+                              {togglingInstallmentId === i.id ? '…' : i.paid ? 'Pagada' : 'Pendiente'}
                             </button>
                           </td>
                           <td><button onClick={() => handleDeleteInstallment(i, d)} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button></td>
                         </tr>
                       ))}
                       {debtInstallments.length === 0 && (
-                        <tr><td colSpan={4} style={{ color: 'var(--text-muted)' }}>Sin cuotas registradas todavía.</td></tr>
+                        <tr><td colSpan={5} style={{ color: 'var(--text-muted)' }}>Sin cuotas registradas todavía.</td></tr>
                       )}
                     </tbody>
                   </table>

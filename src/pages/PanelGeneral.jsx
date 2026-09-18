@@ -6,9 +6,11 @@ import {
 } from 'recharts'
 import Card from '../components/ui/Card.jsx'
 import StatTile from '../components/ui/StatTile.jsx'
+import MonthYearPicker from '../components/ui/MonthYearPicker.jsx'
 import { formatCOP, formatCompact, formatByCurrency } from '../lib/format.js'
 import { listAccounts, fetchBalancesForMonth, totalBalanceInCOP } from '../lib/accountsApi.js'
 import { lastNMonths, fetchMonthlyTrend, fetchTotalDebt, fetchAlerts, findFirstDataMonth } from '../lib/panelApi.js'
+import { listUpcomingFixedExpenses, setPaidStatus } from '../lib/fixedExpensesApi.js'
 import { getRates, toCOP } from '../lib/exchangeRatesApi.js'
 
 const STATUS_DOT = {
@@ -22,9 +24,10 @@ const ACCOUNT_COLORS = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)',
 const MONTH_LABELS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
 
 const now = new Date()
-const YEAR = now.getFullYear()
-const MONTH = now.getMonth() + 1
+const REAL_YEAR = now.getFullYear()
+const REAL_MONTH = now.getMonth() + 1
 const TREND_MONTHS = 6
+const FIXED_EXPENSE_DUE_SOON_DAYS = 5 // mismo umbral que panelApi.fetchAlerts
 
 function alertText(a) {
   switch (a.kind) {
@@ -58,6 +61,8 @@ function alertText(a) {
 }
 
 export default function PanelGeneral() {
+  const [year, setYear] = useState(REAL_YEAR)
+  const [month, setMonth] = useState(REAL_MONTH)
   const [accounts, setAccounts] = useState(null)
   const [balances, setBalances] = useState({})
   const [rates, setRates] = useState([])
@@ -67,6 +72,8 @@ export default function PanelGeneral() {
   const [yoyCurrent, setYoyCurrent] = useState(null)
   const [yoyPrevious, setYoyPrevious] = useState(null)
   const [yoyStartMonth, setYoyStartMonth] = useState(1)
+  const [upcomingFixedExpenses, setUpcomingFixedExpenses] = useState([])
+  const [markingPaidId, setMarkingPaidId] = useState(null)
   const [error, setError] = useState(null)
 
   useEffect(() => {
@@ -81,24 +88,29 @@ export default function PanelGeneral() {
         // idéntico a un mes real sin movimientos y confunde.
         const firstData = await findFirstDataMonth()
         const firstDataKey = firstData ? firstData.year * 12 + firstData.month : null
-        const startMonth = firstData && firstData.year === YEAR ? firstData.month : 1
+        const startMonth = firstData && firstData.year === year ? firstData.month : 1
         setYoyStartMonth(startMonth)
 
-        const currentYearMonths = Array.from({ length: MONTH - startMonth + 1 }, (_, i) => ({ year: YEAR, month: startMonth + i }))
-        const previousYearMonths = currentYearMonths.map((m) => ({ year: YEAR - 1, month: m.month }))
-        let trendMonths = lastNMonths(YEAR, MONTH, TREND_MONTHS)
+        const currentYearMonths = Array.from({ length: month - startMonth + 1 }, (_, i) => ({ year, month: startMonth + i }))
+        const previousYearMonths = currentYearMonths.map((m) => ({ year: year - 1, month: m.month }))
+        let trendMonths = lastNMonths(year, month, TREND_MONTHS)
         if (firstDataKey != null) {
           trendMonths = trendMonths.filter((m) => m.year * 12 + m.month >= firstDataKey)
         }
 
-        const [{ balances: b }, currentRates, trendRows, debt, alertRows, yoyCurrentRows, yoyPreviousRows] = await Promise.all([
-          fetchBalancesForMonth(accs, YEAR, MONTH),
+        // Alertas y "Próximos pagos" siempre miran "hoy real" (REAL_YEAR/
+        // REAL_MONTH), sin importar qué mes esté navegando el resto del
+        // Panel con el selector — "qué necesita mi atención ahora" no
+        // depende de qué período estás mirando en los gráficos.
+        const [{ balances: b }, currentRates, trendRows, debt, alertRows, yoyCurrentRows, yoyPreviousRows, upcomingFixed] = await Promise.all([
+          fetchBalancesForMonth(accs, year, month),
           getRates(),
           fetchMonthlyTrend(ids, trendMonths),
           fetchTotalDebt(),
           fetchAlerts(),
           fetchMonthlyTrend(ids, currentYearMonths),
           fetchMonthlyTrend(ids, previousYearMonths),
+          listUpcomingFixedExpenses(REAL_YEAR, REAL_MONTH, FIXED_EXPENSE_DUE_SOON_DAYS),
         ])
         setBalances(b)
         setRates(currentRates)
@@ -107,12 +119,25 @@ export default function PanelGeneral() {
         setAlerts(alertRows)
         setYoyCurrent(yoyCurrentRows)
         setYoyPrevious(yoyPreviousRows)
+        setUpcomingFixedExpenses(upcomingFixed)
       } catch (err) {
         setError(err.message)
       }
     }
     load()
-  }, [])
+  }, [year, month])
+
+  async function handleMarkFixedExpensePaid(id) {
+    setMarkingPaidId(id)
+    try {
+      await setPaidStatus(id, REAL_YEAR, REAL_MONTH, true)
+      setUpcomingFixedExpenses((prev) => prev.filter((f) => f.id !== id))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setMarkingPaidId(null)
+    }
+  }
 
   if (error) {
     return <p style={{ color: 'var(--status-critical)' }}>Error cargando panel general: {error}</p>
@@ -141,7 +166,7 @@ export default function PanelGeneral() {
   const prevMonth = trend[trend.length - 2]
   const gastoDelta = prevMonth ? lastMonth.gastos - prevMonth.gastos : 0
 
-  const yoyChartData = MONTH_LABELS.slice(yoyStartMonth - 1, MONTH).map((label, i) => ({
+  const yoyChartData = MONTH_LABELS.slice(yoyStartMonth - 1, month).map((label, i) => ({
     month: label,
     gastosActual: yoyCurrent?.[i]?.gastos ?? 0,
     gastosAnterior: yoyPrevious?.[i]?.gastos ?? 0,
@@ -157,7 +182,10 @@ export default function PanelGeneral() {
 
   return (
     <div>
-      <h1 className="page-title">Panel general</h1>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-1)', alignItems: 'center', justifyContent: 'space-between' }}>
+        <h1 className="page-title">Panel general</h1>
+        <MonthYearPicker year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m) }} />
+      </div>
 
       <div className="kpi-row" style={{ marginBottom: 'var(--space-2)' }}>
         <Card><StatTile label="Balance total" value={formatCOP(balanceTotal)} /></Card>
@@ -187,6 +215,35 @@ export default function PanelGeneral() {
                   ) : (
                     alertText(a)
                   )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        <Card title="Próximos pagos">
+          {upcomingFixedExpenses.length === 0 ? (
+            <p style={{ font: 'var(--font-subheadline)', color: 'var(--text-muted)', margin: 0 }}>Sin gastos fijos por vencer.</p>
+          ) : (
+            <ul style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)', margin: 0, padding: 0, listStyle: 'none' }}>
+              {upcomingFixedExpenses.map((f) => (
+                <li key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 8, font: 'var(--font-subheadline)' }}>
+                  <span style={{
+                    width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                    background: f.daysUntil < 0 ? 'var(--status-critical)' : 'var(--status-warning)',
+                  }} />
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    {f.name} — {formatByCurrency(f.amount, f.currency)}{' '}
+                    <span style={{ color: 'var(--text-muted)' }}>
+                      ({f.daysUntil < 0 ? `venció hace ${-f.daysUntil} día(s)` : `vence en ${f.daysUntil} día(s)`})
+                    </span>
+                  </span>
+                  <button
+                    type="button" onClick={() => handleMarkFixedExpensePaid(f.id)} disabled={markingPaidId === f.id}
+                    style={{ font: 'var(--font-caption)', color: 'var(--series-1)', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}
+                  >
+                    {markingPaidId === f.id ? '…' : 'Marcar pagado'}
+                  </button>
                 </li>
               ))}
             </ul>
@@ -236,18 +293,18 @@ export default function PanelGeneral() {
           </ResponsiveContainer>
         </Card>
 
-        <Card title={`Comparativa año a año (${MONTH_LABELS[yoyStartMonth - 1]}–${MONTH_LABELS[MONTH - 1]})`} className="span-3">
+        <Card title={`Comparativa año a año (${MONTH_LABELS[yoyStartMonth - 1]}–${MONTH_LABELS[month - 1]})`} className="span-3">
           <div className="kpi-row" style={{ marginBottom: 'var(--space-2)' }}>
             <StatTile
-              label={`Ingresos ${YEAR}`}
+              label={`Ingresos ${year}`}
               value={formatCOP(ytdIngresosActual)}
-              delta={ingresosDeltaPct != null ? `${ingresosDeltaPct > 0 ? '+' : ''}${ingresosDeltaPct}% vs ${YEAR - 1}` : undefined}
+              delta={ingresosDeltaPct != null ? `${ingresosDeltaPct > 0 ? '+' : ''}${ingresosDeltaPct}% vs ${year - 1}` : undefined}
               deltaGood={ingresosDeltaPct >= 0}
             />
             <StatTile
-              label={`Gastos ${YEAR}`}
+              label={`Gastos ${year}`}
               value={formatCOP(ytdGastosActual)}
-              delta={gastosDeltaPct != null ? `${gastosDeltaPct > 0 ? '+' : ''}${gastosDeltaPct}% vs ${YEAR - 1}` : undefined}
+              delta={gastosDeltaPct != null ? `${gastosDeltaPct > 0 ? '+' : ''}${gastosDeltaPct}% vs ${year - 1}` : undefined}
               deltaGood={gastosDeltaPct <= 0}
             />
           </div>
@@ -258,10 +315,10 @@ export default function PanelGeneral() {
               <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 12 }} axisLine={false} tickLine={false} width={70} tickFormatter={formatCompact} />
               <Tooltip formatter={(v) => formatCOP(v)} contentStyle={{ background: 'var(--surface-raised)', border: '1px solid var(--border-hairline)', borderRadius: 8 }} labelStyle={{ color: 'var(--text-primary)' }} itemStyle={{ color: 'var(--text-primary)' }} cursor={{ fill: 'var(--gridline)' }} />
               <Legend />
-              <Line type="monotone" dataKey="ingresosActual" stroke="var(--series-1)" strokeWidth={2} name={`Ingresos ${YEAR}`} dot={false} />
-              <Line type="monotone" dataKey="ingresosAnterior" stroke="var(--series-1)" strokeWidth={2} strokeDasharray="5 4" name={`Ingresos ${YEAR - 1}`} dot={false} />
-              <Line type="monotone" dataKey="gastosActual" stroke="var(--series-2)" strokeWidth={2} name={`Gastos ${YEAR}`} dot={false} />
-              <Line type="monotone" dataKey="gastosAnterior" stroke="var(--series-2)" strokeWidth={2} strokeDasharray="5 4" name={`Gastos ${YEAR - 1}`} dot={false} />
+              <Line type="monotone" dataKey="ingresosActual" stroke="var(--series-1)" strokeWidth={2} name={`Ingresos ${year}`} dot={false} />
+              <Line type="monotone" dataKey="ingresosAnterior" stroke="var(--series-1)" strokeWidth={2} strokeDasharray="5 4" name={`Ingresos ${year - 1}`} dot={false} />
+              <Line type="monotone" dataKey="gastosActual" stroke="var(--series-2)" strokeWidth={2} name={`Gastos ${year}`} dot={false} />
+              <Line type="monotone" dataKey="gastosAnterior" stroke="var(--series-2)" strokeWidth={2} strokeDasharray="5 4" name={`Gastos ${year - 1}`} dot={false} />
             </LineChart>
           </ResponsiveContainer>
         </Card>
