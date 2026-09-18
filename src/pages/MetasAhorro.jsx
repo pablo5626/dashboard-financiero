@@ -98,7 +98,7 @@ export default function MetasAhorro() {
 
       const trends = {}
       for (const g of rows.filter((r) => r.kind === 'proposito' && r.account_id)) {
-        trends[g.id] = await fetchMonthlyTrend([g.account_id], lastNMonths(YEAR, MONTH, TREND_MONTHS), { convertToCOP: false })
+        trends[g.id] = await fetchMonthlyTrend(accs.filter((a) => a.id === g.account_id), lastNMonths(YEAR, MONTH, TREND_MONTHS), { convertToCOP: false })
       }
       setPropositoTrends(trends)
     } catch (err) {

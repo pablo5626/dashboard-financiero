@@ -95,7 +95,15 @@ are `kind = 'hija'` even though they sit out the monthly madre→hijas ritual.
 4. **Closing check, in Panel** — read the alerts, and confirm each hija's
    "% usado" reconciles against its balance (`disponible − usado = saldo`, see
    Money math). That identity failing is the fastest signal something was
-   entered wrong.
+   entered wrong. **Known gap**: the "Gasto real vs. presupuesto por cuenta"
+   card that used to show this per-hija `%usado` in `GastosDiarios.jsx` was
+   removed (replaced by "Presupuesto por categoría", see that page's entry
+   under "Current state of the 6 sections") and was deliberately **not**
+   relocated to `Cuentas.jsx` — the user asked to just remove it, not move
+   it. As of this writing there is no UI surface left showing the per-hija
+   `%usado` number this closing-check step refers to; `Cuentas.jsx` still
+   shows `saldo`/`asignado` per hija, so the identity can be checked by hand
+   from those two numbers, but not read directly off a single `%` anywhere.
 
 **What to do in each situation, and which MonIA tag it needs:**
 
@@ -150,7 +158,9 @@ below), `transactionsApi.js` (CSV parsing + the bank-assignment engine),
 `transfersApi.js` (account_transfers CRUD + `sumOutgoingByAccount`, the rule
 for what counts as budget used), `debtsApi.js`, `savingsApi.js`,
 `panelApi.js` (cross-page aggregates: monthly trend, alerts),
-`exchangeRatesApi.js` (manual exchange rates, one row per currency pair).
+`exchangeRatesApi.js` (manual exchange rates, one row per currency pair),
+`userSettingsApi.js` (the single `user_settings` row — today just the
+category-budget alert toggle/threshold, see "A `'presupuestos'` section...").
 Pages call these directly from `useEffect`/`useState` — there is no global
 store or data-fetching library; keep that pattern rather than introducing
 one. The common per-page shape is a `reload()` async function called once
@@ -202,9 +212,15 @@ that renders `formatCOP`/`formatByCurrency` across the app now — keep doing
 so for any new money cell.
 
 **Money math**: an account's current balance is never stored directly — it's
-computed as `monthly_initial_balance + net account_transfers + sum of that
-month's transactions.amount` (see `fetchBalancesForMonth` in
-`accountsApi.js`). `account_allocations` is the separate "how much was
+computed as an **anchor + accumulation**: the most recent `monthly_initial_balances`
+row at or before the queried month (or 0 as of `accounts.created_at` if that
+bolsillo never had one) plus every `account_transfers`/`transactions` row from
+that anchor month through the queried month's end (see `resolveAnchorsFromRows`
+in `src/lib/balanceAnchors.js`, shared by `fetchBalancesForMonth` in
+`accountsApi.js` and `fetchMonthlyTrend` in `panelApi.js`). This replaced an
+earlier "one row required per account per month" model — see "Ajuste de saldo
+(opcional)" under `Cuentas.jsx` below for why a monthly re-entry stopped being
+mandatory. `account_allocations` is the separate "how much was
 budgeted this month" figure, not the balance. `parent_account_id` on
 `accounts` is purely a structural/UI grouping (e.g. for the Sankey view) —
 it says nothing about where an account's money actually comes from; that's
@@ -514,10 +530,15 @@ number instead of admitting nothing real is known yet.
 "Alertas" card): surfaces fixed expenses and debt installments due within
 5 days (or overdue), savings goals within 30 days of their target date (or
 past it), pending "sin cuenta asignada" transactions, categories that
-exceeded their `monthly_budget` (`categories.monthly_budget`, a flat
-monthly cap edited from the "Categorías" card in
-`GastosDiarios.jsx` — not month-by-month, just one number that applies
-every month until changed), `'divisa_pendiente'` for foreign-currency
+reached their `monthly_budget` (`categories.monthly_budget`, a flat
+monthly cap edited from Ajustes → Categorías — not month-by-month, just one
+number that applies every month until changed). That alert is configurable
+since Ajustes → Presupuestos existed (see "A `'presupuestos'` section..."
+below): it fires from `budget_alert_threshold_pct` (default 100, so the old
+"only when exceeded" behavior is the default) and can be switched off with
+`budget_alerts_enabled`, both read from `user_settings`; it is `'warning'`
+between the threshold and 100% and `'critical'` at/over 100%.
+`'divisa_pendiente'` for foreign-currency
 purchases still carrying an estimated amount (`currency_pending`), and a
 `'anomalia_categoria'` alert when a
 category's spend this month exceeds 1.5× its trailing-6-month average
@@ -863,11 +884,38 @@ above.
 
 **`TransferHistorySection.jsx`'s own inline add-transfer form was removed**
 once the FAB above covered the exact same ground (including the pocket
-picker) — the component now only renders the transfer-history table, the
-per-row `consumes_budget` checkbox, and delete; `pockets`/`flattenAccountPockets`
+picker) — the component now only renders the transfer-history list, the
+per-row `consumes_budget` toggle, and delete; `pockets`/`flattenAccountPockets`
 were dropped from this file entirely since nothing here needs them anymore.
 The "+" FAB's traslado mode is the only surface left for registering a new
 transfer (see two paragraphs above).
+
+**The table became a row-list, on the user's own observation that it felt
+inconsistent with the rest of the app** — a Plan subagent audited this
+session's other design changes (tap-to-edit rows, the 4-tier budget
+progress-bar scale, `<details>` for optional sections, placeholder =
+calculated value, one-line "where this is used" captions) and confirmed the
+6-column `<table className="simple-table">` (Fecha/Origen/Destino/Monto/
+Nota+checkbox/Eliminar) was the one surface left forcing horizontal scroll
+on mobile even with `.table-scroll`, and that its "Nota + checkbox +
+label" cell was the densest, least explained control in the section. Of the
+patterns above, only two genuinely applied here (the subagent explicitly
+argued against forcing the rest — no tap-to-edit, since a transfer still has
+no edit UI beyond this one flag; no progress bar, since this is a binary
+flag, not a %; no `<details>` collapse, since this list is read routinely as
+part of the monthly closing check, unlike "Ajuste de saldo"): the one-line
+"where it's used" caption, and unifying the row shape with `Diario.jsx`/
+`GastosDiarios.jsx`'s Movimientos lists. `TransferHistorySection.module.css`
+is new (this component previously had zero CSS module, all inline styles) —
+each row (`.transferRow`) shows "Origen → Destino" + a compact date on top,
+amount + a binary badge (`.transferBadge`/`.transferBadgeActive`, tokens
+only, not the 4-tier `budgetToneColor` scale since there's no % here) on the
+right, and a circular "×" delete at the end, matching `.txDelete`'s look
+elsewhere. The explanatory line above the list ("'Descuenta presupuesto'
+cuenta la plata movida como gasto...") only renders once, not per row, and
+only when at least one transfer in the list actually has the toggle (both
+ends ≠ madre). `handleToggleConsumesBudget`/`doDelete`/`updateConsumesBudget`
+are unchanged — only the JSX/CSS around them changed.
 
 **Category picking and account picking both converged on shared components**
 (also used the same way by `Diario.jsx`, so behavior stays consistent
@@ -958,6 +1006,75 @@ Rationale: every category created from now on should render with a real icon
 in `CategoryEmojiGrid.jsx`'s horizontally scrollable strip, not the
 letter-hash fallback — existing categories created before this rule keep
 using that fallback until someone manually edits them to add one.
+
+**Categorías: budget can now be set at creation, is visible without
+opening a row, and tapping a row edits it — no more separate "Editar"
+button.** This followed directly from adding "Presupuesto por categoría" to
+`GastosDiarios.jsx` (see that page's entry below): once a category's
+`monthly_budget` actually did something visible and useful, the gaps in how
+it was entered became worth fixing. `categoriesApi.createCategory` gained an
+`initialBalance`-style optional `monthlyBudget` param (same
+insert-time-only pattern as an account's initial balance), and the "+ Nueva
+categoría" form in `SettingsPanel.jsx` grew the same "Presupuesto mensual
+(opcional)" number input the edit form already had — previously the only
+way to set a budget was create the category first, then separately tap
+"Editar" to add one. Both the create and edit forms also gained a one-line
+caption under that input naming where the number is actually used ("Se
+compara contra el gasto real del mes en 'Presupuesto por categoría' (Gastos)
+y en los chips de Diario, y avisa en Panel si te pasás") — the feature
+existed before but was invisible/undiscoverable at the point of entry. The
+collapsed row now shows the configured budget inline (`formatByCurrency(c.monthly_budget,
+'COP')` + "/mes", next to the name, only when one is set) instead of hiding
+it until "Editar" is tapped. The standalone "Editar" button was removed
+entirely — tapping anywhere on a non-editing row now calls `startEdit(c.id)`
+directly (`.rowClickable` in `SettingsPanel.module.css`, just a `cursor:
+pointer`), same "select it and it's already editable" pattern the
+Movimientos lists in `Diario.jsx`/`GastosDiarios.jsx` use; "Archivar" stays
+a separate button and calls `e.stopPropagation()` so tapping it doesn't also
+open edit mode.
+
+**Editing (and creating) a category got a deeper visual overhaul, from a
+Stitch mockup the user dropped in `other recursos/`** (`editar_categor_a_ocio.html`
++ `editar categoria.jpg` for the edit card; `idea de categorias.jpg` for the
+collapsed row) — same "structure/UX only, not the literal look" rule as
+every other Stitch reference in this app: the mockup's pure-black background,
+purple gradients and Tailwind utility colors were **not** copied, only the
+layout ideas, rebuilt with this app's own tokens (light/dark aware).
+
+- **Collapsed row is bigger**, on the user's explicit request after sharing
+  the reference: `.categoryGlyph` (44×44px, `border-radius: 13px` —
+  a rounded-square "squircle" instead of the old 28px circle) + a two-line
+  text stack (`.categoryRowText` → `.categoryRowName` bold on top,
+  `.categoryRowSubtitle` showing "$X/mes" below, only when a budget is set).
+  These are category-only classes, not a resize of the shared `.rowGlyph`/
+  `.rowName` — the mockup's row also showed a live "$ gastado hoy" figure,
+  which was deliberately **not** copied: this drawer has no month/page
+  context to compute that (see "it deliberately does not show a 'gastado
+  este mes' figure" below, an existing constraint that still holds).
+- **The edit form (and, for consistency, the create form) became a real
+  card** (`.categoryEditCard` — a category-only modifier of the shared
+  `.editForm`, so debts/goals/accounts editing elsewhere in this drawer are
+  untouched) with a bigger live avatar preview (`.categoryEditAvatar`,
+  56×56px rounded square reflecting `emoji`/`color` as they're picked) next
+  to the name field, uppercase section labels (`.categoryLabel`, e.g.
+  "NOMBRE DE LA CATEGORÍA", "PRESUPUESTO MENSUAL (OPCIONAL)") above each
+  field group (`.categoryFieldGroup`) instead of bare placeholders, quick
+  budget-preset buttons (`.categoryBudgetPresets`, +$50.000/+$100.000/
+  +$200.000, additive — tapping twice stacks — plus a "Limpiar" that resets
+  to blank) next to the manual amount input, and the explanatory caption
+  restyled as a tinted `.categoryInfoCard` box (`color-mix` with
+  `--series-1`, tokens only) instead of a plain muted paragraph.
+- **"Ambigua" became an iOS-style switch** (`.switchTrack`/`.switchTrackBg`/
+  `.switchThumb` wrapping a real (visually hidden but still functional)
+  checkbox `<input>` — no new dependency, pure CSS with a `:checked ~`
+  sibling selector) instead of a bare native checkbox, with a real
+  description line explaining what it actually does (`.categoryHelperText`:
+  "Dejala marcada si puede pagarse desde distintas cuentas. Desmarcala solo
+  si sabés que siempre sale de la misma [...]" — this field previously had
+  **zero explanation** anywhere in the UI, unlike the mockup's own
+  description text which was fictional and got rewritten to match this
+  app's actual `is_ambiguous`/bank-assignment-engine semantics, see
+  `.claude/rules/motor-asignacion.md`).
 
 **Global settings drawer (`SettingsPanel.jsx`)**: category management (the
 old "Categorías" card described above, previously on `GastosDiarios.jsx`)
@@ -1120,6 +1237,45 @@ fills the manual rate input (`rateInputs`), the user still has to review and
 tap "Guardar" — nothing is written to `exchange_rates` directly from the
 fetch.
 
+**A `'presupuestos'` section (in `SETTINGS_SECTIONS`, right after
+`'categorias'`) makes the category-budget alert configurable, from a Stitch
+mockup the user dropped in `other recursos/`** (a "Presupuestos" screen with
+an "Alertas de presupuesto" toggle, an "Umbral de alerta" slider at 80%, and
+a list of categories with "Sin presupuesto establecido" / their budget +
+chevron) — same "structure/UX only" rule as always. Unlike most of the
+Ajustes visual reworks, **this one is functional and needed a schema
+change**: a new `user_settings` table (`schema.sql`, one row per user —
+`user_id` is its own primary key — with `budget_alerts_enabled boolean
+default true` and `budget_alert_threshold_pct integer default 100`, RLS
+added to the same generic `do $$ ... $$` policy loop as every other table),
+read/written through the new `src/lib/userSettingsApi.js`
+(`getUserSettings` returns the defaults when no row exists yet, so a user who
+never opens this section sees exactly the old behavior; `saveUserSettings`
+upserts on `user_id`, relying on the column's `default auth.uid()` like every
+other `*Api.js` insert here). `panelApi.fetchAlerts` now reads those settings
+(one more entry in its existing `Promise.all`) instead of the hardcoded
+`spent <= budget` check: the `presupuesto_categoria` alert fires once
+`spent >= budget × threshold/100`, is skipped entirely when
+`budgetAlertsEnabled` is false (`anomalia_categoria` is a different
+mechanism and is unaffected), and now has two levels — `'warning'` between
+the threshold and 100%, `'critical'` at/over 100% (it used to be always
+`'critical'`, which would read as alarmist at 80%). `PanelGeneral.jsx`'s
+`alertText` branches on `a.amount >= a.budget` to say "superó su presupuesto"
+vs. "ya lleva X de Y (N% del presupuesto)". In the section itself
+(`SettingsPanel.jsx`), the toggle persists immediately, but the `<input
+type="range">` (min 50, max 100, step 5, colored with `accent-color:
+var(--series-1)` — no custom slider CSS) only updates local state while
+dragging and persists on `onMouseUp`/`onTouchEnd`, so dragging doesn't write
+once per tick. Below that, a list of every category (reusing the `categories`
+state `SettingsPanel` already loads on open — no new fetch) shows its
+`monthly_budget` or "Sin presupuesto establecido"; tapping a row calls
+`setSection('categorias'); startEdit(c.id)` to jump straight into that
+category's edit card rather than duplicating a second edit form here.
+`IconBudget` (a bell) is new in `icons.jsx`. **Live-DB step required**: the
+`user_settings` table has to be created once in the Supabase SQL Editor (see
+`esquema-datos.md`) — until then `getUserSettings()` errors on the missing
+table, which `fetchAlerts` propagates.
+
 **A `'tags'` section (in `SETTINGS_SECTIONS`, between `'categorias'` and
 `'cuentas'`) manages the new `tags` catalog table** — added because the user
 asked for a tags-creation surface in Settings, reusing the same reserved-word
@@ -1153,6 +1309,17 @@ button is for tidying the suggestion list, not for un-tagging history. Needs
 `IconHash` (new in `icons.jsx`) rather than reusing `IconTag` — "Categorías"
 already has that glyph, and two adjacent menu rows with the same icon would
 read as a mistake.
+
+**The tag list became a wrapping cloud of pills, from a Stitch mockup the
+user dropped in `other recursos/`** (a full-screen "Etiquetas" list) — same
+"structure only" rule as always (the mockup's pure-dark background wasn't
+copied). `.tagCloud` (`display: flex; flex-wrap: wrap`) replaces the old
+one-row-per-tag `.list`/`.row` layout; each `.tagPill` is `#name` with no
+visible delete affordance — tapping the pill itself opens the same
+`ConfirmDialog` `handleCreateTag`'s sibling delete flow already used, rather
+than a separate "Eliminar" link per row. The create input's placeholder
+became `"#Nueva etiqueta"` (was `"Nombre (ej. mercado)"`), matching the
+mockup's own input copy.
 
 **Global search popup (`SearchPanel.jsx`)**: mounted once in `AppShell.jsx`
 next to `SettingsPanel`/`QuickCaptureFAB`, controlled from there via a
@@ -1386,15 +1553,84 @@ Supabase, no sample data left anywhere:
   `categories.monthly_budget` already existed and was already editable from
   Ajustes → Categorías; only the visualization was missing before.
 
+  **Chips widened on the user's own request, to show ~4-5 at a time on a
+  phone instead of a denser row** — `.categoryChip` went from `padding: 8px
+  10px`/no minimum width to `padding: 12px 16px`/`min-width: 76px`, the
+  emoji circle from 32px to 38px, and the amount text from `--font-caption`
+  to the next size up (`--font-footnote`). Purely a sizing change, same
+  horizontal-scroll/hidden-scrollbar mechanics as before.
+
   **"Movimientos — {período}" groups by date when `period !== 'hoy'`**
   (`groupTransactionsByDate`, a `Map` keyed by `occurred_at.slice(0,10)`,
   newest day first) — a small header row per day (`.txDateHeader`, e.g.
   "lun, 11 sept") between groups; for `period === 'hoy'` the list renders
   flat with no header, since grouping a single day is a no-op UX-wise. Same
-  `renderTxRow` function (unchanged from before: inline "✎" edit via
-  `transactionsApi.updateTransaction`, "×" delete, both still patch local
-  state instead of `reload()`ing) is shared by both render paths. The edit
-  still keeps the transaction's original sign and date, same as before.
+  `renderTxRow` function (edit via `transactionsApi.updateTransaction`, "×"
+  delete, both still patch local state instead of `reload()`ing) is shared
+  by both render paths. The edit still keeps the transaction's original sign
+  and date, same as before. **The inline "✎" edit button was later removed**
+  — tapping anywhere on a non-editing `.txRow` now calls `startEdit(t)`
+  directly (`.txRowClickable`, just `cursor: pointer`), same "select it and
+  it's already editable" pattern `GastosDiarios.jsx`'s Movimientos list
+  already used (there it's scoped to `.txInfo`, not the whole row — a minor,
+  harmless inconsistency between the two, not worth reconciling on its own).
+  "×" delete calls `e.stopPropagation()` so it doesn't also trigger edit.
+
+  **A real width-overflow bug surfaced once the edit row could contain a
+  `CategoryEmojiGrid`**: `.page` (this page's own top-level container,
+  `display: grid`, not the shared `.grid-auto`) never got the equivalent of
+  `.grid-auto > *`/`.kpi-row > *`'s `min-width: 0` rule from `index.css` —
+  harmless while every child's content was already narrower than the
+  viewport, but `CategoryEmojiGrid`'s horizontally-scrollable chip row
+  reports its *max-content* width (the sum of every chip) regardless of its
+  own `overflow-x: auto`, so opening a transaction's edit form (which embeds
+  that grid) inflated the grid track — and the whole page — wider than the
+  screen instead of the chip row scrolling on its own. Fixed the same way as
+  everywhere else this bug class has hit: `.page > * { min-width: 0; }` in
+  `Diario.module.css`.
+
+  **The edit form itself was later given a card look**, on the user's own
+  request for it to be "prettier" — `.txEditRow` went from a flat column
+  with just a `border-bottom` (the same as any other list row) to a raised
+  card (`background: var(--surface-raised)`, `border-radius: 14px`, real
+  padding instead of sitting flush with the list), with a small header row
+  (`.txEditHeader`) showing the transaction's category glyph next to an
+  uppercase "EDITANDO MOVIMIENTO" caption (`.txEditLabel`) — so the card look
+  itself isn't the only signal you're now editing. Same card-for-editing
+  idea as Ajustes → Categorías (see below), not shared code between the two
+  since they're different pages/components, but the same visual language.
+
+  **The edit form got a deeper rework later, from two Stitch mockups the
+  user dropped in `other recursos/`** (`editar_movimiento.jpeg` +
+  `editar_movimiento_comida.html`) — same "structure/UX only" rule as every
+  other reference in this app (the mockup's dark-only Tailwind palette,
+  glow shadows and a fictional "ID: #MOV-8631" were not copied):
+  - A **Gasto/Ingreso type badge** (`.txEditTypeBadge`, tokens only —
+    `--status-critical`/`--status-good` tints, not the mockup's literal
+    rose/emerald hexes) next to the "EDITANDO MOVIMIENTO" label.
+  - **Categoría collapsed behind "Cambiar"**: `categoryPickerOpen` (state,
+    resets to `false` on every `startEdit`) gates whether `CategoryEmojiGrid`
+    renders at all, or a compact current-value row (`.txEditCurrentValue` —
+    small glyph + name, tappable, same effect as tapping "Cambiar")
+    shows instead. Before this, the full category grid was always expanded
+    inside the edit card even when the user only wanted to fix the monto or
+    a tag.
+  - **Amount got quick-add presets** (`.txEditPresets`, +5.000/+10.000,
+    additive like the category-budget presets in Ajustes) next to the monto
+    input.
+  - **Tags became real multi-select pills** (`editDraft.tags`, an array —
+    was `editDraft.tag`, a single string) via `handleDraftAddTag`/
+    `handleDraftRemoveTag`, copied from `GastosDiarios.jsx`'s own tag pill
+    editor (see that page's entry above) — this closes the gap that section
+    used to call out explicitly ("this page's multi-tag pill editor is the
+    one to copy if `Diario.jsx` ever needs the same fix"): editing a
+    CSV-imported row with several tags (`#efectivo #cerveza`) no longer
+    silently drops every tag but the first on save.
+  - **Field order now matches the mockup**: Categoría → Monto → Cuenta →
+    Etiquetas → Nota o detalle (was Descripción → Monto → Cuenta →
+    Categoría → Tag) — each field wrapped in `.txEditField` with an
+    uppercase `.txEditFieldLabel` above it, same "label above control"
+    idiom Ajustes → Categorías uses.
 
   **Live refresh via a window event, not a prop, is unchanged**: since this
   page's own entry form is gone, the *only* way to add a movement while
@@ -1451,11 +1687,12 @@ Supabase, no sample data left anywhere:
   account (like `arq`) can hold several real currency balances at once — see
   "Multi-currency accounts are a real single row now" above for the full
   mechanics; no standalone "Tasa de cambio" card anymore, each account's
-  rate row now renders inline in its own card), a monthly
-  initial-balances editor covering every active account
-  (`MonthlyInitialBalancesSection.jsx` — manual entry or via the iPhone
-  Shortcut described in `prompt-dashboard-financiero.md`'s "Fase 2"; both
-  write to `monthly_initial_balances` with `source: 'manual'|'shortcut'`),
+  rate row now renders inline in its own card), an optional saldo-adjustment
+  section covering every active account (`MonthlyInitialBalancesSection.jsx`
+  — manual entry or via the iPhone Shortcut described in
+  `prompt-dashboard-financiero.md`'s "Fase 2"; both write to
+  `monthly_initial_balances` with `source: 'manual'|'shortcut'`; see "Ajuste
+  de saldo (opcional)" below for why this stopped being a monthly chore),
   monthly allocation editor with previous-month templating
   (`MonthlyAllocationSection.jsx`), which also has a "Confirmar
   transferencia real" button that turns that month's planned amounts into
@@ -1494,6 +1731,13 @@ Supabase, no sample data left anywhere:
   section, 'tasas'" above); this page only reads `exchange_rates` for the
   "faltan tasas configuradas" warning banner and for computing balances.
 
+  **Section order on this page, top to bottom**: cuenta madre + hijas cards,
+  `MonthlyAllocationSection` (Distribución mensual), `FixedExpensesSection`
+  (Gastos fijos), `TransferHistorySection` (Historial de transferencias),
+  `MonthlyInitialBalancesSection` (Ajuste de saldo (opcional), now last) —
+  swapped with Gastos fijos on the user's own request, no other reasoning
+  than reprioritizing what's seen first on the page.
+
   **`MonthlyInitialBalancesSection.jsx`: a multi-currency account is one
   table row, not one per pocket.** It used to list every pocket as its own
   always-visible row (e.g. "Arq" and "Arq (EUR)" as two separate lines),
@@ -1508,6 +1752,33 @@ Supabase, no sample data left anywhere:
   still iterates the flat, ungrouped pocket list). Single-currency accounts
   render exactly as before (plain row, no dropdown, since there's nothing to
   pick).
+
+  **"Ajuste de saldo (opcional)" — this section stopped being a monthly
+  chore, on the user's own observation that it felt like a duplicate of
+  "Distribución mensual".** The two are conceptually different (one is *how
+  much you plan to hand each hija*, the other is *what the bank actually
+  says a bolsillo has*), but before this change "Saldos iniciales" had no
+  fallback at all — an empty field every month, unlike the allocation
+  section's previous-month template — so it felt like the same re-typing
+  chore twice. The fix wasn't UI-only: `fetchBalancesForMonth`/
+  `fetchMonthlyTrend` now resolve an **anchor + accumulation** (see "Money
+  math" above and `src/lib/balanceAnchors.js`) instead of requiring a fresh
+  `monthly_initial_balances` row every month, so a bolsillo's balance now
+  carries forward on its own. This section (renamed from "Saldos iniciales")
+  is now wrapped in a collapsed `<details>` ("¿El saldo real de tu banco no
+  coincide? Ajustalo acá"), open by default only when a bolsillo already has
+  a row for the current month, and each row shows the already-computed
+  balance next to the input (as both a caption and the input's placeholder)
+  instead of a bare "0" — so using it at all is now explicitly an opt-in
+  reconciliation against a real bank discrepancy, not a required monthly
+  step. `Cuentas.jsx` passes it the same `balances` it already computes for
+  the account cards. The saldo inicial "real" for a normal (non-multi-currency)
+  account is now seeded once, at account-creation time — `createAccount`
+  gained an `initialBalance` parameter mirroring the one multi-currency
+  pockets already had, and Ajustes → Cuentas' alta form gained a matching
+  "Saldo inicial (opcional)" field for that path — so "load it once, when
+  you create the account" is true for every account, not only multi-currency
+  ones.
 - **`GastosDiarios.jsx`**: this page shrank a lot mid-session — both its
   category CRUD (moved to `SettingsPanel.jsx`) and its manual entry form and
   search card (see below) are gone, leaving it focused on the MonIA
@@ -1523,8 +1794,8 @@ Supabase, no sample data left anywhere:
   bar charts, a "candidatos a gasto fijo" detector that flags a description
   repeated in ≥3 of the last 6 months and offers to add it as a recurring
   fixed expense, "Movimientos — mes" (a day-grouped list, not a table — see
-  below), "Gasto real vs. presupuesto por cuenta" (cards with a progress
-  bar — see below), and — **moved to the very end of the page** (it used to
+  below), "Presupuesto por categoría" (cards with a progress bar — see
+  below), and — **moved to the very end of the page** (it used to
   be the first card) — "Importar CSV de MonIA" (dedup via `monia_id`, the
   bank-assignment engine above, using the same `MonthYearPicker` component
   `PanelGeneral.jsx` uses — extracted from what used to be this card's own
@@ -1588,12 +1859,15 @@ Supabase, no sample data left anywhere:
   `var(--surface-raised)`) so editing feels like the same UI piece as
   adding a movement, instead of an inline expanding row. Tags inside that
   modal are their own editable pills (`editDraft.tags`, add/remove, always
-  starting with `#`) rather than a single free-text field — deliberately
-  **not** copied from `Diario.jsx`'s own edit form, which only supports one
-  tag at a time (`tags: [editDraft.tag.trim()]`) and would silently drop
-  every other tag on a row that already had several (common in
-  CSV-imported data, e.g. `#efectivo #cerveza`) — this page's multi-tag
-  pill editor is the one to copy if `Diario.jsx` ever needs the same fix.
+  starting with `#`) rather than a single free-text field. **`Diario.jsx`'s
+  edit form copied this exact pill editor later** (see its own entry below)
+  — the two pages' `.txTagsEditor`/`.txTagEditable`/`.txTagRemove`/
+  `.txTagAddInput` classes are duplicated 1:1 across
+  `GastosDiarios.module.css`/`Diario.module.css` (same values, no shared
+  import) rather than extracted into one place, consistent with this app's
+  existing tolerance for small CSS duplication over a premature shared
+  component (see `budgetToneColor`, duplicated the same way for the same
+  reason).
   The categoría/cuenta/tag filter row above the list is collapsed behind a
   `.filterToggle` button (`IconFilter`, badge shows the active-filter
   count) instead of always visible, same "don't show what isn't being
@@ -1607,25 +1881,40 @@ Supabase, no sample data left anywhere:
   seeing the unfiltered month. Delete is unchanged
   (`transactionsApi.deleteTransaction`, a "×" per row).
 
-  **"Gasto real vs. presupuesto por cuenta" is a card grid with a progress
-  bar per cuenta hija, not a table**, and was moved to **after**
-  "Movimientos" (it used to come right after the two spend charts, before
-  Movimientos) — the user asked for this reorder because Movimientos is
-  checked far more often. Each card (`.budgetCard`, `styles` in
-  `GastosDiarios.module.css`) shows the account/pocket name, a `%` (or "sin
-  presupuesto" when nothing's allocated and no income landed there),
-  a colored progress bar (`budgetToneColor(pct)` — <70% good, 70–99%
-  warning, 100–119% serious, ≥120% critical, same scale as
-  `Diario.jsx`'s own `budgetToneColor` for its category-budget chips, kept
-  in sync deliberately since both answer "how close to a budget is this"),
-  and the same underlying figures the old table's columns showed (Gastado,
-  Movido a otras cuentas, Asignado, Ingresos) as caption rows below the
-  bar instead of table columns — the money-math formula behind the bar
-  (`pct = (gastado + movido) / (asignado + ingresos)`) is unchanged from
-  the old table, only the presentation changed. A Plan subagent proposed
-  three options for this redesign (polish the table with 4-tier colors,
-  this card+bar approach, or a table with an inline mini-bar as a middle
-  ground); the user picked the card+bar option.
+  **"Presupuesto por categoría" replaced the old "Gasto real vs. presupuesto
+  por cuenta" card (a card grid with a progress bar per cuenta hija/pocket)**
+  — the user flagged that it was, in effect, showing the same number twice:
+  its denominator's first term was `account_allocations.allocated_amount`,
+  the exact figure `MonthlyAllocationSection.jsx` ("Distribución mensual" in
+  `Cuentas.jsx`) already writes and displays — so opening Cuentas showed
+  "Nequi: asignado $500.000" and opening Gastos showed a card that also
+  printed "Asignado: $500.000" verbatim, just alongside more numbers (spent,
+  moved, income). They weren't literally redundant (one was the *plan*, the
+  other the *plan-vs-actuals*), but sharing that one anchor number was
+  enough to feel duplicative. A subagent investigation confirmed
+  `categories.monthly_budget` (edited in Ajustes → Categorías) already had
+  three real, working uses — Diario.jsx's category chip borders + its
+  "presupuesto restante" hero caption, and Panel General's
+  `presupuesto_categoria`/`anomalia_categoria` alerts — but **no single
+  consolidated view** listing every budgeted category with its month-to-date
+  spend in one place; `GastosDiarios.jsx` in particular never read
+  `monthly_budget` at all before this. The new card fills exactly that gap:
+  `categoryBudgetData` filters `categories` to those with `monthly_budget`
+  set (a category without one is excluded entirely, never shown as a $0
+  budget — same principle as everywhere else in the app), reuses the
+  already-computed `spentByCategory` (COP-converted, `isIgnoredRow`-filtered,
+  the same map that feeds the spend-by-category chart above it) as the
+  numerator, and sorts by `%` descending so the most over-budget category
+  surfaces first. Same visual shell as the card it replaced (`.budgetGrid`/
+  `.budgetCard`/`.budgetBarTrack` etc. in `GastosDiarios.module.css`, kept
+  as-is) and the same `budgetToneColor` 4-tier scale (<70% good, 70–99%
+  warning, 100–119% serious, ≥120% critical) `Diario.jsx`'s chips already
+  use. **The account-level "% usado" view was not relocated anywhere** — the
+  user explicitly asked to just remove it from Gastos, not move it to
+  Cuentas.jsx; `allocations`/`transferredOut`/`spentByAccount`/
+  `incomeByAccount`/`pendingByAccount` and their fetches
+  (`getAllocationsForMonth`, `getTransfersForMonth`/`sumOutgoingByAccount`)
+  were deleted from this file since nothing else here used them.
 
   **The manual expense form is gone** (`createManualTransaction` is no
   longer imported/called from this file at all) — same reasoning as

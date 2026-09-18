@@ -1,6 +1,9 @@
 import { supabase } from './supabaseClient.js'
 import { countPendingTransactions, countPendingCurrencyTransactions, isIgnoredRow } from './transactionsApi.js'
 import { getRates, toCOP } from './exchangeRatesApi.js'
+import { buildPocketIndex, resolvePocketKey } from './currencyPockets.js'
+import { fetchAllInitialBalanceRows, resolveAnchorsFromRows, earliestAnchorMonth, monthStartStr } from './balanceAnchors.js'
+import { getUserSettings } from './userSettingsApi.js'
 
 // Devuelve los últimos n meses (incluyendo year/month) ordenados de más
 // antiguo a más reciente, como [{ year, month }, ...].
@@ -16,76 +19,124 @@ export function lastNMonths(year, month, n) {
   return months
 }
 
-// Para cada mes del rango: saldo total (misma fórmula que fetchBalancesForMonth,
-// sumada entre accountIds), ingresos y gastos del mes. Ingresos/gastos se
-// calculan sobre TODAS las transacciones del usuario en ese rango de fechas
-// (estén o no asignadas a una cuenta todavía) porque reflejan flujo de dinero
-// real, no el estado de asignación del motor de cuentas.
+// Para cada mes del rango: saldo total acumulado (misma resolución de ancla
+// que fetchBalancesForMonth — ver balanceAnchors.js: la fila explícita más
+// reciente <= el mes, o 0 en accounts.created_at, más todo lo ocurrido desde
+// ahí), sumado entre los bolsillos de `accounts`; ingresos y gastos del mes.
+// Ingresos/gastos se calculan sobre TODAS las transacciones del usuario en
+// ese rango de fechas (estén o no asignadas a una cuenta todavía) porque
+// reflejan flujo de dinero real, no el estado de asignación del motor de
+// cuentas — el saldo, en cambio, solo acumula transacciones/transferencias
+// cuya cuenta Y moneda coinciden con un bolsillo real de `accounts` (mismo
+// criterio que fetchBalancesForMonth).
+//
+// `months` debe venir contigua y ascendente (así la arman los 3 llamadores:
+// lastNMonths, o un rango de meses de un mismo año) — la función camina mes
+// a mes desde el ancla más vieja detectada hasta el último mes pedido,
+// acumulando en `running`, y solo devuelve las filas de `months`: los meses
+// "puente" entre el ancla y el primer mes pedido se calculan pero no se
+// exponen (si no se hiciera esto, un ancla anterior al rango visible dejaría
+// el arrastre incompleto para el primer mes mostrado).
 //
 // convertToCOP (default true) convierte cada monto no-COP a COP con la tasa
 // vigente antes de sumarlo, para que balanceTotal/ingresos/gastos sean un
 // solo número consolidado — usado por Panel General. Pasar `false` cuando
 // el llamador quiere el trend en la moneda nativa de la cuenta (ej. una
 // meta de ahorro ligada a una cuenta en USD no debe convertirse a COP).
-export async function fetchMonthlyTrend(accountIds, months, { convertToCOP = true } = {}) {
+export async function fetchMonthlyTrend(accounts, months, { convertToCOP = true } = {}) {
   if (months.length === 0) return []
+
+  const accountIds = accounts.map((a) => a.id)
+  const pocketIndex = buildPocketIndex(accounts)
+  const keyFor = (id, currency) => resolvePocketKey(pocketIndex, id, currency)
 
   const first = months[0]
   const last = months[months.length - 1]
-  const rangeStart = `${first.year}-${String(first.month).padStart(2, '0')}-01`
   const afterLast = last.month === 12 ? { year: last.year + 1, month: 1 } : { year: last.year, month: last.month + 1 }
-  const rangeEnd = `${afterLast.year}-${String(afterLast.month).padStart(2, '0')}-01`
+  const rangeEnd = monthStartStr(afterLast.year, afterLast.month)
 
-  const [{ data: initialBalances, error: e1 }, { data: transfers, error: e2 }, { data: transactions, error: e3 }, rates] =
+  const allBalanceRows = await fetchAllInitialBalanceRows(accountIds)
+  const anchors = resolveAnchorsFromRows(allBalanceRows, accounts, first.year, first.month)
+  // Sin ningún bolsillo (accounts vacío) no hay ancla que resolver — cae al
+  // propio primer mes pedido, para no romper con accounts=[].
+  const earliest = earliestAnchorMonth(anchors) ?? { year: first.year, month: first.month }
+  const rangeStart = monthStartStr(earliest.year, earliest.month)
+
+  const [{ data: transfers, error: e2 }, { data: transactions, error: e3 }, rates] =
     await Promise.all([
-      supabase.from('monthly_initial_balances').select('account_id, year, month, initial_balance, currency')
-        .gte('year', first.year).lte('year', last.year).in('account_id', accountIds),
-      supabase.from('account_transfers').select('from_account_id, to_account_id, amount, transfer_date, currency')
+      supabase.from('account_transfers').select('from_account_id, to_account_id, amount, transfer_date, currency, to_amount, to_currency')
         .gte('transfer_date', rangeStart).lt('transfer_date', rangeEnd),
       supabase.from('transactions').select('account_id, amount, occurred_at, currency, tags')
         .gte('occurred_at', rangeStart).lt('occurred_at', rangeEnd),
       convertToCOP ? getRates() : Promise.resolve([]),
     ])
-  if (e1) throw e1
   if (e2) throw e2
   if (e3) throw e3
 
-  const accountIdSet = new Set(accountIds)
   const convert = (amount, currency) => (convertToCOP ? toCOP(amount, currency, rates) : amount)
 
-  return months.map(({ year, month }) => {
-    const monthStart = new Date(Date.UTC(year, month - 1, 1))
-    const nextStart = new Date(Date.UTC(month === 12 ? year + 1 : year, month === 12 ? 0 : month, 1))
+  // Bucketeado por mes una sola vez (en vez de recorrer todas las filas en
+  // cada iteración del mes) — el rango puede abarcar bastantes meses más que
+  // los pedidos si el ancla más vieja queda lejos.
+  const txByMonth = {}
+  for (const row of transactions) (txByMonth[row.occurred_at.slice(0, 7)] ??= []).push(row)
+  const trByMonth = {}
+  for (const row of transfers) (trByMonth[row.transfer_date.slice(0, 7)] ??= []).push(row)
+  const explicitByPocketMonth = {}
+  for (const row of allBalanceRows) {
+    const key = keyFor(row.account_id, row.currency)
+    if (key) explicitByPocketMonth[`${key}|${row.year}-${String(row.month).padStart(2, '0')}`] = Number(row.initial_balance)
+  }
 
-    let balanceTotal = 0
-    for (const row of initialBalances) {
-      if (row.year === year && row.month === month) balanceTotal += convert(Number(row.initial_balance), row.currency)
-    }
-    for (const row of transfers) {
-      const d = new Date(row.transfer_date)
-      if (d < monthStart || d >= nextStart) continue
-      const amount = convert(Number(row.amount), row.currency)
-      if (accountIdSet.has(row.to_account_id)) balanceTotal += amount
-      if (accountIdSet.has(row.from_account_id)) balanceTotal -= amount
+  const running = Object.fromEntries(Object.entries(anchors).map(([k, a]) => [k, a.balance]))
+  const wantedMonths = new Set(months.map((m) => `${m.year}-${String(m.month).padStart(2, '0')}`))
+  const result = []
+
+  let y = earliest.year
+  let m = earliest.month
+  while (y * 12 + m <= last.year * 12 + last.month) {
+    const monthKey = `${y}-${String(m).padStart(2, '0')}`
+
+    // Un ajuste explícito cargado este mes resetea el arrastre acumulado —
+    // mismo comportamiento que ya tenía cualquier fila explícita.
+    for (const key of Object.keys(running)) {
+      const explicit = explicitByPocketMonth[`${key}|${monthKey}`]
+      if (explicit !== undefined) running[key] = explicit
     }
 
     let ingresos = 0
     let gastos = 0
-    for (const row of transactions) {
-      const d = new Date(row.occurred_at)
-      if (d < monthStart || d >= nextStart) continue
-      const amount = convert(Number(row.amount), row.currency)
-      if (accountIdSet.has(row.account_id)) balanceTotal += amount
+    for (const row of txByMonth[monthKey] ?? []) {
+      const key = keyFor(row.account_id, row.currency)
+      if (key && key in running) running[key] += Number(row.amount)
       // Filas cuyo movimiento real ya está registrado en otro lado (traslado
       // entre cuentas propias, o compra ya cargada a mano): contarlas acá sería
       // contar el mismo movimiento dos veces.
       if (isIgnoredRow(row.tags)) continue
+      const amount = convert(Number(row.amount), row.currency)
       if (amount > 0) ingresos += amount
       else gastos += -amount
     }
+    for (const row of trByMonth[monthKey] ?? []) {
+      const toKey = row.to_account_id ? keyFor(row.to_account_id, row.to_currency ?? row.currency) : null
+      if (toKey && toKey in running) running[toKey] += Number(row.to_amount ?? row.amount)
+      const fromKey = row.from_account_id ? keyFor(row.from_account_id, row.currency) : null
+      if (fromKey && fromKey in running) running[fromKey] -= Number(row.amount)
+    }
 
-    return { year, month, balanceTotal, ingresos, gastos, ahorro: ingresos - gastos }
-  })
+    if (wantedMonths.has(monthKey)) {
+      const balanceTotal = Object.entries(running).reduce((sum, [key, bal]) => {
+        const currency = key.includes(':') ? key.split(':')[1] : (accounts.find((a) => a.id === key)?.currency || 'COP')
+        return sum + convert(bal, currency)
+      }, 0)
+      result.push({ year: y, month: m, balanceTotal, ingresos, gastos, ahorro: ingresos - gastos })
+    }
+
+    m += 1
+    if (m === 13) { m = 1; y += 1 }
+  }
+
+  return result
 }
 
 // Primer mes con algún registro financiero real (saldo inicial, transacción
@@ -162,7 +213,7 @@ export async function fetchAlerts() {
   const [
     { data: fixedExpenses, error: e1 }, { data: debtInstallments, error: e2 }, { data: savingsGoals, error: e3 },
     pendingCount, { data: allCategories, error: e5 }, { data: expenseRows, error: e6 },
-    pendingCurrencyCount,
+    pendingCurrencyCount, budgetSettings,
   ] = await Promise.all([
     supabase.from('fixed_expenses').select('id, name, amount, due_day, currency').eq('is_active', true),
     supabase.from('debt_installments').select('id, due_date, amount, debts(creditor_name, is_active, direction, currency)').eq('paid', false).lte('due_date', dueSoonCutoff),
@@ -171,6 +222,7 @@ export async function fetchAlerts() {
     supabase.from('categories').select('id, name, monthly_budget').eq('is_active', true),
     supabase.from('transactions').select('category_id, amount, occurred_at, tags').gte('occurred_at', historyStart).lt('occurred_at', nextMonthStart).lt('amount', 0),
     countPendingCurrencyTransactions(),
+    getUserSettings(),
   ])
   if (e1) throw e1
   if (e2) throw e2
@@ -278,20 +330,30 @@ export async function fetchAlerts() {
     })
   }
 
-  for (const c of allCategories) {
-    if (c.monthly_budget == null) continue
-    const spent = spentByCategory[c.id] ?? 0
-    const budget = Number(c.monthly_budget)
-    if (spent <= budget) continue
-    alerts.push({
-      id: `budget-${c.id}`,
-      kind: 'presupuesto_categoria',
-      level: 'critical',
-      name: c.name,
-      amount: spent,
-      budget,
-      href: '/gastos',
-    })
+  // El umbral es configurable desde Ajustes → Presupuestos
+  // (userSettingsApi.getUserSettings, default 100% si el usuario nunca lo
+  // tocó — mismo comportamiento que esta alerta tenía antes de que el
+  // ajuste existiera). Por debajo del 100% ya no significa "te pasaste":
+  // 'critical' se reserva para spent >= budget, 'warning' para el rango
+  // umbral..100%.
+  if (budgetSettings.budgetAlertsEnabled) {
+    const thresholdRatio = budgetSettings.budgetAlertThresholdPct / 100
+    for (const c of allCategories) {
+      if (c.monthly_budget == null) continue
+      const spent = spentByCategory[c.id] ?? 0
+      const budget = Number(c.monthly_budget)
+      if (spent < budget * thresholdRatio) continue
+      alerts.push({
+        id: `budget-${c.id}`,
+        kind: 'presupuesto_categoria',
+        level: spent >= budget ? 'critical' : 'warning',
+        name: c.name,
+        amount: spent,
+        budget,
+        thresholdPct: budgetSettings.budgetAlertThresholdPct,
+        href: '/gastos',
+      })
+    }
   }
 
   for (const c of allCategories) {

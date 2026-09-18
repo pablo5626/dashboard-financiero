@@ -16,14 +16,13 @@ export async function buildMoneyContext() {
   const month = now.getMonth() + 1
 
   const accounts = await listAccounts()
-  const accountIds = accounts.map((a) => a.id)
   const months = lastNMonths(year, month, TREND_MONTHS_BACK)
 
   const [{ balances, allocated }, monthTransactions, alerts, trend, totalDebt] = await Promise.all([
     fetchBalancesForMonth(accounts, year, month),
     listTransactionsForMonth(year, month),
     fetchAlerts(),
-    fetchMonthlyTrend(accountIds, months, { convertToCOP: true }),
+    fetchMonthlyTrend(accounts, months, { convertToCOP: true }),
     fetchTotalDebt(),
   ])
 

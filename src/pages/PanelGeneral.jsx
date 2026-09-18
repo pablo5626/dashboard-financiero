@@ -53,7 +53,9 @@ function alertText(a) {
         ? '1 compra en divisa con monto estimado — confírmalo en Gastos diarios'
         : `${a.count} compras en divisa con monto estimado — confírmalos en Gastos diarios`
     case 'presupuesto_categoria':
-      return `"${a.name}" superó su presupuesto — ${formatCOP(a.amount)} de ${formatCOP(a.budget)}`
+      return a.amount >= a.budget
+        ? `"${a.name}" superó su presupuesto — ${formatCOP(a.amount)} de ${formatCOP(a.budget)}`
+        : `"${a.name}" ya lleva ${formatCOP(a.amount)} de ${formatCOP(a.budget)} (${a.thresholdPct}% del presupuesto)`
     case 'anomalia_categoria':
       return `"${a.name}" se disparó este mes — ${formatCOP(a.amount)} vs. promedio histórico de ${formatCOP(a.average)} (últimos ${a.monthsBack} meses)`
     default:
@@ -82,7 +84,6 @@ export default function PanelGeneral() {
       try {
         const accs = await listAccounts()
         setAccounts(accs)
-        const ids = accs.map((a) => a.id)
 
         // No graficar meses anteriores al primer registro real (saldo inicial,
         // transacción o transferencia) como si fueran "0 gastado" — eso se ve
@@ -106,11 +107,11 @@ export default function PanelGeneral() {
         const [{ balances: b }, currentRates, trendRows, debt, alertRows, yoyCurrentRows, yoyPreviousRows, upcomingFixed] = await Promise.all([
           fetchBalancesForMonth(accs, year, month),
           getRates(),
-          fetchMonthlyTrend(ids, trendMonths),
+          fetchMonthlyTrend(accs, trendMonths),
           fetchTotalDebt(),
           fetchAlerts(),
-          fetchMonthlyTrend(ids, currentYearMonths),
-          fetchMonthlyTrend(ids, previousYearMonths),
+          fetchMonthlyTrend(accs, currentYearMonths),
+          fetchMonthlyTrend(accs, previousYearMonths),
           listUpcomingFixedExpenses(REAL_YEAR, REAL_MONTH, FIXED_EXPENSE_DUE_SOON_DAYS),
         ])
         setBalances(b)
@@ -183,8 +184,14 @@ export default function PanelGeneral() {
 
   return (
     <div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-1)', alignItems: 'center', justifyContent: 'space-between' }}>
-        <h1 className="page-title">Panel general</h1>
+      {/* A diferencia de las demás páginas (h1.page-title como hijo directo,
+          con su propio margin-bottom), acá el título comparte fila con el
+          selector de mes/año — el margin-bottom de page-title no se traduce
+          de forma confiable en espacio real dentro de un flex row, así que
+          el margen inferior se pone explícito en el contenedor para no
+          terminar tocando el kpi-row de abajo. */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-1)', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-3)' }}>
+        <h1 className="page-title" style={{ margin: 0 }}>Panel general</h1>
         <MonthYearPicker year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m) }} />
       </div>
 

@@ -47,10 +47,32 @@ directamente en el panel de Supabase sin reflejarlo en el archivo.
   fondear una compra que se ejecuta desde la otra cuenta o puro reacomodo de
   bolsillos. Lo que sigue sin cambiar: una transferencia **nunca** es un gasto
   en las vistas consolidadas (Panel general).
-- **`monthly_initial_balances`** es la tabla pensada para recibir el POST del
-  futuro Shortcut de iOS (Fase 2) vía la API REST auto-generada de Supabase —
-  mantenerla simple (una fila por cuenta hija por mes) porque ese es su
-  contrato de entrada.
+- **`monthly_initial_balances`** ya no representa una carga mensual
+  obligatoria por cuenta — una fila es un **ancla puntual**: el saldo real de
+  ese bolsillo al arranque de ese mes exacto, cargada a mano (o vía el
+  Shortcut de iOS de Fase 2, `source: 'shortcut'`) solo cuando el banco real
+  difiere de lo calculado. La lectura (`fetchBalancesForMonth` en
+  `accountsApi.js`, `fetchMonthlyTrend` en `panelApi.js`, ambas vía
+  `resolveAnchorsFromRows` en `src/lib/balanceAnchors.js`) resuelve, por
+  bolsillo, la fila explícita más reciente con `(year, month) <= mes
+  consultado` y acumula transacciones/transferencias desde ahí; sin ninguna
+  fila, el ancla es 0 en el mes de `accounts.created_at`. Sigue siendo la
+  tabla que recibe la siembra inicial al crear una cuenta
+  (`accountsApi.createAccount`, tanto para el bolsillo primario como para
+  cada moneda extra de una cuenta multi-moneda) — lo que cambió es que ya no
+  hace falta una fila nueva cada mes para que el saldo se calcule bien.
+- **`user_settings`** guarda ajustes globales del usuario (no de una cuenta ni
+  una categoría en particular) — **una sola fila por usuario**, y `user_id` es
+  su propia primary key (no tiene `id` aparte, a diferencia del resto de las
+  tablas). Hoy solo tiene `budget_alerts_enabled` (default `true`) y
+  `budget_alert_threshold_pct` (default `100`), que controlan la alerta de
+  presupuesto por categoría de `panelApi.fetchAlerts` (Ajustes →
+  Presupuestos). Sin fila todavía, `userSettingsApi.getUserSettings()`
+  devuelve esos mismos defaults, así que el comportamiento anterior (alerta
+  solo al pasarse del 100%) se conserva hasta que el usuario toque algo. Se
+  escribe con `upsert` sobre `user_id`, apoyándose en el
+  `default auth.uid()` de la columna igual que cualquier otro insert de la
+  app. Está en el mismo bucle de RLS de `schema.sql` que el resto.
 - **`category_account_stats`** guarda aprendizaje incremental por categoría
   **y por tag** (columna `tag` nullable): una fila agrega por categoría sola,
   otra fila específica por categoría+tag, para que el orden de sugerencias

@@ -300,11 +300,11 @@ export default function Cuentas() {
 
         <MonthlyAllocationSection hijas={hijasCop} madre={madre} year={YEAR} month={MONTH} onSaved={reload} />
 
-        <MonthlyInitialBalancesSection accounts={accounts} year={YEAR} month={MONTH} onSaved={reload} />
+        <FixedExpensesSection accounts={accounts ?? []} />
 
         <TransferHistorySection accounts={accounts} year={YEAR} month={MONTH} onSaved={reload} />
 
-        <FixedExpensesSection accounts={accounts ?? []} />
+        <MonthlyInitialBalancesSection accounts={accounts} year={YEAR} month={MONTH} balances={balances} onSaved={reload} />
       </div>
 
       <ConfirmDialog

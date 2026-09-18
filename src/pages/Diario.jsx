@@ -61,8 +61,14 @@ export default function Diario() {
   const [deleteTarget, setDeleteTarget] = useState(null) // transacción | null
 
   const [editingId, setEditingId] = useState('')
-  const [editDraft, setEditDraft] = useState(null) // { purpose, amount, categoryId, accountId, tag }
+  const [editDraft, setEditDraft] = useState(null) // { purpose, amount, categoryId, accountId, tags }
   const [savingEdit, setSavingEdit] = useState(false)
+  const [newTagDraft, setNewTagDraft] = useState('')
+  // Colapsada por default: mostrar la categoría elegida en una fila
+  // compacta y solo desplegar la grilla completa al tocar "Cambiar" — antes
+  // la grilla entera quedaba siempre abierta ocupando toda la tarjeta de
+  // edición, aunque lo único que se quisiera tocar fuera el monto o un tag.
+  const [categoryPickerOpen, setCategoryPickerOpen] = useState(false)
 
   const loadAll = useCallback(() => {
     let fetchTransactions
@@ -115,13 +121,36 @@ export default function Diario() {
       amount: String(Math.abs(Number(t.amount))),
       categoryId: t.category_id || '',
       accountId: t.account_id || '',
-      tag: t.tags?.[0] || '',
+      tags: t.tags ?? [],
     })
+    setNewTagDraft('')
+    setCategoryPickerOpen(false)
   }
 
   function cancelEdit() {
     setEditingId('')
     setEditDraft(null)
+    setNewTagDraft('')
+  }
+
+  // Mismo editor de tags-como-píldoras que GastosDiarios.jsx (editDraft.tags
+  // como array) — reemplaza el único input de texto que tenía esta página
+  // antes, que silenciosamente perdía cualquier tag adicional que un
+  // movimiento ya trajera (común en filas importadas del CSV, ej.
+  // "#efectivo #cerveza").
+  function handleDraftAddTag() {
+    const tag = newTagDraft.trim()
+    setNewTagDraft('')
+    if (!tag) return
+    setEditDraft((prev) => ({ ...prev, tags: [...new Set([...prev.tags, tag])] }))
+  }
+
+  function handleDraftRemoveTag(tag) {
+    setEditDraft((prev) => ({ ...prev, tags: prev.tags.filter((x) => x !== tag) }))
+  }
+
+  function addAmountPreset(delta) {
+    setEditDraft((prev) => ({ ...prev, amount: String((Number(prev.amount) || 0) + delta) }))
   }
 
   async function handleSaveEdit(original) {
@@ -137,7 +166,7 @@ export default function Diario() {
         categoryId: editDraft.categoryId || null,
         accountId: editDraft.accountId || null,
         currency: newCurrency,
-        tags: editDraft.tag.trim() ? [editDraft.tag.trim()] : [],
+        tags: editDraft.tags,
       })
       setPeriodTransactions((prev) => prev.map((t) => (t.id === original.id ? updated : t)))
       cancelEdit()
@@ -219,32 +248,107 @@ export default function Diario() {
     const isGasto = Number(t.amount) < 0
 
     if (editingId === t.id) {
+      const draftCategory = categories.find((c) => c.id === editDraft.categoryId)
       return (
         <div key={t.id} className={styles.txEditRow}>
-          <input
-            value={editDraft.purpose} onChange={(e) => setEditDraft({ ...editDraft, purpose: e.target.value })}
-            className={styles.txEditInput} placeholder="Descripción"
-          />
-          <input
-            type="number" inputMode="decimal" value={editDraft.amount}
-            onChange={(e) => setEditDraft({ ...editDraft, amount: e.target.value })}
-            className={styles.txEditInput} placeholder="Monto"
-          />
-          <AccountAutocomplete
-            accounts={accounts}
-            value={editDraft.accountId}
-            onChange={(id) => setEditDraft({ ...editDraft, accountId: id })}
-            placeholder="Cuenta"
-          />
-          <CategoryEmojiGrid
-            categories={categories}
-            selectedId={editDraft.categoryId}
-            onSelect={(id) => setEditDraft((prev) => ({ ...prev, categoryId: prev.categoryId === id ? '' : id }))}
-          />
-          <input
-            value={editDraft.tag} onChange={(e) => setEditDraft({ ...editDraft, tag: e.target.value })}
-            className={styles.txEditInput} placeholder="Tag (opcional)"
-          />
+          <div className={styles.txEditHeader}>
+            <span
+              className={styles.txEditGlyph}
+              style={{ background: cat ? (cat.color || seriesForName(cat.name)) : 'var(--text-muted)' }}
+            >
+              {cat?.emoji || cat?.name?.charAt(0).toUpperCase() || '?'}
+            </span>
+            <span className={styles.txEditLabel}>Editando movimiento</span>
+            <span className={isGasto ? `${styles.txEditTypeBadge} ${styles.txEditTypeBadgeGasto}` : `${styles.txEditTypeBadge} ${styles.txEditTypeBadgeIngreso}`}>
+              {isGasto ? 'Gasto' : 'Ingreso'}
+            </span>
+          </div>
+
+          <div className={styles.txEditField}>
+            <div className={styles.txEditFieldLabelRow}>
+              <span className={styles.txEditFieldLabel}>Categoría</span>
+              <button type="button" onClick={() => setCategoryPickerOpen((v) => !v)} className={styles.txEditFieldAction}>
+                {categoryPickerOpen ? 'Listo' : 'Cambiar'}
+              </button>
+            </div>
+            {categoryPickerOpen ? (
+              <CategoryEmojiGrid
+                categories={categories}
+                selectedId={editDraft.categoryId}
+                onSelect={(id) => {
+                  setEditDraft((prev) => ({ ...prev, categoryId: prev.categoryId === id ? '' : id }))
+                  setCategoryPickerOpen(false)
+                }}
+              />
+            ) : (
+              <button type="button" onClick={() => setCategoryPickerOpen(true)} className={styles.txEditCurrentValue}>
+                <span
+                  className={styles.txEditGlyphSmall}
+                  style={{ background: draftCategory ? (draftCategory.color || seriesForName(draftCategory.name)) : 'var(--text-muted)' }}
+                >
+                  {draftCategory?.emoji || draftCategory?.name?.charAt(0).toUpperCase() || '?'}
+                </span>
+                <span>{draftCategory?.name || 'Sin categoría'}</span>
+              </button>
+            )}
+          </div>
+
+          <div className={styles.txEditField}>
+            <span className={styles.txEditFieldLabel}>Monto</span>
+            <input
+              type="number" inputMode="decimal" value={editDraft.amount}
+              onChange={(e) => setEditDraft({ ...editDraft, amount: e.target.value })}
+              className={styles.txEditInput} placeholder="0"
+            />
+            <div className={styles.txEditPresets}>
+              <button type="button" onClick={() => addAmountPreset(5000)} className={styles.txEditPresetButton}>+5.000</button>
+              <button type="button" onClick={() => addAmountPreset(10000)} className={styles.txEditPresetButton}>+10.000</button>
+            </div>
+          </div>
+
+          <div className={styles.txEditField}>
+            <span className={styles.txEditFieldLabel}>Cuenta / origen de fondos</span>
+            <AccountAutocomplete
+              accounts={accounts}
+              value={editDraft.accountId}
+              onChange={(id) => setEditDraft({ ...editDraft, accountId: id })}
+              placeholder="Cuenta"
+            />
+          </div>
+
+          <div className={styles.txEditField}>
+            <span className={styles.txEditFieldLabel}>Etiquetas</span>
+            <div className={styles.txTagsEditor}>
+              {editDraft.tags.map((tag) => (
+                <span key={tag} className={styles.txTagEditable}>
+                  #{tag}
+                  <button
+                    type="button" onClick={() => handleDraftRemoveTag(tag)}
+                    className={styles.txTagRemove} aria-label={`Quitar tag ${tag}`}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+              <input
+                className={styles.txTagAddInput}
+                placeholder="+ tag"
+                value={newTagDraft}
+                onChange={(e) => setNewTagDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleDraftAddTag() } }}
+                onBlur={() => { if (newTagDraft.trim()) handleDraftAddTag() }}
+              />
+            </div>
+          </div>
+
+          <div className={styles.txEditField}>
+            <span className={styles.txEditFieldLabel}>Nota o detalle</span>
+            <input
+              value={editDraft.purpose} onChange={(e) => setEditDraft({ ...editDraft, purpose: e.target.value })}
+              className={styles.txEditInput} placeholder="Descripción"
+            />
+          </div>
+
           <div className={styles.txEditActions}>
             <button type="button" onClick={() => handleSaveEdit(t)} disabled={savingEdit || !editDraft.amount} className={styles.txEditSave}>Guardar</button>
             <button type="button" onClick={cancelEdit} className={styles.txEditCancel}>Cancelar</button>
@@ -254,7 +358,12 @@ export default function Diario() {
     }
 
     return (
-      <div key={t.id} className={styles.txRow} style={ignored ? { opacity: 0.5 } : undefined}>
+      <div
+        key={t.id}
+        className={`${styles.txRow} ${styles.txRowClickable}`}
+        style={ignored ? { opacity: 0.5 } : undefined}
+        onClick={() => startEdit(t)}
+      >
         <span
           className={styles.txGlyph}
           style={{ background: cat ? (cat.color || seriesForName(cat.name)) : 'var(--text-muted)' }}
@@ -278,8 +387,12 @@ export default function Diario() {
           <span className={isGasto ? `${styles.txAmount} ${styles.txAmountGasto}` : `${styles.txAmount} ${styles.txAmountIngreso}`}>
             {formatByCurrency(Math.abs(t.amount), t.currency)}
           </span>
-          <button onClick={() => startEdit(t)} className={styles.txEdit} aria-label="Editar movimiento">✎</button>
-          <button onClick={() => setDeleteTarget(t)} className={styles.txDelete} aria-label="Eliminar movimiento">×</button>
+          <button
+            onClick={(e) => { e.stopPropagation(); setDeleteTarget(t) }}
+            className={styles.txDelete} aria-label="Eliminar movimiento"
+          >
+            ×
+          </button>
         </div>
       </div>
     )

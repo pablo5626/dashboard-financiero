@@ -1,6 +1,7 @@
 import { supabase } from './supabaseClient.js'
 import { sumOutgoingByAccount } from './transfersApi.js'
 import { buildPocketIndex, resolvePocketKey, pocketKeyFor } from './currencyPockets.js'
+import { fetchAllInitialBalanceRows, resolveAnchorsFromRows, earliestAnchorMonth, monthStartStr } from './balanceAnchors.js'
 
 export async function listAccounts() {
   const { data, error } = await supabase
@@ -39,8 +40,14 @@ export async function listAccounts() {
 // desde "arq_eur" — ver normalizeTag en transactionsApi.js. Si viene
 // initialBalance, se siembra de una vez el saldo inicial del mes en curso
 // para ese bolsillo, para que crear la cuenta ya dé de alta "cuánto tiene
-// cada moneda" sin un paso aparte en Saldos iniciales.
-export async function createAccount({ name, kind, parentAccountId, currency = 'COP', isMultiCurrency = false, extraCurrencies = [] }) {
+// cada moneda" sin un paso aparte en Ajuste de saldo.
+//
+// `initialBalance` (aparte, para el camino NO multi-moneda) siembra la misma
+// tabla para la moneda primaria de la cuenta — el saldo inicial "real" se
+// carga una sola vez acá, al crear la cuenta (ver balanceAnchors.js: de ahí
+// en adelante el saldo se acumula solo, sin volver a pedir esta carga cada
+// mes).
+export async function createAccount({ name, kind, parentAccountId, currency = 'COP', isMultiCurrency = false, extraCurrencies = [], initialBalance = null }) {
   const { data, error } = await supabase
     .from('accounts')
     .insert({ name, kind, parent_account_id: parentAccountId ?? null, currency, is_multi_currency: isMultiCurrency })
@@ -68,6 +75,13 @@ export async function createAccount({ name, kind, parentAccountId, currency = 'C
       const { error: e3 } = await supabase.from('monthly_initial_balances').upsert(balanceRows, { onConflict: 'user_id,account_id,year,month,currency' })
       if (e3) throw e3
     }
+  } else if (initialBalance != null && initialBalance !== '') {
+    const now = new Date()
+    const { error: e4 } = await supabase.from('monthly_initial_balances').upsert(
+      [{ account_id: data.id, year: now.getFullYear(), month: now.getMonth() + 1, initial_balance: Number(initialBalance) || 0, currency, source: 'manual' }],
+      { onConflict: 'user_id,account_id,year,month,currency' }
+    )
+    if (e4) throw e4
   }
   return data
 }
@@ -136,8 +150,9 @@ export async function saveMonthlyInitialBalances(rows, year, month) {
   if (error) throw error
 }
 
-// Saldo del mes = saldo inicial del mes + transferencias netas + suma de
-// transacciones del mes — cada BOLSILLO (cuenta normal, o cada moneda de una
+// Saldo del mes = saldo del ancla más reciente (ver balanceAnchors.js) +
+// transferencias netas + transacciones, todo desde el mes de esa ancla hasta
+// el mes consultado — cada BOLSILLO (cuenta normal, o cada moneda de una
 // cuenta multi-moneda) solo suma filas en su propia moneda, para no mezclar
 // unidades cuando existan cuentas en distinta moneda (ej. una cuenta USD) o
 // varios bolsillos bajo la misma cuenta (ej. arq USD + arq EUR). La moneda
@@ -151,36 +166,38 @@ export async function fetchBalancesForMonth(accounts, year, month) {
   const accountIds = accounts.map((a) => a.id)
   const pocketIndex = buildPocketIndex(accounts)
   const pocketKeys = accounts.flatMap((a) => [a.id, ...(a.extraCurrencies ?? []).map((c) => pocketKeyFor(a.id, c.currency))])
+  const keyFor = (accountId, currency) => resolvePocketKey(pocketIndex, accountId, currency)
 
-  const monthStart = `${year}-${String(month).padStart(2, '0')}-01`
+  const targetMonthStart = monthStartStr(year, month)
   const nextMonthStart = month === 12
     ? `${year + 1}-01-01`
-    : `${year}-${String(month + 1).padStart(2, '0')}-01`
+    : monthStartStr(year, month + 1)
 
-  const [{ data: initialBalances, error: e1 }, { data: transfers, error: e2 }, { data: transactions, error: e3 }, { data: allocations, error: e4 }] =
+  const allBalanceRows = await fetchAllInitialBalanceRows(accountIds)
+  const anchors = resolveAnchorsFromRows(allBalanceRows, accounts, year, month)
+  const earliest = earliestAnchorMonth(anchors) // nunca null: siempre cae en accounts.created_at
+  const rangeStart = monthStartStr(earliest.year, earliest.month)
+  // El saldo de un bolsillo solo acumula desde SU PROPIA ancla, no desde la
+  // más vieja del conjunto — bolsillos distintos pueden arrancar en meses
+  // distintos (ej. una cuenta vieja junto a una recién creada).
+  const anchorStart = (key) => monthStartStr(anchors[key].year, anchors[key].month)
+
+  const [{ data: transfers, error: e2 }, { data: transactions, error: e3 }, { data: allocations, error: e4 }] =
     await Promise.all([
-      supabase.from('monthly_initial_balances').select('account_id, initial_balance, currency').eq('year', year).eq('month', month).in('account_id', accountIds),
-      supabase.from('account_transfers').select('from_account_id, to_account_id, amount, currency, to_amount, to_currency, consumes_budget').gte('transfer_date', monthStart).lt('transfer_date', nextMonthStart),
-      supabase.from('transactions').select('account_id, amount, currency').gte('occurred_at', monthStart).lt('occurred_at', nextMonthStart).in('account_id', accountIds),
+      supabase.from('account_transfers').select('from_account_id, to_account_id, amount, currency, to_amount, to_currency, consumes_budget, transfer_date').gte('transfer_date', rangeStart).lt('transfer_date', nextMonthStart),
+      supabase.from('transactions').select('account_id, amount, currency, occurred_at').gte('occurred_at', rangeStart).lt('occurred_at', nextMonthStart).in('account_id', accountIds),
       supabase.from('account_allocations').select('account_id, allocated_amount, currency').eq('year', year).eq('month', month).in('account_id', accountIds),
     ])
-  if (e1) throw e1
   if (e2) throw e2
   if (e3) throw e3
   if (e4) throw e4
 
-  const balances = Object.fromEntries(pocketKeys.map((k) => [k, 0]))
+  const balances = Object.fromEntries(pocketKeys.map((k) => [k, anchors[k]?.balance ?? 0]))
   const allocated = Object.fromEntries(pocketKeys.map((k) => [k, null]))
 
-  const keyFor = (accountId, currency) => resolvePocketKey(pocketIndex, accountId, currency)
-
-  for (const row of initialBalances) {
-    const key = keyFor(row.account_id, row.currency)
-    if (key) balances[key] += Number(row.initial_balance)
-  }
   for (const row of transactions) {
     const key = keyFor(row.account_id, row.currency)
-    if (key) balances[key] += Number(row.amount)
+    if (key && row.occurred_at >= anchorStart(key)) balances[key] += Number(row.amount)
   }
   for (const row of transfers) {
     // to_amount/to_currency solo existen en transferencias que cruzan de
@@ -189,18 +206,21 @@ export async function fetchBalancesForMonth(accounts, year, month) {
     const toCurrency = row.to_currency ?? row.currency
     const toAmount = row.to_amount ?? row.amount
     const toKey = row.to_account_id ? keyFor(row.to_account_id, toCurrency) : null
-    if (toKey) balances[toKey] += Number(toAmount)
+    if (toKey && row.transfer_date >= anchorStart(toKey)) balances[toKey] += Number(toAmount)
     const fromKey = row.from_account_id ? keyFor(row.from_account_id, row.currency) : null
-    if (fromKey) balances[fromKey] -= Number(row.amount)
+    if (fromKey && row.transfer_date >= anchorStart(fromKey)) balances[fromKey] -= Number(row.amount)
   }
   for (const row of allocations) {
     const key = keyFor(row.account_id, row.currency)
     if (key) allocated[key] = Number(row.allocated_amount)
   }
 
-  // Reusa las mismas filas de transferencias ya traídas arriba: la plata que
-  // salió de cada cuenta alimenta su "% usado" (ver sumOutgoingByAccount).
-  return { balances, allocated, transferredOut: sumOutgoingByAccount(transfers, accounts) }
+  // transferredOut alimenta el "% usado" del mes CONSULTADO específicamente
+  // (ver Money math en CLAUDE.md) — como `transfers` ahora puede abarcar
+  // varios meses (desde la ancla más vieja), hay que acotarlo al mes target
+  // antes de sumarlo, o el % usado se inflaría arrastrando meses anteriores.
+  const transfersThisMonth = transfers.filter((t) => t.transfer_date >= targetMonthStart && t.transfer_date < nextMonthStart)
+  return { balances, allocated, transferredOut: sumOutgoingByAccount(transfersThisMonth, accounts) }
 }
 
 // Saldo total de una cuenta convertido a COP — para una cuenta multi-moneda

@@ -27,7 +27,11 @@
   datos, más módulos chicos sin dependencias para lógica compartida que no
   encaja en un dominio — `currencyPockets.js` para las claves de bolsillo
   multi-moneda, `chartUtils.js` para el cálculo de ancho de eje de los
-  gráficos horizontales, ver `.claude/rules/diseno-ui.md`).
+  gráficos horizontales, ver `.claude/rules/diseno-ui.md`;
+  `balanceAnchors.js` para resolver el ancla de saldo compartida por
+  `fetchBalancesForMonth` y `fetchMonthlyTrend`, ver "Money math" en
+  `CLAUDE.md`; `userSettingsApi.js` para los ajustes globales de
+  `user_settings`).
 - No queda ningún dato de muestra en el proyecto — `src/lib/sampleData.js`
   se eliminó una vez que las secciones quedaron conectadas a Supabase (ver
   `CLAUDE.md`). Si algún día se agrega una sección nueva antes de tener su

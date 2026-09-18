@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { IconSettings, IconClose, IconChevronRight, IconTag, IconHash, IconAccounts, IconDebts, IconGoals, IconExchange, IconExpenses } from './icons.jsx'
+import { IconSettings, IconClose, IconChevronRight, IconTag, IconHash, IconAccounts, IconDebts, IconGoals, IconExchange, IconExpenses, IconBudget } from './icons.jsx'
 import ColorSwatchPicker from './ui/ColorSwatchPicker.jsx'
 import ConfirmDialog from './ui/ConfirmDialog.jsx'
 import { listCategories, createCategory, updateCategory, archiveCategory } from '../lib/categoriesApi.js'
@@ -10,6 +10,7 @@ import { createDebt } from '../lib/debtsApi.js'
 import { createSavingsGoal } from '../lib/savingsApi.js'
 import { createFixedExpense } from '../lib/fixedExpensesApi.js'
 import { getRates, setRate, fetchLiveRate } from '../lib/exchangeRatesApi.js'
+import { getUserSettings, saveUserSettings } from '../lib/userSettingsApi.js'
 import { formatByCurrency, CURRENCIES } from '../lib/format.js'
 import styles from './SettingsPanel.module.css'
 
@@ -23,10 +24,10 @@ import styles from './SettingsPanel.module.css'
 // vista atada a qué cuentas existen hoy.
 const RATE_PAIRS = [...CURRENCIES.filter((c) => c !== 'COP').map((c) => ['COP', c]), ['USD', 'EUR']]
 
-const emptyNewCategory = { name: '', emoji: '', color: '', isAmbiguous: true }
+const emptyNewCategory = { name: '', emoji: '', color: '', isAmbiguous: true, monthlyBudget: '' }
 const emptyEditDraft = { name: '', emoji: '', color: '', isAmbiguous: true, monthlyBudget: '' }
 const MULTI = 'MULTI' // valor del <select> de tipo de cuenta para "multi-moneda"
-const emptyNewAccount = { name: '', type: 'COP', pockets: [], draftCurrency: '', draftAmount: '', isMadre: false }
+const emptyNewAccount = { name: '', type: 'COP', pockets: [], draftCurrency: '', draftAmount: '', isMadre: false, initialBalance: '' }
 
 const RELATIONSHIP_OPTIONS = [
   { value: 'amigo', label: 'Amigo' },
@@ -55,6 +56,7 @@ const emptyNewFixedExpense = { name: '', amount: '', dueDay: '', frequency: 'men
 // usuario pida una sección concreta.
 const SETTINGS_SECTIONS = [
   { key: 'categorias', label: 'Categorías', subtitle: 'Crear, renombrar, colores, presupuestos', Icon: IconTag },
+  { key: 'presupuestos', label: 'Presupuestos', subtitle: 'Alerta de presupuesto por categoría', Icon: IconBudget },
   { key: 'tags', label: 'Tags', subtitle: 'Catálogo de tags para el "+" y el buscador', Icon: IconHash },
   { key: 'cuentas', label: 'Cuentas', subtitle: 'Agregar una cuenta hija, incluida multi-moneda', Icon: IconAccounts },
   { key: 'deudas', label: 'Deudas', subtitle: 'Agregar una deuda o un préstamo dado', Icon: IconDebts },
@@ -122,13 +124,47 @@ export default function SettingsPanel() {
   const [fetchingRatePair, setFetchingRatePair] = useState(null) // "base_quote" | null
   const [rateFetchError, setRateFetchError] = useState({}) // "base_quote" -> string | undefined
 
+  const [budgetSettings, setBudgetSettings] = useState({ budgetAlertsEnabled: true, budgetAlertThresholdPct: 100 })
+  const [savingBudgetSettings, setSavingBudgetSettings] = useState(false)
+
   useEffect(() => {
     if (!open) return
     listCategories().then(setCategories).catch((err) => setError(err.message))
     listAccounts().then(setAccounts).catch((err) => setError(err.message))
     getRates().then(setRates).catch((err) => setError(err.message))
     listTags().then(setTags).catch((err) => setError(err.message))
+    getUserSettings().then(setBudgetSettings).catch((err) => setError(err.message))
   }, [open])
+
+  // El toggle persiste al instante (como cualquier otro checkbox de esta
+  // app); el slider actualiza el estado local en cada tick (para que el %
+  // se vea moverse en vivo) pero solo persiste al soltar (onMouseUp/
+  // onTouchEnd) — guardar en cada pixel de arrastre sería una escritura por
+  // tick, sin ningún beneficio ya que solo el valor final importa.
+  async function persistBudgetSettings(next) {
+    setSavingBudgetSettings(true)
+    try {
+      await saveUserSettings(next)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSavingBudgetSettings(false)
+    }
+  }
+
+  function handleToggleBudgetAlerts(enabled) {
+    const next = { ...budgetSettings, budgetAlertsEnabled: enabled }
+    setBudgetSettings(next)
+    persistBudgetSettings(next)
+  }
+
+  function handleThresholdChange(pct) {
+    setBudgetSettings((prev) => ({ ...prev, budgetAlertThresholdPct: pct }))
+  }
+
+  function handleThresholdCommit(pct) {
+    persistBudgetSettings({ ...budgetSettings, budgetAlertThresholdPct: pct })
+  }
 
   // Puente entre páginas hermanas bajo AppShell y este panel (que vive
   // aparte, montado una sola vez): "Préstamos detectados sin registrar" en
@@ -199,6 +235,7 @@ export default function SettingsPanel() {
       await createCategory({
         name: newCategory.name.trim(), emoji: newCategory.emoji.trim(),
         color: newCategory.color, isAmbiguous: newCategory.isAmbiguous,
+        monthlyBudget: newCategory.monthlyBudget,
       })
       setNewCategory(emptyNewCategory)
       await reload()
@@ -325,7 +362,10 @@ export default function SettingsPanel() {
           )
         }
       } else {
-        await createAccount({ name: newAccount.name.trim(), kind: 'hija', parentAccountId: madreId, currency: newAccount.type })
+        await createAccount({
+          name: newAccount.name.trim(), kind: 'hija', parentAccountId: madreId, currency: newAccount.type,
+          initialBalance: newAccount.initialBalance,
+        })
       }
       setAccountCreated(newAccount.name.trim())
       setNewAccount(emptyNewAccount)
@@ -531,33 +571,95 @@ export default function SettingsPanel() {
 
             <div className={styles.list}>
               {categories.map((c) => (
-                <div key={c.id} className={styles.row}>
+                <div
+                  key={c.id}
+                  className={editingId === c.id ? styles.row : `${styles.row} ${styles.rowClickable}`}
+                  onClick={editingId === c.id ? undefined : () => startEdit(c.id)}
+                >
                   {editingId === c.id ? (
-                    <div className={styles.editForm}>
-                      <input
-                        value={editDraft.name} onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })}
-                        className={styles.textInput} placeholder="Nombre"
-                      />
-                      <div className={styles.editFormRow}>
-                        <input
-                          value={editDraft.emoji} maxLength={4}
-                          onChange={(e) => setEditDraft({ ...editDraft, emoji: e.target.value })}
-                          className={styles.emojiInput} placeholder="Emoji"
-                        />
-                        <ColorSwatchPicker value={editDraft.color} onChange={(color) => setEditDraft({ ...editDraft, color })} />
+                    <div className={`${styles.editForm} ${styles.categoryEditCard}`}>
+                      <div className={styles.categoryEditHeader}>
+                        <span
+                          className={styles.categoryEditAvatar}
+                          style={editDraft.color ? { background: editDraft.color } : undefined}
+                        >
+                          {editDraft.emoji || editDraft.name.charAt(0).toUpperCase() || '?'}
+                        </span>
+                        <div className={styles.categoryFieldGroup}>
+                          <span className={styles.categoryLabel}>Nombre de la categoría</span>
+                          <input
+                            value={editDraft.name} onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })}
+                            className={styles.textInput} placeholder="Ej. Ocio, Mercado, Transporte"
+                          />
+                        </div>
                       </div>
-                      <label className={styles.checkboxRow}>
+
+                      <div className={styles.categoryFieldGroup}>
+                        <span className={styles.categoryLabel}>Emoji y color</span>
+                        <div className={styles.editFormRow}>
+                          <input
+                            value={editDraft.emoji} maxLength={4}
+                            onChange={(e) => setEditDraft({ ...editDraft, emoji: e.target.value })}
+                            className={styles.emojiInput} placeholder="Emoji"
+                          />
+                          <ColorSwatchPicker value={editDraft.color} onChange={(color) => setEditDraft({ ...editDraft, color })} />
+                        </div>
+                      </div>
+
+                      <div className={`${styles.categoryFieldGroup} ${styles.categoryEditBudgetGroup}`}>
+                        <div className={styles.categoryLabelRow}>
+                          <span className={styles.categoryLabel}>Presupuesto mensual (opcional)</span>
+                          <span className={styles.categoryLabelHint}>En pesos (COP)</span>
+                        </div>
                         <input
-                          type="checkbox" checked={editDraft.isAmbiguous}
-                          onChange={(e) => setEditDraft({ ...editDraft, isAmbiguous: e.target.checked })}
+                          type="number" min="0" value={editDraft.monthlyBudget}
+                          onChange={(e) => setEditDraft({ ...editDraft, monthlyBudget: e.target.value })}
+                          className={styles.textInput} placeholder="0"
                         />
-                        Ambigua
+                        <div className={styles.categoryBudgetPresets}>
+                          {[50000, 100000, 200000].map((amount) => (
+                            <button
+                              key={amount} type="button"
+                              onClick={() => setEditDraft({ ...editDraft, monthlyBudget: String((Number(editDraft.monthlyBudget) || 0) + amount) })}
+                              className={styles.categoryBudgetPresetButton}
+                            >
+                              +{formatByCurrency(amount, 'COP')}
+                            </button>
+                          ))}
+                          {editDraft.monthlyBudget !== '' && (
+                            <button
+                              type="button" onClick={() => setEditDraft({ ...editDraft, monthlyBudget: '' })}
+                              className={styles.categoryBudgetClear}
+                            >
+                              Limpiar
+                            </button>
+                          )}
+                        </div>
+                        <p className={styles.categoryInfoCard}>
+                          Se compara contra el gasto real del mes en "Presupuesto por categoría" (Gastos)
+                          y en los chips de Diario, y avisa en Panel si te pasás.
+                        </p>
+                      </div>
+
+                      <label className={styles.categoryAmbiguousRow}>
+                        <span className={styles.categoryFieldGroup}>
+                          <span className={styles.categoryLabel}>Categoría ambigua</span>
+                          <span className={styles.categoryHelperText}>
+                            Dejala marcada si puede pagarse desde distintas cuentas. Desmarcala solo si
+                            sabés que siempre sale de la misma (ej. Suscripciones).
+                          </span>
+                        </span>
+                        <span className={styles.switchTrack}>
+                          <input
+                            type="checkbox" checked={editDraft.isAmbiguous}
+                            onChange={(e) => setEditDraft({ ...editDraft, isAmbiguous: e.target.checked })}
+                            className={styles.switchInput}
+                          />
+                          <span className={styles.switchTrackBg} />
+                          <span className={styles.switchThumb} />
+                        </span>
                       </label>
-                      <input
-                        type="number" value={editDraft.monthlyBudget}
-                        onChange={(e) => setEditDraft({ ...editDraft, monthlyBudget: e.target.value })}
-                        className={styles.textInput} placeholder="Presupuesto mensual (opcional)"
-                      />
+
                       {c.name.trim().toLowerCase() === 'préstamo' && (
                         <p className={styles.warning}>
                           Esta categoría alimenta la detección de préstamos en Deudas — cambiarle el nombre o archivarla desactiva esa función.
@@ -571,14 +673,24 @@ export default function SettingsPanel() {
                   ) : (
                     <>
                       <span
-                        className={styles.rowGlyph}
+                        className={styles.categoryGlyph}
                         style={c.color ? { background: c.color } : undefined}
                       >
                         {c.emoji || c.name.charAt(0).toUpperCase()}
                       </span>
-                      <span className={styles.rowName}>{c.name}</span>
-                      <button type="button" onClick={() => startEdit(c.id)} className={styles.editLink}>Editar</button>
-                      <button type="button" onClick={() => setConfirmArchive({ id: c.id, name: c.name })} className={styles.archiveLink}>Archivar</button>
+                      <span className={styles.categoryRowText}>
+                        <span className={styles.categoryRowName}>{c.name}</span>
+                        {c.monthly_budget != null && (
+                          <span className={styles.categoryRowSubtitle}>{formatByCurrency(Number(c.monthly_budget), 'COP')}/mes</span>
+                        )}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setConfirmArchive({ id: c.id, name: c.name }) }}
+                        className={styles.archiveLink}
+                      >
+                        Archivar
+                      </button>
                     </>
                   )}
                 </div>
@@ -586,27 +698,79 @@ export default function SettingsPanel() {
               {categories.length === 0 && <p className={styles.hint}>No hay categorías todavía.</p>}
             </div>
 
-            <form onSubmit={handleCreate} className={styles.createForm}>
-              <span className={styles.hint}>+ Nueva categoría</span>
-              <input
-                placeholder="Nombre" value={newCategory.name}
-                onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })}
-                className={styles.textInput}
-              />
-              <div className={styles.editFormRow}>
+            <form onSubmit={handleCreate} className={`${styles.createForm} ${styles.categoryEditCard}`}>
+              <span className={styles.hint} style={{ margin: 0 }}>+ Nueva categoría</span>
+              <div className={styles.categoryFieldGroup}>
+                <span className={styles.categoryLabel}>Nombre de la categoría</span>
                 <input
-                  placeholder="Emoji (obligatorio)" value={newCategory.emoji} maxLength={4}
-                  onChange={(e) => setNewCategory({ ...newCategory, emoji: e.target.value })}
-                  className={styles.emojiInput}
+                  placeholder="Ej. Ocio, Mercado, Transporte" value={newCategory.name}
+                  onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })}
+                  className={styles.textInput}
                 />
-                <ColorSwatchPicker value={newCategory.color} onChange={(color) => setNewCategory({ ...newCategory, color })} />
               </div>
-              <label className={styles.checkboxRow}>
+              <div className={styles.categoryFieldGroup}>
+                <span className={styles.categoryLabel}>Emoji (obligatorio) y color</span>
+                <div className={styles.editFormRow}>
+                  <input
+                    placeholder="Emoji" value={newCategory.emoji} maxLength={4}
+                    onChange={(e) => setNewCategory({ ...newCategory, emoji: e.target.value })}
+                    className={styles.emojiInput}
+                  />
+                  <ColorSwatchPicker value={newCategory.color} onChange={(color) => setNewCategory({ ...newCategory, color })} />
+                </div>
+              </div>
+              <div className={`${styles.categoryFieldGroup} ${styles.categoryEditBudgetGroup}`}>
+                <div className={styles.categoryLabelRow}>
+                  <span className={styles.categoryLabel}>Presupuesto mensual (opcional)</span>
+                  <span className={styles.categoryLabelHint}>En pesos (COP)</span>
+                </div>
                 <input
-                  type="checkbox" checked={newCategory.isAmbiguous}
-                  onChange={(e) => setNewCategory({ ...newCategory, isAmbiguous: e.target.checked })}
+                  type="number" min="0" placeholder="0" value={newCategory.monthlyBudget}
+                  onChange={(e) => setNewCategory({ ...newCategory, monthlyBudget: e.target.value })}
+                  className={styles.textInput}
                 />
-                Ambigua
+                <div className={styles.categoryBudgetPresets}>
+                  {[50000, 100000, 200000].map((amount) => (
+                    <button
+                      key={amount} type="button"
+                      onClick={() => setNewCategory({ ...newCategory, monthlyBudget: String((Number(newCategory.monthlyBudget) || 0) + amount) })}
+                      className={styles.categoryBudgetPresetButton}
+                    >
+                      +{formatByCurrency(amount, 'COP')}
+                    </button>
+                  ))}
+                  {newCategory.monthlyBudget !== '' && (
+                    <button
+                      type="button" onClick={() => setNewCategory({ ...newCategory, monthlyBudget: '' })}
+                      className={styles.categoryBudgetClear}
+                    >
+                      Limpiar
+                    </button>
+                  )}
+                </div>
+                <p className={styles.categoryInfoCard}>
+                  Se compara contra el gasto real del mes en "Presupuesto por categoría" (Gastos) y en
+                  los chips de Diario, y avisa en Panel si te pasás — se puede dejar en blanco y
+                  definirlo después tocando la categoría.
+                </p>
+              </div>
+              <label className={styles.categoryAmbiguousRow}>
+                <span className={styles.categoryFieldGroup}>
+                  <span className={styles.categoryLabel}>Categoría ambigua</span>
+                  <span className={styles.categoryHelperText}>
+                    Dejala marcada si puede pagarse desde distintas cuentas. Desmarcala solo si sabés que
+                    siempre sale de la misma (ej. Suscripciones).
+                  </span>
+                </span>
+                <span className={styles.switchTrack}>
+                  <input
+                    type="checkbox" checked={newCategory.isAmbiguous}
+                    onChange={(e) => setNewCategory({ ...newCategory, isAmbiguous: e.target.checked })}
+                    className={styles.switchInput}
+                  />
+                  <span className={styles.switchTrackBg} />
+                  <span className={styles.switchThumb} />
+                </span>
               </label>
               <button
                 type="submit" disabled={creating || !newCategory.name.trim() || !newCategory.emoji.trim()}
@@ -627,6 +791,79 @@ export default function SettingsPanel() {
             </>
             )}
 
+            {activeSection?.key === 'presupuestos' && (
+            <>
+            <h3 className={styles.sectionTitle}>Presupuestos</h3>
+            <p className={styles.hint}>
+              Configurá cuándo avisarte que una categoría se está acercando a su presupuesto mensual, y
+              revisá de un vistazo cuáles ya tienen uno.
+            </p>
+
+            <div className={styles.categoryAmbiguousRow} style={{ marginBottom: 'var(--space-2)' }}>
+              <span className={styles.categoryFieldGroup}>
+                <span className={styles.categoryRowName}>Alertas de presupuesto</span>
+                <span className={styles.categoryHelperText}>
+                  Avisa en el Panel general cuando una categoría llegue al umbral de abajo.
+                </span>
+              </span>
+              <span className={styles.switchTrack}>
+                <input
+                  type="checkbox" checked={budgetSettings.budgetAlertsEnabled}
+                  onChange={(e) => handleToggleBudgetAlerts(e.target.checked)}
+                  className={styles.switchInput}
+                />
+                <span className={styles.switchTrackBg} />
+                <span className={styles.switchThumb} />
+              </span>
+            </div>
+
+            {budgetSettings.budgetAlertsEnabled && (
+              <div className={styles.categoryFieldGroup} style={{ marginBottom: 'var(--space-2)' }}>
+                <div className={styles.categoryLabelRow}>
+                  <span className={styles.categoryLabel}>Umbral de alerta</span>
+                  <span className={styles.categoryLabelHint}>{budgetSettings.budgetAlertThresholdPct}%</span>
+                </div>
+                <input
+                  type="range" min="50" max="100" step="5"
+                  value={budgetSettings.budgetAlertThresholdPct}
+                  onChange={(e) => handleThresholdChange(Number(e.target.value))}
+                  onMouseUp={(e) => handleThresholdCommit(Number(e.target.value))}
+                  onTouchEnd={(e) => handleThresholdCommit(Number(e.target.value))}
+                  className={styles.rangeInput}
+                />
+                <p className={styles.categoryInfoCard}>
+                  Avisa cuando el gasto real de una categoría llegue al {budgetSettings.budgetAlertThresholdPct}%
+                  de su presupuesto — no hace falta esperar a pasarte del 100% para enterarte.
+                  {savingBudgetSettings ? ' Guardando…' : ''}
+                </p>
+              </div>
+            )}
+
+            <span className={styles.categoryLabel} style={{ display: 'block', margin: '0 0 4px' }}>Categorías</span>
+            <div className={styles.list}>
+              {categories.map((c) => (
+                <div
+                  key={c.id}
+                  className={`${styles.row} ${styles.rowClickable}`}
+                  onClick={() => { setSection('categorias'); startEdit(c.id) }}
+                >
+                  <span className={styles.categoryGlyph} style={c.color ? { background: c.color } : undefined}>
+                    {c.emoji || c.name.charAt(0).toUpperCase()}
+                  </span>
+                  <span className={styles.categoryRowText}>
+                    <span className={styles.categoryRowName}>{c.name}</span>
+                    <span className={styles.categoryRowSubtitle}>
+                      {c.monthly_budget != null ? `${formatByCurrency(Number(c.monthly_budget), 'COP')}/mes` : 'Sin presupuesto establecido'}
+                    </span>
+                  </span>
+                  <IconChevronRight width={18} height={18} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+                </div>
+              ))}
+              {categories.length === 0 && <p className={styles.hint}>No hay categorías todavía.</p>}
+            </div>
+            </>
+            )}
+
             {activeSection?.key === 'tags' && (
             <>
             <h3 className={styles.sectionTitle}>Tags</h3>
@@ -635,12 +872,16 @@ export default function SettingsPanel() {
               solo un atajo para precargar uno antes de usarlo, o para sacar uno que ya no hace falta.
             </p>
 
-            <div className={styles.list}>
+            <div className={styles.tagCloud}>
               {tags.map((t) => (
-                <div key={t.id} className={styles.row}>
-                  <span className={styles.rowName}>#{t.name}</span>
-                  <button type="button" onClick={() => setConfirmDeleteTag({ id: t.id, name: t.name })} className={styles.archiveLink}>Eliminar</button>
-                </div>
+                <button
+                  key={t.id} type="button"
+                  onClick={() => setConfirmDeleteTag({ id: t.id, name: t.name })}
+                  className={styles.tagPill}
+                  title="Tocar para eliminar"
+                >
+                  #{t.name}
+                </button>
               ))}
               {tags.length === 0 && <p className={styles.hint}>No hay tags todavía.</p>}
             </div>
@@ -648,7 +889,7 @@ export default function SettingsPanel() {
             <form onSubmit={handleCreateTag} className={styles.createForm}>
               <span className={styles.hint}>+ Nuevo tag</span>
               <input
-                placeholder="Nombre (ej. mercado)" value={newTagName}
+                placeholder="#Nueva etiqueta" value={newTagName}
                 onChange={(e) => setNewTagName(e.target.value)}
                 className={styles.textInput}
               />
@@ -694,6 +935,14 @@ export default function SettingsPanel() {
                   {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
                   <option value={MULTI}>Multi-moneda</option>
                 </select>
+              )}
+
+              {!newAccount.isMadre && newAccount.type !== MULTI && (
+                <input
+                  type="number" placeholder="Saldo inicial (opcional)" value={newAccount.initialBalance}
+                  onChange={(e) => setNewAccount({ ...newAccount, initialBalance: e.target.value })}
+                  className={styles.textInput}
+                />
               )}
 
               {!newAccount.isMadre && newAccount.type === MULTI && (

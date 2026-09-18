@@ -1,0 +1,96 @@
+/* Lista de filas en vez de la tabla original — mismo lenguaje visual que
+   "Movimientos" en Diario.jsx/GastosDiarios.jsx (línea principal + línea
+   secundaria por fila, monto a la derecha), en vez de una tabla de 6
+   columnas que forzaba scroll horizontal en el celular incluso con
+   .table-scroll. Reemplazó a un componente que antes solo tenía estilos
+   inline — este es el primer .module.css propio de TransferHistorySection. */
+
+.hint {
+  font: var(--font-footnote);
+  color: var(--text-muted);
+  margin: 0 0 var(--space-1);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+}
+
+.transferRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.transferRow:last-child {
+  border-bottom: none;
+}
+
+.transferInfo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.transferRoute {
+  font: var(--font-body);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transferMeta {
+  font: var(--font-caption);
+  color: var(--text-muted);
+}
+
+.transferRight {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.transferAmount {
+  font: var(--font-subheadline);
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+/* Insignia binaria (no el semáforo de 4 niveles de budgetToneColor — acá no
+   hay un %, es un flag on/off) — mismo criterio visual que .categoryChipActive
+   en Diario.module.css para un estado "activo" seleccionable. */
+.transferBadge {
+  font: var(--font-caption);
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-hairline);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.transferBadgeActive {
+  border-color: var(--series-1);
+  color: var(--series-1);
+  background: color-mix(in srgb, var(--series-1) 12%, var(--surface-1));
+}
+
+.transferDelete {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

@@ -348,6 +348,18 @@ create table tags (
   unique (user_id, name)
 );
 
+-- Ajustes globales del usuario (no específicos de una cuenta ni categoría) —
+-- una sola fila por usuario (user_id es la propia primary key, no hay id
+-- aparte). Hoy solo controla el umbral de la alerta de presupuesto por
+-- categoría (Ajustes → Presupuestos, panelApi.fetchAlerts) — pensada para
+-- crecer si aparecen más ajustes globales más adelante.
+create table user_settings (
+  user_id uuid primary key references auth.users(id) default auth.uid(),
+  budget_alerts_enabled boolean not null default true,
+  budget_alert_threshold_pct integer not null default 100,
+  created_at timestamptz not null default now()
+);
+
 -- ============================================================================
 -- ROW LEVEL SECURITY: cada tabla solo expone las filas del usuario dueño
 -- ============================================================================
@@ -360,7 +372,7 @@ begin
     'account_transfers', 'categories', 'transactions', 'category_account_stats',
     'purpose_category_stats',
     'fixed_expenses', 'fixed_expense_month_status', 'debts', 'debt_installments',
-    'savings_goals', 'savings_contributions', 'tags'
+    'savings_goals', 'savings_contributions', 'tags', 'user_settings'
   ])
   loop
     execute format('alter table %I enable row level security;', t);

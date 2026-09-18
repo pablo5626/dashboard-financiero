@@ -6,10 +6,13 @@ export async function listCategories() {
   return data
 }
 
-export async function createCategory({ name, emoji, color, isAmbiguous = true }) {
+export async function createCategory({ name, emoji, color, isAmbiguous = true, monthlyBudget = null }) {
   const { data, error } = await supabase
     .from('categories')
-    .insert({ name, emoji: emoji || null, color: color || null, is_ambiguous: isAmbiguous })
+    .insert({
+      name, emoji: emoji || null, color: color || null, is_ambiguous: isAmbiguous,
+      monthly_budget: monthlyBudget != null && monthlyBudget !== '' ? Number(monthlyBudget) : null,
+    })
     .select()
     .single()
   if (error) throw error

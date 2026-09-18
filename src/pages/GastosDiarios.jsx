@@ -11,10 +11,7 @@ import { IconFilter } from '../components/icons.jsx'
 import { formatCOP, formatByCurrency } from '../lib/format.js'
 import { listAccounts } from '../lib/accountsApi.js'
 import { getRates, toCOP } from '../lib/exchangeRatesApi.js'
-import { buildPocketIndex, resolvePocketKey, flattenAccountPockets } from '../lib/currencyPockets.js'
 import { listCategories } from '../lib/categoriesApi.js'
-import { getAllocationsForMonth } from '../lib/allocationsApi.js'
-import { getTransfersForMonth, sumOutgoingByAccount } from '../lib/transfersApi.js'
 import { listFixedExpenses, createFixedExpense } from '../lib/fixedExpensesApi.js'
 import {
   parseMonIACSV, filterRowsByMonth, importTransactions,
@@ -35,7 +32,7 @@ function formatDate(iso) {
 }
 
 // Misma escala de colores que budgetToneColor en Diario.jsx, para que el
-// "% usado" de una cuenta se lea igual en las dos páginas.
+// "% usado" de una categoría se lea igual en las dos páginas.
 function budgetToneColor(pct) {
   if (pct == null) return 'var(--border-hairline)'
   if (pct < 70) return 'var(--status-good)'
@@ -112,8 +109,6 @@ export default function GastosDiarios() {
   const [editDraft, setEditDraft] = useState(null) // { purpose, amount, categoryId, accountId, tags }
   const [savingEdit, setSavingEdit] = useState(false)
   const [newTagDraft, setNewTagDraft] = useState('')
-  const [allocations, setAllocations] = useState({})
-  const [transferredOut, setTransferredOut] = useState({})
   const [fixedExpenses, setFixedExpenses] = useState([])
   const [recentExpenses, setRecentExpenses] = useState([])
   const [addingCandidate, setAddingCandidate] = useState(null)
@@ -141,8 +136,6 @@ export default function GastosDiarios() {
       setFixedExpenses(fixedRows)
       setRecentExpenses(recent)
       setSuggestions(await fetchSuggestionsForCategories(pendingRows.map((t) => t.category_id)))
-      setAllocations(await getAllocationsForMonth(accs.filter((a) => a.kind === 'hija').map((a) => a.id), year, month))
-      setTransferredOut(sumOutgoingByAccount(await getTransfersForMonth(accs.map((a) => a.id), year, month), accs))
     } catch (err) {
       setError(err.message)
     }
@@ -329,35 +322,16 @@ export default function GastosDiarios() {
     ...hijas.flatMap((h) => (h.extraCurrencies ?? []).map((c) => c.tag.toLowerCase())),
   ])
 
-  // Vistas por cuenta (spentByAccount/incomeByAccount) van en la moneda propia
-  // de cada bolsillo, igual que los saldos; las consolidadas (categoría y tag,
-  // que cruzan cuentas de distinta moneda) convierten a COP con la tasa
-  // vigente, igual que el Panel general.
-  const pocketIndex = buildPocketIndex(accounts)
+  // Consolidado (categoría y tag, que cruzan cuentas de distinta moneda):
+  // convierte a COP con la tasa vigente, igual que el Panel general.
   const spentByCategory = {}
   const spentByTag = {}
-  const spentByAccount = {}
-  const incomeByAccount = {}
-  // Cuenta cuántos de los movimientos sumados en spentByAccount todavía
-  // tienen monto estimado (currency_pending) — para avisar en la tabla de
-  // "Gasto real vs. presupuesto" que ese número puede afinarse confirmando
-  // la cola de arriba, en vez de dejarlo pasar por un total ya exacto.
-  const pendingByAccount = {}
   for (const t of monthTransactions ?? []) {
     if (isIgnoredRow(t.tags)) continue
-    const currency = t.currency || 'COP'
-    const pocketKey = t.account_id ? resolvePocketKey(pocketIndex, t.account_id, currency) : null
-    if (Number(t.amount) >= 0) {
-      if (pocketKey) incomeByAccount[pocketKey] = (incomeByAccount[pocketKey] ?? 0) + Number(t.amount)
-      continue
-    }
+    if (Number(t.amount) >= 0) continue
     const amount = -Number(t.amount)
-    const amountCOP = toCOP(amount, currency, rates)
+    const amountCOP = toCOP(amount, t.currency || 'COP', rates)
     spentByCategory[t.category_id] = (spentByCategory[t.category_id] ?? 0) + amountCOP
-    if (pocketKey) {
-      spentByAccount[pocketKey] = (spentByAccount[pocketKey] ?? 0) + amount
-      if (t.currency_pending) pendingByAccount[pocketKey] = (pendingByAccount[pocketKey] ?? 0) + 1
-    }
     for (const tag of t.tags ?? []) {
       if (accountNameTags.has(tag)) continue
       spentByTag[tag] = (spentByTag[tag] ?? 0) + amountCOP
@@ -378,6 +352,25 @@ export default function GastosDiarios() {
     .map(([tag, value]) => ({ name: tag, value }))
     .sort((a, b) => b.value - a.value)
     .slice(0, 10)
+
+  // "Presupuesto por categoría" reemplaza a la vieja "Gasto real vs.
+  // presupuesto por cuenta" — reusa spentByCategory (ya en COP, ya excluye
+  // filas ignoradas) contra categories.monthly_budget, que hasta ahora solo
+  // se usaba en Diario.jsx (chips) y en las alertas de Panel, sin ninguna
+  // vista consolidada de "todas mis categorías con presupuesto en un solo
+  // lugar". Solo entran categorías con monthly_budget configurado — una sin
+  // presupuesto no tiene nada que medir acá (mismo principio que el resto de
+  // la app: nunca tratar "sin presupuesto" como presupuesto $0). Ordenadas
+  // por % usado descendente para que lo más urgente quede primero.
+  const categoryBudgetData = categories
+    .filter((c) => c.monthly_budget != null)
+    .map((c) => {
+      const spent = spentByCategory[c.id] ?? 0
+      const budget = Number(c.monthly_budget)
+      const pct = budget > 0 ? Math.round((spent / budget) * 100) : null
+      return { id: c.id, name: c.name, emoji: c.emoji, spent, budget, pct }
+    })
+    .sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1))
 
   // Ambas comparten la misma altura (la del más alto de los dos) — antes
   // cada una calculaba su alto según su propia cantidad de filas, así que
@@ -654,8 +647,8 @@ export default function GastosDiarios() {
                         </span>
                         {/* Tocar el movimiento lo selecciona para editarlo entero
                             (descripción, monto, cuenta, categoría y tags) — mismo
-                            criterio que el ✎ de Diario.jsx, pero acá el toque en
-                            la fila ya lo abre, sin ícono aparte. */}
+                            criterio que la fila de Movimientos en Diario.jsx (que
+                            también perdió su botón lápiz aparte por esto mismo). */}
                         <div className={styles.txInfo} onClick={() => startEdit(t)}>
                           {cat && <span className={styles.txCategory}>{cat.name}</span>}
                           <span className={styles.txPurpose}>{t.purpose}</span>
@@ -702,29 +695,22 @@ export default function GastosDiarios() {
           )}
         </Card>
 
-        <Card title="Gasto real vs. presupuesto por cuenta" className="span-3">
-          {hijas.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)' }}>No hay cuentas hijas todavía.</p>
+        <Card title="Presupuesto por categoría" className="span-3">
+          {categoryBudgetData.length === 0 ? (
+            <p style={{ color: 'var(--text-muted)' }}>
+              Ninguna categoría tiene presupuesto configurado — agregalo en Ajustes → Categorías.
+            </p>
           ) : (
             <div className={styles.budgetGrid}>
-              {flattenAccountPockets(hijas).map((p) => {
-                const currency = p.currency
-                const spent = spentByAccount[p.key] ?? 0
-                const pendingCount = pendingByAccount[p.key] ?? 0
-                const movido = transferredOut[p.key] ?? 0
-                const allocated = allocations[p.key]
-                const income = incomeByAccount[p.key] ?? 0
-                const disponible = (allocated ?? 0) + income
-                const usado = spent + movido
-                const pct = disponible > 0 ? Math.round((usado / disponible) * 100) : null
-                const tone = budgetToneColor(pct)
-                const barWidth = pct == null ? 0 : Math.min(100, pct)
+              {categoryBudgetData.map((c) => {
+                const tone = budgetToneColor(c.pct)
+                const barWidth = c.pct == null ? 0 : Math.min(100, c.pct)
                 return (
-                  <div key={p.key} className={styles.budgetCard}>
+                  <div key={c.id} className={styles.budgetCard}>
                     <div className={styles.budgetHeader}>
-                      <span className={styles.budgetName}>{p.label}</span>
+                      <span className={styles.budgetName}>{c.emoji ? `${c.emoji} ` : ''}{c.name}</span>
                       <span className={styles.budgetPct} style={{ color: tone }}>
-                        {pct != null ? `${pct}%` : 'sin presupuesto'}
+                        {c.pct != null ? `${c.pct}%` : '—'}
                       </span>
                     </div>
                     <div className={styles.budgetBarTrack}>
@@ -734,34 +720,8 @@ export default function GastosDiarios() {
                       />
                     </div>
                     <div className={styles.budgetMetaRow}>
-                      <span>
-                        Gastado{' '}
-                        {pendingCount > 0 && (
-                          <span
-                            title={`Incluye ${pendingCount} monto(s) estimado(s) — confírmalos en "Compras en divisa por confirmar"`}
-                            style={{ color: 'var(--status-warning)' }}
-                          >
-                            ≈
-                          </span>
-                        )}
-                        <strong>{formatByCurrency(spent, currency)}</strong>
-                      </span>
-                      {movido > 0 && (
-                        <span>
-                          Movido <strong>{formatByCurrency(movido, currency)}</strong>
-                        </span>
-                      )}
-                    </div>
-                    <div className={styles.budgetMetaRow}>
-                      <span>
-                        Asignado{' '}
-                        <strong>{allocated != null ? formatByCurrency(allocated, currency) : 'sin definir'}</strong>
-                      </span>
-                      {income > 0 && (
-                        <span>
-                          Ingresos <strong>{formatByCurrency(income, currency)}</strong>
-                        </span>
-                      )}
+                      <span>Gastado <strong>{formatCOP(c.spent)}</strong></span>
+                      <span>Presupuesto <strong>{formatCOP(c.budget)}</strong></span>
                     </div>
                   </div>
                 )

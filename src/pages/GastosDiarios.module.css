@@ -36,8 +36,10 @@
   box-shadow: 0 2px 10px -2px color-mix(in srgb, var(--series-1) 45%, transparent);
 }
 
-/* "Gasto real vs. presupuesto por cuenta": tarjeta con barra de progreso
-   por cuenta, en vez de una fila de tabla por columna de dato — mismo
+/* "Presupuesto por categoría": tarjeta con barra de progreso por categoría
+   (reemplazó a la vieja "Gasto real vs. presupuesto por cuenta", que
+   comparaba lo mismo que ya mostraba Distribución mensual en Cuentas.jsx —
+   ver CLAUDE.md), en vez de una fila de tabla por columna de dato — mismo
    criterio visual que la lista de Movimientos (glyph/pill), pero acá el
    dato central es el % usado, así que la barra es la protagonista. */
 .budgetGrid {

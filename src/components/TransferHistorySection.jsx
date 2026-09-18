@@ -3,6 +3,13 @@ import Card from './ui/Card.jsx'
 import ConfirmDialog from './ui/ConfirmDialog.jsx'
 import { formatByCurrency } from '../lib/format.js'
 import { getTransfersForMonth, deleteTransfer, updateConsumesBudget } from '../lib/transfersApi.js'
+import styles from './TransferHistorySection.module.css'
+
+// Mismo formato compacto que GastosDiarios.jsx usa para sus fechas de fila,
+// en vez de la fecha ISO cruda ("2026-09-01") que mostraba la tabla vieja.
+function formatDate(iso) {
+  return new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', timeZone: 'UTC' })
+}
 
 export default function TransferHistorySection({ accounts, year, month, onSaved }) {
   const [transfers, setTransfers] = useState(null)
@@ -58,47 +65,65 @@ export default function TransferHistorySection({ accounts, year, month, onSaved 
   if (error) return <Card title="Historial de transferencias" className="span-3"><p style={{ color: 'var(--status-critical)' }}>{error}</p></Card>
   if (!transfers) return <Card title="Historial de transferencias" className="span-3"><p style={{ color: 'var(--text-muted)' }}>Cargando…</p></Card>
 
+  // Al menos una fila con ambas puntas ≠ madre — solo esas muestran la
+  // insignia de "Descuenta presupuesto", así que la leyenda que la explica
+  // (una sola vez, no repetida por fila) solo hace falta si hay alguna.
+  const hasToggleableRow = transfers.some((t) => t.from_account_id !== madreId && t.to_account_id !== madreId)
+
   return (
     <>
     <Card title={`Transferencias — ${month}/${year}`} className="span-3">
-      <div className="table-scroll" style={{ marginBottom: 'var(--space-2)' }}>
-        <table className="simple-table">
-          <thead><tr><th>Fecha</th><th>Origen</th><th>Destino</th><th>Monto</th><th>Nota</th><th></th></tr></thead>
-          <tbody>
-            {transfers.map((t) => (
-              <tr key={t.id}>
-                <td>{t.transfer_date}</td>
-                <td>{accountName(t.from_account_id)}</td>
-                <td>{accountName(t.to_account_id)}</td>
-                <td className="amount-cell">
+      {hasToggleableRow && (
+        <p className={styles.hint}>
+          "Descuenta presupuesto" cuenta la plata movida como gasto del presupuesto de la cuenta de
+          origen — tocalo para cambiarlo en cualquier momento (ej. si era solo reacomodar plata entre
+          bolsillos propios, no fondear una compra).
+        </p>
+      )}
+      <div className={styles.list}>
+        {transfers.map((t) => {
+          const toggleable = t.from_account_id !== madreId && t.to_account_id !== madreId
+          const consumes = t.consumes_budget !== false
+          return (
+            <div key={t.id} className={styles.transferRow}>
+              <div className={styles.transferInfo}>
+                <span className={styles.transferRoute}>
+                  {accountName(t.from_account_id)} → {accountName(t.to_account_id)}
+                </span>
+                <span className={styles.transferMeta}>
+                  {formatDate(t.transfer_date)}{!toggleable && t.note ? ` · ${t.note}` : ''}
+                </span>
+              </div>
+              <div className={styles.transferRight}>
+                <span className={styles.transferAmount}>
                   {t.to_amount != null
                     ? `${formatByCurrency(t.amount, t.currency)} → ${formatByCurrency(t.to_amount, t.to_currency)}`
                     : formatByCurrency(t.amount, t.currency)}
-                </td>
-                <td style={{ color: 'var(--text-muted)' }}>
-                  {t.from_account_id !== madreId && t.to_account_id !== madreId ? (
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <input
-                        type="checkbox"
-                        checked={t.consumes_budget !== false}
-                        disabled={savingConsumesId === t.id}
-                        onChange={() => handleToggleConsumesBudget(t)}
-                        style={{ width: 16, height: 16 }}
-                      />
-                      {t.note ? `${t.note} · ` : ''}Descuenta presupuesto
-                    </label>
-                  ) : (t.note || '—')}
-                </td>
-                <td>
-                  <button onClick={() => setConfirmDelete({ id: t.id })} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button>
-                </td>
-              </tr>
-            ))}
-            {transfers.length === 0 && (
-              <tr><td colSpan={6} style={{ color: 'var(--text-muted)' }}>Sin transferencias registradas este mes.</td></tr>
-            )}
-          </tbody>
-        </table>
+                </span>
+                {toggleable && (
+                  <button
+                    type="button"
+                    onClick={() => handleToggleConsumesBudget(t)}
+                    disabled={savingConsumesId === t.id}
+                    className={consumes ? `${styles.transferBadge} ${styles.transferBadgeActive}` : styles.transferBadge}
+                  >
+                    {consumes ? 'Descuenta presupuesto' : 'No descuenta'}
+                  </button>
+                )}
+                {toggleable && t.note && <span className={styles.transferMeta}>{t.note}</span>}
+              </div>
+              <button
+                type="button" onClick={() => setConfirmDelete({ id: t.id })}
+                className={styles.transferDelete} aria-label="Eliminar transferencia"
+              >
+                ×
+              </button>
+            </div>
+          )
+        })}
+        {transfers.length === 0 && (
+          <p className={styles.hint}>Sin transferencias registradas este mes.</p>
+        )}
       </div>
     </Card>
 
