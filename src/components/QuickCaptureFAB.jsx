@@ -79,12 +79,19 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
   const [rates, setRates] = useState([])
   // true = el usuario ya tocó a mano el "Monto recibido" de un traslado
   // entre monedas distintas — mientras sea false, ese campo se sigue
-  // recalculando solo a partir de la tasa guardada cada vez que cambia el
-  // monto o las cuentas, mismo criterio que CurrencyExchangeSection.jsx en
-  // Cuentas ("Cambio de divisa"), que ya resuelve este mismo caso.
+  // recalculando solo a partir de la tasa guardada en exchange_rates cada
+  // vez que cambia el monto o las cuentas.
   const [toAmountTouchedByUser, setToAmountTouchedByUser] = useState(false)
   const [categories, setCategories] = useState([])
   const [recentPurposes, setRecentPurposes] = useState([])
+  // true = el tile "+" de categorías mandó al usuario a Ajustes → Categorías
+  // a crear una — la hoja se oculta (sin resetear form) mientras tanto, y
+  // vuelve a abrirse sola con el mismo movimiento a medio llenar apenas
+  // Ajustes se cierra (ver el listener de "dashboard:settings-closed" más
+  // abajo). Un mini-form inline (versión anterior de esto) se descartó: el
+  // usuario prefirió que la fila de categorías no sume más elementos y usar
+  // el formulario completo de Ajustes en su lugar.
+  const [pendingResumeAfterSettings, setPendingResumeAfterSettings] = useState(false)
   const [form, setForm] = useState(emptyForm)
   const [showMore, setShowMore] = useState(false)
   const [tagOpen, setTagOpen] = useState(false)
@@ -126,6 +133,21 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
   const audioRafRef = useRef(null)
   const receiptCameraInputRef = useRef(null)
   const receiptGalleryInputRef = useRef(null)
+  const plusWrapRef = useRef(null)
+
+  // Tocar en cualquier otro lugar de la pantalla mientras la burbuja de
+  // cámara está desplegada la retrae, sin abrir nada — mismo criterio que un
+  // menú/popover estándar que se cierra al tocar afuera. Solo escucha
+  // mientras plusExpanded es true, para no pagar un listener global todo el
+  // tiempo que el "+" está colapsado (su estado normal).
+  useEffect(() => {
+    if (!plusExpanded) return
+    function handlePointerDown(e) {
+      if (!plusWrapRef.current?.contains(e.target)) setPlusExpanded(false)
+    }
+    document.addEventListener('pointerdown', handlePointerDown)
+    return () => document.removeEventListener('pointerdown', handlePointerDown)
+  }, [plusExpanded])
 
   function handleCameraButtonClick() {
     setPlusExpanded(false)
@@ -151,6 +173,33 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
     }
   }
 
+  // Tile "+" de CategoryEmojiGrid: oculta esta hoja (setOpen(false), NO
+  // close()/reset() — el form sigue vivo en memoria) y abre Ajustes en la
+  // sección Categorías vía el mismo evento que ya usa "Precargar" en
+  // Deudas.jsx (SettingsPanel.jsx escucha dashboard:open-settings). Es
+  // SettingsPanel el que "sabe" cuándo el usuario terminó ahí — ver el
+  // listener de dashboard:settings-closed más abajo.
+  function handleCreateCategoryClick() {
+    setPendingResumeAfterSettings(true)
+    setOpen(false)
+    window.dispatchEvent(new CustomEvent('dashboard:open-settings', { detail: { section: 'categorias' } }))
+  }
+
+  // SettingsPanel dispatchea esto en su propio close() (cualquier motivo:
+  // creó la categoría, se arrepintió, tocó afuera) — reabre esta hoja con el
+  // mismo form intacto y refresca categories para que la nueva ya aparezca,
+  // sin depender de que el usuario vuelva a tocar "+" a mano.
+  useEffect(() => {
+    function handleSettingsClosed() {
+      if (!pendingResumeAfterSettings) return
+      setPendingResumeAfterSettings(false)
+      listCategories().then(setCategories).catch(() => {})
+      setOpen(true)
+    }
+    window.addEventListener('dashboard:settings-closed', handleSettingsClosed)
+    return () => window.removeEventListener('dashboard:settings-closed', handleSettingsClosed)
+  }, [pendingResumeAfterSettings])
+
   useEffect(() => {
     if (!open || accounts.length > 0) return
     listAccounts().then((accs) => {
@@ -166,11 +215,10 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
   }, [open, accounts.length])
 
   // Sugiere "Monto recibido" en un traslado entre monedas distintas a partir
-  // de la tasa guardada para ese par (mismo mecanismo que "Cambio de
-  // divisa" en Cuentas — ver CurrencyExchangeSection.jsx) — el usuario
-  // sigue pudiendo ajustarlo a mano si la tasa real de ese traslado puntual
-  // fue otra; una vez que lo toca, deja de auto-completarse hasta que
-  // cambien monto o cuentas de nuevo.
+  // de la tasa guardada para ese par en exchange_rates — el usuario sigue
+  // pudiendo ajustarlo a mano si la tasa real de ese traslado puntual fue
+  // otra; una vez que lo toca, deja de auto-completarse hasta que cambien
+  // monto o cuentas de nuevo.
   useEffect(() => {
     if (form.mode !== 'transferencia' || !crossCurrency || !form.amount || toAmountTouchedByUser) return
     const suggested = convertAmount(Number(form.amount), currencyOf(form.fromAccountId), currencyOf(form.toAccountId), rates)
@@ -202,6 +250,7 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
     setOpen(false)
     setSuccess(false)
     setPlusExpanded(false)
+    setPendingResumeAfterSettings(false)
     reset('gasto')
   }
 
@@ -542,7 +591,7 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
           <IconSearch width={20} height={20} />
         </button>
 
-        <div className={styles.fabPlusWrap}>
+        <div className={styles.fabPlusWrap} ref={plusWrapRef}>
           {plusExpanded && (
             <button
               type="button"
@@ -582,7 +631,6 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
             className={styles.sheet} role="dialog" aria-modal="true"
             aria-labelledby="quick-capture-title" onClick={(e) => e.stopPropagation()}
           >
-            <div className={styles.dragHandle} />
             <div className={styles.header}>
               {receiptMode ? (
                 <div className={styles.titleRow}>
@@ -842,10 +890,10 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
                         </button>
                       ))}
                     </div>
-                    {/* Monto recibido: mismo mecanismo de sugerencia por tasa que
-                        "Cambio de divisa" en Cuentas — se completa solo apenas hay
-                        monto y las dos cuentas elegidas, y sigue editable a mano
-                        para el caso puntual de una tasa real distinta a la guardada. */}
+                    {/* Monto recibido: se completa solo apenas hay monto y las dos
+                        cuentas elegidas, a partir de la tasa guardada — sigue
+                        editable a mano para el caso puntual de una tasa real
+                        distinta a la guardada. */}
                     {crossCurrency && (
                       <div className={styles.amountCard}>
                         <div className={styles.amountCardLabel}>
@@ -905,6 +953,11 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
                 ) : (
                   <>
                     <input
+                      type="date" value={form.date}
+                      onChange={(e) => setForm({ ...form, date: e.target.value })}
+                      className={styles.topDatePill}
+                    />
+                    <input
                       placeholder="Descripción" value={form.purpose} autoFocus
                       onChange={(e) => { setForm({ ...form, purpose: e.target.value }); setPurposeSuggestion(false) }}
                       onBlur={handlePurposeBlur}
@@ -952,17 +1005,10 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
                       categories={sortedCategories}
                       selectedId={form.categoryId}
                       onSelect={(id) => { setForm({ ...form, categoryId: id === form.categoryId ? '' : id }); setPurposeSuggestion(false) }}
+                      onCreateClick={handleCreateCategoryClick}
                     />
                     {purposeSuggestion && (
                       <p className={styles.voiceHint}>Sugerido de tu historial — podés cambiarlo antes de guardar.</p>
-                    )}
-
-                    {tagOpen && (
-                      <input
-                        placeholder="Tag (opcional)" value={form.tag} autoFocus
-                        onChange={(e) => setForm({ ...form, tag: e.target.value })}
-                        className={styles.textInput}
-                      />
                     )}
 
                     {error && <p className={styles.error}>{error}</p>}
@@ -979,11 +1025,13 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch }) {
                       >
                         #
                       </button>
-                      <input
-                        type="date" value={form.date}
-                        onChange={(e) => setForm({ ...form, date: e.target.value })}
-                        className={styles.dateInput}
-                      />
+                      {tagOpen && (
+                        <input
+                          placeholder="Tag" value={form.tag} autoFocus
+                          onChange={(e) => setForm({ ...form, tag: e.target.value })}
+                          className={styles.tagInlineInput}
+                        />
+                      )}
                       <button type="submit" disabled={!canSubmit || saving} className={`${styles.submit} ${styles.submitInline}`}>
                         {saving ? 'Guardando…' : 'Guardar'}
                       </button>

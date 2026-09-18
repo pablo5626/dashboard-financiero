@@ -104,7 +104,7 @@ are `kind = 'hija'` even though they sit out the monthly madre→hijas ritual.
 | Gasto normal desde una hija COP | Nada: lo trae el CSV | El nombre de la cuenta (`dale`, `nequi`, `pibank`…) |
 | Compra desde arq en USD/EUR | Nada al capturar: la trae el CSV (en COP, convertida por MonIA) y luego confirma el monto real en euros/dólares en la cola "Compras en divisa por confirmar" | `arq` / `arq_eur`¹ |
 | Mover plata entre cuentas propias | La registra como transferencia en la app, decidiendo el checkbox de presupuesto | `traslado`, solo si además aparece en el CSV |
-| Comprar divisas (COP→USD, USD→EUR…) | Usa "Cambio de divisa", que sugiere el monto con la tasa guardada | `traslado` (o `moneda`, alias viejo) |
+| Comprar divisas (COP→USD, USD→EUR…) | La registra como transferencia (Cuentas → Historial de transferencias, o el "+" en modo Traslado) — ambos sugieren el monto de destino con la tasa guardada cuando las dos cuentas tienen moneda distinta | `traslado` (o `moneda`, alias viejo) |
 | Ingreso que cae fuera del reparto mensual | Nada especial: entra como transacción positiva y amplía el disponible solo | El nombre de la cuenta |
 | No sabe de qué cuenta salió | Lo confirma en "Pendientes de banco" | Ninguno |
 
@@ -145,7 +145,8 @@ authenticated," not "no data."
 **Data layer pattern**: each domain gets one `src/lib/*Api.js` module that
 wraps the raw Supabase queries for that domain — `accountsApi.js`,
 `allocationsApi.js`, `fixedExpensesApi.js`, `categoriesApi.js`,
-`transactionsApi.js` (CSV parsing + the bank-assignment engine),
+`tagsApi.js` (tags catalog CRUD — non-normative, see "A `'tags'` section..."
+below), `transactionsApi.js` (CSV parsing + the bank-assignment engine),
 `transfersApi.js` (account_transfers CRUD + `sumOutgoingByAccount`, the rule
 for what counts as budget used), `debtsApi.js`, `savingsApi.js`,
 `panelApi.js` (cross-page aggregates: monthly trend, alerts),
@@ -234,9 +235,10 @@ to the madre** (returning leftover money to Bold is not using the budget),
 currency check as every other per-account view. That flag exists because moving
 money between two hijas is ambiguous — it can be funding a purchase that will
 execute from the other account (consumes the budget) or just rebalancing
-pockets (doesn't) — so both transfer forms (`TransferHistorySection` and
-`CurrencyExchangeSection`) ask with a checkbox, defaulted to checked, shown only
-when neither end is the madre. It's set at creation and not editable
+pockets (doesn't) — so both places that create a transfer
+(`TransferHistorySection` and the "+" FAB's traslado mode) ask with a
+checkbox, defaulted to checked, shown only when neither end is the madre.
+It's set at creation and not editable
 afterwards: to change it, delete the transfer and re-create it, same as every
 other field of a transfer.
 `fetchBalancesForMonth` returns it as `transferredOut` at no extra query cost
@@ -291,15 +293,14 @@ quote, rate)` — up to 3 pairs in practice (COP↔USD, COP↔EUR, USD↔EUR); t
 USD↔EUR pair is stored directly rather than derived by crossing the two COP
 rates, since a real USD→EUR exchange (the most common cross-currency
 movement) doesn't necessarily match a rate computed by pivoting through
-COP. **There is no standalone "Tasa de cambio" card anymore** — it was
-removed because a rate floating in its own disconnected card, unrelated to
-any account on screen, didn't read as belonging to anything. Each rate row
-now renders contextually via `Cuentas.jsx`'s local `renderRateRow(base,
-quote)` helper, directly inside the card of whichever account(s) use that
-currency: any hija whose `currency !== 'COP'` shows its own "1 `currency` =
-? COP" row inline, and if a currency-group (see below) contains both a USD
-and an EUR pocket, that group's card additionally shows the USD↔EUR cross
-rate. A `(base, quote, rate)` row always means "1 `quote` = `rate` `base`"
+COP. **There is no standalone "Tasa de cambio" card anymore, and Cuentas.jsx
+no longer edits rates inline either** — an earlier iteration rendered a
+`renderRateRow(base, quote)` row directly inside each non-COP account's card
+(and, before that, a disconnected standalone card); both were removed once
+Ajustes → Tasas de cambio (see "Fifth section, 'tasas'" below) became the
+one place to edit every pair — keeping a second, duplicate editor on
+Cuentas.jsx wasn't worth the upkeep once Settings covered the exact same
+`exchange_rates` rows. A `(base, quote, rate)` row always means "1 `quote` = `rate` `base`"
 (e.g. `base='COP'`, `quote='USD'`, `rate=4000` → "1 USD = 4000 COP"),
 consistently across all 3 pairs — so the USD/EUR row reads "1 EUR = rate
 USD" (e.g. `rate=1.16` → 1 EUR = 1.16 USD). **This bit us once already**: a
@@ -386,23 +387,26 @@ account to its **primary** currency only (`currencyOf(id)` /
 `balances[g.account_id]`) — there's no pocket picker in those two surfaces
 yet, so logging a manual EUR expense against arq, or pointing a savings goal
 at arq's EUR pocket specifically, isn't possible from there today (the CSV
-import path, `TransferHistorySection`, and `CurrencyExchangeSection` **are**
-pocket-aware, via the same `flattenAccountPockets` picker). `TransferHistorySection`'s
-transfer-history *table* also still renders the bare account name for a past
-transfer's origin/destination, not which pocket — the row's own
+import path and `TransferHistorySection` **are** pocket-aware, via the same
+`flattenAccountPockets` picker). `TransferHistorySection`'s transfer-history
+*table* also still renders the bare account name for a past transfer's
+origin/destination, not which pocket — the row's own
 `formatByCurrency(amount, currency)` is what actually tells you which pocket
 was involved.
 
-A dedicated `CurrencyExchangeSection.jsx` widget (rendered in
-`Cuentas.jsx`, above `TransferHistorySection`) exists specifically to
-register a currency swap between two accounts quickly: it prefills the
-destination amount via `convertAmount` using whatever rate is configured
-for that pair (still editable, since the real rate of a one-off exchange —
-bank spread, cash exchange house — rarely matches the saved manual rate
-exactly), then writes a single row to `account_transfers` via the same
-`transfersApi.createTransfers` used by `TransferHistorySection` — so it has
-no separate history list, its rows just show up in
-`TransferHistorySection`'s table for the month like any other transfer.
+**`CurrencyExchangeSection.jsx` (the standalone "Cambio de divisa" quick-swap
+widget) was removed** — it duplicated `TransferHistorySection`'s own ability
+to register a transfer between two accounts with a converted destination
+amount, and once Ajustes → Tasas de cambio also existed for rate editing
+(see "Fifth section, 'tasas'" below), the user asked to declutter Cuentas.jsx
+of both currency-conversion widgets. Registering a currency swap (COP hija →
+arq, or between arq's own pockets) now goes through
+`TransferHistorySection`'s own add-transfer form (two manual amounts,
+`to_amount`/`to_currency`) or the "+" FAB's traslado mode, which still
+suggests "Monto recibido" from the saved rate the same way the removed
+widget did (see "Quick capture (FAB)" below) — the saved-rate suggestion
+logic itself lives in `exchangeRatesApi.convertAmount`, not in the deleted
+component, so nothing about that mechanism was lost.
 Non-COP accounts (USD or EUR) are deliberately kept out of
 `MonthlyAllocationSection` (madre→hijas monthly distribution) and
 `FixedExpensesSection` (recurring fixed expenses) — neither component has
@@ -565,6 +569,52 @@ sheet (the mic button, the lupa) also collapses `plusExpanded` first, so the
 bubble never lingers stuck open over an unrelated screen. The lupa kept its
 own always-visible spot in the pill, to the left of the "+"/camera group —
 only "+" and the camera regrouped, per what the video specifically showed.
+**Tapping anywhere else on the screen while the satellite is expanded also
+retracts it** — a `pointerdown` listener on `document` (added/removed via a
+`useEffect` gated on `plusExpanded`, so it's never attached while "+" is
+collapsed, its normal state) closes the bubble the moment the click target
+falls outside `plusWrapRef` (`.fabPlusWrap`), without opening the sheet —
+same behavior as a standard menu/popover that dismisses on an outside tap,
+requested after the user found the bubble stayed open when they tapped
+elsewhere instead of on "+" itself a second time.
+
+**The "+" sheet is a full-screen page on mobile now, not a bottom sheet** —
+redone to match a reference screenshot the user shared (a MonIA-style full
+screen with generous spacing, no rounded-corner card floating over the tab
+bar). `.sheet` drops its `border-radius`/`box-shadow`/`max-height:85dvh` and
+instead fills `100dvh` below 768px (the drag-handle affordance was removed
+too, since there's no longer a bottom-sheet edge to suggest dragging);
+desktop/tablet (≥768px) keeps the previous centered floating card
+unchanged, only the mobile branch of the same `min-width: 768px` media
+query changed. Inside the gasto/ingreso form, `.form` is `flex: 1` and
+`.bottomRow` (the "#" tag toggle + "Guardar") gets `margin-top: auto`, so
+the tag/Guardar row anchors to the bottom of the screen instead of sitting
+right under the category row — the same generous "espacios" look as the
+reference. Descripción → Monto → Cuenta (still right below Monto, unchanged
+placement) → categorías stayed in the same order, only the container and
+spacing changed. `CategoryEmojiGrid.jsx`'s tiles (shared with `Diario.jsx`)
+changed shape to match: a horizontal pill (emoji + name side by side,
+`border-radius: 999px`) instead of the earlier vertical panelito (emoji on
+top, name below) — still the same horizontally-scrollable row, just a
+different chip shape per the reference.
+
+**Date moved to the top, tag moved into the bottom row, on a follow-up
+ask**: `form.date` used to live in `.bottomRow` next to "#" and "Guardar"
+(a fixed-width `<input type="date">`); it's now the very first field in the
+gasto/ingreso branch, right above Descripción, styled as a small
+`.topDatePill` (`align-self: flex-start` so it doesn't stretch full-width
+like the rest of `.form`'s children under the default `align-items:
+stretch`). The tag input moved the other way, into `.bottomRow` itself —
+it only renders there once `tagOpen` is true (same toggle as before), as a
+flex:1 `.tagInlineInput` sitting between "#" and "Guardar" instead of its
+own full-width row below the category grid. Net effect: the row that used
+to read "# · fecha · Guardar" now reads "# · [tag cuando está abierto] ·
+Guardar", and the fecha pill sits at the top instead. Also dropped
+"(opcional)" from the tag placeholder (now just "Tag") — the toggle itself
+already makes it obviously optional, so the label was redundant. This
+JSX/CSS reshuffle is scoped to the gasto/ingreso branch only, same as the
+full-screen change above — transferencia mode's own date field (inside
+"Más opciones") is untouched, since it has no tag field to make room for.
 
 **The search icon's behavior was reversed mid-session**: it used to call
 `navigate('/gastos')` as "a shortcut into the existing 'Buscar movimientos'
@@ -740,20 +790,22 @@ the moment the sheet opened. Both classes now suppress the native outline —
 focus affordance, so the native one was always redundant, just invisible
 everywhere `autoFocus` isn't used.
 
-**Transferencia mode now suggests "Monto recibido" for a cross-currency
+**Transferencia mode suggests "Monto recibido" for a cross-currency
 transfer** (COP hija → `arq`'s USD/EUR pocket, or between arq's own pockets)
-the same way `CurrencyExchangeSection.jsx`'s "Cambio de divisa" in Cuentas
-already does — this existed as a manual-only field before (`crossCurrency`
-block, present since the multi-currency-accounts work) but never used the
-saved `exchange_rates` at all, so every such transfer required typing both
-amounts by hand even though a rate was already on file. A `useEffect`
+from the saved `exchange_rates` — this existed as a manual-only field before
+(`crossCurrency` block, present since the multi-currency-accounts work) but
+never used the saved rate at all, so every such transfer required typing
+both amounts by hand even though a rate was already on file. A `useEffect`
 (gated by `form.mode === 'transferencia' && crossCurrency && form.amount &&
-!toAmountTouchedByUser`) calls the same `exchangeRatesApi.convertAmount` and
-fills `form.toAmount`; a `toAmountTouchedByUser` flag (reset whenever the
-user picks a different "Desde"/"Hacia" chip or via `reset()`) stops
-re-suggesting once the user edits that field by hand, for the same reason
-`CurrencyExchangeSection.jsx` needs it — a one-off exchange's real rate
+!toAmountTouchedByUser`) calls `exchangeRatesApi.convertAmount` and fills
+`form.toAmount`; a `toAmountTouchedByUser` flag (reset whenever the user
+picks a different "Desde"/"Hacia" chip or via `reset()`) stops re-suggesting
+once the user edits that field by hand — a one-off exchange's real rate
 (bank spread, cash house) often doesn't match the saved manual rate exactly.
+This is the same suggestion mechanism the now-removed
+`CurrencyExchangeSection.jsx` used to provide from Cuentas — registering a
+currency swap still gets a rate-based suggestion, just from this FAB or
+`TransferHistorySection` instead of a dedicated widget.
 `QuickCaptureFAB.jsx` now fetches `exchangeRatesApi.getRates()` alongside
 accounts/categories when the sheet first opens, since it never needed rates
 before this.
@@ -762,13 +814,19 @@ before this.
 (also used the same way by `Diario.jsx`, so behavior stays consistent
 across every entry surface):
 - `CategoryEmojiGrid.jsx` is rendered directly (no separate flat "suggested
-  chips" row, no "+" expand toggle — an earlier iteration had both, removed
-  once the grid itself became the single source of truth). Its CSS is a
-  **horizontally-scrollable flex row of vertical tiles**, not a wrapping
+  chips" row, no "+" *expand* toggle — an earlier iteration had both, removed
+  once the grid itself became the single source of truth; that removal
+  still stands, don't resurrect a filter/expand toggle). A different "+" was
+  added back later (see "Creating a category from the '+' sheet redirects to
+  Ajustes" below) — a *create* affordance, not a filter one, so it doesn't
+  contradict this. Its CSS is a **horizontally-scrollable flex row**, not a wrapping
   grid (`display:flex; overflow-x:auto` in `CategoryEmojiGrid.module.css`,
   changed from the original `grid-template-columns: repeat(auto-fill,...)`)
   — always shows every category, "swipeable panels" per the user's own
-  words, so there's never a need to hide categories behind a toggle.
+  words, so there's never a need to hide categories behind a toggle. The
+  tile shape itself changed later from vertical (emoji on top, name below)
+  to a horizontal pill (emoji + name side by side) — see "Date moved to the
+  top..." under "Quick capture (FAB)" for that change and why.
   `.grid` also sets `scrollbar-width: none` + a hidden `::-webkit-scrollbar`
   — without it, desktop Chrome on Windows draws a visible horizontal
   scrollbar with click arrows under the row, easy to miss with just one such
@@ -800,6 +858,36 @@ across every entry surface):
   registers — a standard pattern for custom autocomplete/combobox UIs.
   Chip rows for "Desde"/"Hacia" in `QuickCaptureFAB.jsx`'s transferencia
   mode are untouched (out of scope, same as the rest of that mode).
+
+**Creating a category from the "+" sheet redirects to Ajustes, it doesn't
+inline a mini-form**: `CategoryEmojiGrid.jsx` takes an optional
+`onCreateClick` prop — when passed, a circular "+" tile (`.addTile`) renders
+first in the row, before any category. Only `QuickCaptureFAB.jsx` passes it;
+`Diario.jsx`'s copy of the same component doesn't, so it renders exactly as
+before. **A first version of this opened an inline emoji+name form right in
+the sheet** (same idea as the inline category form in `SettingsPanel.jsx`,
+just embedded) — the user asked to undo that: the category row shouldn't
+grow more elements, and the full Ajustes form (name/emoji/color/`is_ambiguous`)
+is more complete anyway. `handleCreateCategoryClick` instead: (1) sets local
+`pendingResumeAfterSettings = true`, (2) hides this sheet with a bare
+`setOpen(false)` — **not** `close()`/`reset()`, so `form` (amount, purpose,
+account, everything typed so far) stays alive in memory — and (3) dispatches
+`dashboard:open-settings` with `{ section: 'categorias' }`, the same event
+`Deudas.jsx`'s "Precargar" flow already used to jump Ajustes straight to a
+section. `SettingsPanel.jsx`'s `close()` now always dispatches a new
+`dashboard:settings-closed` event (harmless no-op for any other listener,
+today there isn't one); `QuickCaptureFAB.jsx` listens for it, and when
+`pendingResumeAfterSettings` is true it re-fetches `listCategories()` (so
+the just-created category is there — the sheet's own categories fetch only
+ever runs once per mount, gated by `accounts.length` as a "already loaded"
+flag, so nothing else would pick up the change) and calls `setOpen(true)`
+to bring the paused sheet back with the same half-filled movement intact.
+This only fires when *this* flow set `pendingResumeAfterSettings` — closing
+Ajustes any other way (its own "×", the user just browsing it unrelated to
+this) is harmless since nothing is listening in that case; `close()` also
+resets the flag as a safety net. Both `close()` in `SettingsPanel.jsx` and
+`handleCreateCategoryClick`/the listener in `QuickCaptureFAB.jsx` are the
+whole mechanism — no new prop, no new global store.
 
 **`categories.emoji` is now required when creating a new category** (not
 retroactively enforced on existing categories, or on rename/edit of one
@@ -915,17 +1003,19 @@ payload needed) and each page subscribes in a `useEffect` calling its own
 
 **Fifth section, `'tasas'`**: a centralized "Tasas de cambio" editor for the
 3 fixed pairs (`RATE_PAIRS` — `CURRENCIES` only has COP/USD/EUR, so this
-list is hardcoded rather than derived from active accounts, unlike
-`Cuentas.jsx`'s own version of these rows which only shows a pair when some
-account actually uses that currency). This **duplicates**, rather than
-replaces, `Cuentas.jsx`'s existing inline `renderRateRow` per account card —
-the user explicitly asked to add it to Settings "también" (as well), not to
-move it away from the account cards, so both UIs write the same
-`exchange_rates` rows and stay in sync via a new `dashboard:rates-changed`
-event (`Cuentas.jsx` subscribes and calls `reload()`, same shape as the
-`debts-changed`/`goals-changed` pair above — needed here too since
-`Cuentas.jsx` stays mounted under the Settings sheet while a rate is saved
-from there).
+list is hardcoded rather than derived from active accounts). This started as
+a duplicate of `Cuentas.jsx`'s own inline `renderRateRow` per account card —
+added "también" (as well) at first, not to replace it — but once both
+existed the user asked to declutter Cuentas.jsx, so `renderRateRow` and the
+standalone `CurrencyExchangeSection.jsx` widget were both removed from
+`Cuentas.jsx` (see "Multi-currency" above and "Known gaps" for
+`CurrencyExchangeSection`'s removal). **This Settings section is now the
+only place that writes `exchange_rates`.** `Cuentas.jsx` still listens for
+`dashboard:rates-changed` (dispatched here on save) and calls its own
+`reload()`, same shape as the `debts-changed`/`goals-changed` pair above —
+kept so the "faltan tasas configuradas" warning banner and each account's
+computed balances refresh live when a rate is saved from Settings, even
+though the page itself no longer edits rates.
 
 **"Buscar" fetches today's rate from a real FX-rate API, not from an AI
 model** — the user's first ask was for "an AI system" to look up the day's
@@ -937,13 +1027,48 @@ follow elsewhere in this app. `exchangeRatesApi.fetchLiveRate(base, quote)`
 instead calls `https://open.er-api.com/v6/latest/{quote}` directly from the
 browser (free, no API key, `Access-Control-Allow-Origin: *` so no CORS
 issue and no Edge Function/deploy step needed) and reads `rates[base]` —
-matching `renderRateRow`'s own "1 quote = rate base" convention exactly, so
-fetching with `(base, quote)` swapped the same way `setRate` expects avoids
+matching this app's "1 quote = rate base" convention exactly (see
+"Multi-currency" above), so fetching with `(base, quote)` swapped the same
+way `setRate` expects avoids
 the inversion mistake documented under "Multi-currency" above. Same
 prefill-only discipline as voice/receipt parsing: the fetched value only
 fills the manual rate input (`rateInputs`), the user still has to review and
 tap "Guardar" — nothing is written to `exchange_rates` directly from the
 fetch.
+
+**A `'tags'` section (in `SETTINGS_SECTIONS`, between `'categorias'` and
+`'cuentas'`) manages the new `tags` catalog table** — added because the user
+asked for a tags-creation surface in Settings, reusing the same reserved-word
+knowledge the bank-assignment engine already had. Until this, `transactions.tags`
+was purely free text with no catalog at all (`SearchPanel.jsx`'s tag chips came
+from `listTopTags()`, a frequency count over real transactions, not a real
+list of "known" tags). `tags` (schema.sql, `id`/`user_id`/`name`/`created_at`,
+`unique (user_id, name)`) is **not** a normative table — `transactions.tags`
+stays a free `text[]` (see `.claude/rules/motor-asignacion.md`), this is only
+a catalog for autocomplete/management, with no FK from `transactions`.
+`src/lib/tagsApi.js` (`listTags`, `createTag`, `deleteTag`, `ensureTags`) is
+new; `ensureTags(names)` — a batched `upsert(..., { onConflict: 'user_id,name',
+ignoreDuplicates: true })` — is the important one: **the catalog grows on its
+own from real usage**, not only from manual entry in Settings. It's called
+(best-effort, wrapped in try/catch so a tag-catalog hiccup never blocks the
+real save) from `transactionsApi.js`'s `createManualTransaction`,
+`updateTransactionTags`, `updateTransaction`, and `importTransactions` (the
+MonIA CSV path — one batched call per import, not per row, and filtered
+through `isReservedTag` first so account-name tags and `IGNORED_TAGS` never
+pollute the catalog as if they were real spend-tags). The Settings section
+itself (list of tags + delete via `ConfirmDialog`, matching the
+"every create needs a delete" rule + a small create form) is mostly a
+shortcut to pre-register a tag before using it, or to clean one out of the
+catalog — `handleCreateTag` blocks a reserved name up front with the same
+`isReservedTag` check, showing why in the inline error instead of a generic
+failure. Deleting a tag here only removes it from the catalog — it does
+**not** touch `tags` already saved on past transactions (nothing to cascade,
+since there's no FK) and, per `ensureTags`, comes right back the next time
+it's actually used on a movement — that's by design, not a bug: the delete
+button is for tidying the suggestion list, not for un-tagging history. Needs
+`IconHash` (new in `icons.jsx`) rather than reusing `IconTag` — "Categorías"
+already has that glyph, and two adjacent menu rows with the same icon would
+read as a mistake.
 
 **Global search popup (`SearchPanel.jsx`)**: mounted once in `AppShell.jsx`
 next to `SettingsPanel`/`QuickCaptureFAB`, controlled from there via a
@@ -983,6 +1108,32 @@ default — same "don't show what isn't being used" reasoning as
 (`hasAnyFilter` check), so opening the panel doesn't dump the 200 most
 recent transactions before the user has typed anything.
 
+**The panel is a full-screen page on mobile now too**, same conversion and
+same reasoning as the "+" sheet (see "Quick capture (FAB)" above) —
+`.backdrop`/`.panel` in `SearchPanel.module.css` follow the identical
+pattern (base rules fill `100dvh` with no rounded corners below 768px, the
+existing `min-width: 768px` override keeps the centered floating card on
+desktop/tablet unchanged), and the drag-handle affordance was removed for
+the same reason (no bottom-sheet edge left to suggest dragging).
+
+**The single query box now searches by descripción, categoría, and tag at
+once, not just free text against `purpose`** — the user asked for "esa
+línea" (the one search box) to cover all three instead of requiring the
+"Filtros" drawer for categoría/tag. `SearchPanel.jsx` resolves which
+categories match the typed text client-side (`categories` is already in
+memory; accent/case-insensitive substring match via a local `normalize()`
+helper, same idea as `normalizeName` in `QuickCaptureFAB.jsx`) and passes
+those ids as `matchCategoryIds` to `transactionsApi.searchTransactions`.
+That function runs up to 3 variants of the same filtered base query in
+parallel — `purpose` ilike, `tags` contains (exact, lowercase — same
+operator the dedicated tag filter already used), and `category_id in
+matchCategoryIds` — and de-duplicates the merged rows by `id`, because
+PostgREST can't express an OR across a column on the queried table
+(`purpose`), a related table's column (`categories.name`), and an array
+column (`tags`) in a single request. The explicit "Filtros" fields
+(categoría `<select>`, cuenta, tag, fechas) are unchanged and still combine
+with the query box as regular `AND` conditions, same as before.
+
 **Voice search**: a mic button inside the query field (visible only when
 `SpeechRecognitionCtor` exists, same browser-support check as
 `QuickCaptureFAB`) starts a `SpeechRecognition` with `interimResults = true`
@@ -1012,9 +1163,11 @@ placeholder data in front of the user, only real numbers/tags, even for a
 
 **Every create/log action needs a matching delete**: transactions, savings
 contributions, transfers, accounts, debts (+ installments), fixed
-expenses, and savings goals can all be deleted or archived from the UI —
-this is a standing expectation, not something to add only when the user
-notices a gap. A resource that's a single current-state value fully
+expenses, savings goals, and tags (catalog-only — deleting one from Ajustes
+→ Tags doesn't touch `tags` already saved on past transactions, since
+there's no FK, see "A `'tags'` section..." below) can all be deleted or
+archived from the UI — this is a standing expectation, not something to
+add only when the user notices a gap. A resource that's a single current-state value fully
 overwritten on save (the monthly allocation amounts, the monthly initial
 balances) is fine without a delete button, since re-entering the right
 number and saving is an equivalent fix and there's no historical log being
@@ -1207,14 +1360,19 @@ Supabase, no sample data left anywhere:
   `accountsApi.fetchBalancesForMonth` credits the destination account using
   `to_amount`/`to_currency` when present (falling back to `amount`/
   `currency` otherwise) while the source account is always debited in its
-  own `amount`/`currency`. `CurrencyExchangeSection.jsx` (above
-  `TransferHistorySection.jsx`) is the fast path for that same scenario —
-  same underlying `createTransfers` call, but with the destination amount
-  pre-filled from the saved per-pair rate instead of typed by hand every
-  time. Also fixed-expenses CRUD with
-  per-month paid status (`FixedExpensesSection.jsx`), and the
-  exchange-rate card (now one row per currency pair, see "Multi-currency"
-  above).
+  own `amount`/`currency`. A dedicated `CurrencyExchangeSection.jsx` widget
+  used to sit above `TransferHistorySection.jsx` as a faster path for that
+  same scenario (destination amount pre-filled from the saved rate instead
+  of typed by hand) — **it was removed** once it read as duplicate chrome
+  next to Ajustes → Tasas de cambio; `TransferHistorySection.jsx`'s own
+  add-transfer form and the "+" FAB's traslado mode (which also
+  pre-fills "Monto recibido" from the saved rate, see "Quick capture (FAB)")
+  are the two remaining ways to register one of these. Also fixed-expenses
+  CRUD with per-month paid status (`FixedExpensesSection.jsx`). There is no
+  exchange-rate card or inline rate row left on this page at all — every
+  pair is edited exclusively from Ajustes → Tasas de cambio (see "Fifth
+  section, 'tasas'" above); this page only reads `exchange_rates` for the
+  "faltan tasas configuradas" warning banner and for computing balances.
 
   **`MonthlyInitialBalancesSection.jsx`: a multi-currency account is one
   table row, not one per pocket.** It used to list every pocket as its own

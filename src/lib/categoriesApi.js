@@ -7,8 +7,13 @@ export async function listCategories() {
 }
 
 export async function createCategory({ name, emoji, color, isAmbiguous = true }) {
-  const { error } = await supabase.from('categories').insert({ name, emoji: emoji || null, color: color || null, is_ambiguous: isAmbiguous })
+  const { data, error } = await supabase
+    .from('categories')
+    .insert({ name, emoji: emoji || null, color: color || null, is_ambiguous: isAmbiguous })
+    .select()
+    .single()
   if (error) throw error
+  return data
 }
 
 export async function updateCategory(id, fields) {

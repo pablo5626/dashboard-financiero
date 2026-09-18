@@ -124,6 +124,17 @@ export function IconTag(props) {
   )
 }
 
+// Distinta de IconTag (usada por "Categorías") para que el menú de Ajustes
+// no repita el mismo glifo en dos filas — "#" es también el mismo símbolo
+// que el botón de tag en QuickCaptureFAB/SearchPanel.
+export function IconHash(props) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M9 4l-2 16M17 4l-2 16M4 9h16M3 15h16" />
+    </svg>
+  )
+}
+
 export function IconExchange(props) {
   return (
     <svg {...base} {...props}>

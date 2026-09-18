@@ -324,6 +324,24 @@ create table savings_contributions (
   created_at timestamptz not null default now()
 );
 
+-- ----------------------------------------------------------------------------
+-- 9. CATÁLOGO DE TAGS (autocompletado; no es una tabla normativa)
+-- ----------------------------------------------------------------------------
+-- transactions.tags sigue siendo un text[] libre (ver motor-asignacion.md) —
+-- esta tabla no tiene FK desde ahí, es solo el catálogo que alimenta el
+-- selector de Ajustes → Tags y las sugerencias en SearchPanel/QuickCaptureFAB.
+-- Se llena de dos formas: a mano desde Ajustes, o automáticamente cada vez
+-- que se guarda un movimiento con un tag que todavía no está acá
+-- (tagsApi.ensureTags, llamada desde createManualTransaction,
+-- updateTransactionTags, updateTransaction e importTransactions).
+create table tags (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) default auth.uid(),
+  name text not null,
+  created_at timestamptz not null default now(),
+  unique (user_id, name)
+);
+
 -- ============================================================================
 -- ROW LEVEL SECURITY: cada tabla solo expone las filas del usuario dueño
 -- ============================================================================
@@ -336,7 +354,7 @@ begin
     'account_transfers', 'categories', 'transactions', 'category_account_stats',
     'purpose_category_stats',
     'fixed_expenses', 'fixed_expense_month_status', 'debts', 'debt_installments',
-    'savings_goals', 'savings_contributions'
+    'savings_goals', 'savings_contributions', 'tags'
   ])
   loop
     execute format('alter table %I enable row level security;', t);

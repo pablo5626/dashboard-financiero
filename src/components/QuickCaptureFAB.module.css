@@ -123,38 +123,33 @@
   }
 }
 
+/* Pantalla completa en mobile (referencia: captura del usuario) — ya no un
+   bottom sheet recortado, así que la hoja usa toda la altura visible y "+"
+   se siente como su propia pantalla, no una tarjeta flotante. Desktop/tablet
+   (≥768px) sigue como tarjeta centrada, sin cambios. */
 .sheet {
   background: var(--surface-raised);
-  border: 1px solid var(--border-hairline);
-  border-radius: 28px 28px 0 0;
-  padding: 10px var(--space-2) calc(var(--space-3) + env(safe-area-inset-bottom));
+  border: none;
+  border-radius: 0;
+  padding: max(var(--space-2), env(safe-area-inset-top)) var(--space-2) calc(var(--space-2) + env(safe-area-inset-bottom));
   width: 100%;
   max-width: 420px;
-  max-height: 85dvh;
+  height: 100dvh;
+  max-height: 100dvh;
   overflow-y: auto;
-  box-shadow: 0 -16px 40px -12px color-mix(in srgb, var(--series-1) 16%, transparent);
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
 }
 
 @media (min-width: 768px) {
   .sheet {
+    border: 1px solid var(--border-hairline);
     border-radius: 28px;
     padding: var(--space-3);
-  }
-}
-
-/* Barrita de "arrastrar" decorativa arriba de la hoja — afordancia estándar
-   de bottom sheet, no es funcional (no hay drag-to-dismiss implementado). */
-.dragHandle {
-  width: 40px;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--gridline);
-  margin: 0 auto var(--space-2);
-}
-
-@media (min-width: 768px) {
-  .dragHandle {
-    display: none;
+    height: auto;
+    max-height: 85dvh;
+    box-shadow: 0 -16px 40px -12px color-mix(in srgb, var(--series-1) 16%, transparent);
   }
 }
 
@@ -162,7 +157,7 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: var(--space-2);
+  margin-bottom: var(--space-3);
 }
 
 .titleRow {
@@ -419,10 +414,15 @@
   color: var(--text-muted);
 }
 
+/* flex:1 hace que el form ocupe el alto disponible de la hoja de pantalla
+   completa, así .bottomRow (margin-top: auto más abajo) queda anclado al
+   fondo en vez de pegado justo debajo de la grilla de categorías. */
 .form {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: var(--space-2);
+  flex: 1;
+  min-height: 0;
 }
 
 .segmented {
@@ -928,11 +928,15 @@
   margin: 0;
 }
 
+/* margin-top: auto empuja esta fila al fondo de la hoja de pantalla
+   completa (ver flex:1 en .form) — el "#" y "Guardar" quedan anclados abajo
+   en vez de subir pegados a la grilla de categorías. */
 .bottomRow {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 4px;
+  margin-top: auto;
+  padding-top: var(--space-2);
 }
 
 .tagToggle {
@@ -952,16 +956,36 @@
   box-shadow: 0 2px 10px -2px color-mix(in srgb, var(--series-1) 45%, transparent);
 }
 
-.dateInput {
+/* Píldora de fecha arriba del todo (Descripción/Monto/...) — antes vivía
+   junto a "Guardar" al fondo, movida arriba para que ese lugar lo ocupe el
+   tag en línea (ver .tagInlineInput). align-self:flex-start para que no
+   estire a lo ancho como el resto de los campos de .form (align-items
+   stretch por defecto). */
+.topDatePill {
+  align-self: flex-start;
+  min-height: 32px;
+  padding: 0 14px;
+  border-radius: 20px;
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font: var(--font-caption);
+  font-weight: 600;
+}
+
+/* Tag en línea horizontal junto al "#" y "Guardar" — ocupa el lugar donde
+   antes estaba la fecha en .bottomRow, en vez de su propia fila completa
+   debajo de las categorías. */
+.tagInlineInput {
+  flex: 1;
+  min-width: 0;
   min-height: var(--touch-target);
   border-radius: 12px;
   border: 1px solid var(--border-hairline);
-  padding: 0 8px;
-  font: var(--font-caption);
+  padding: 0 var(--space-1);
+  font: var(--font-body);
   background: var(--surface-1);
   color: var(--text-primary);
-  flex-shrink: 0;
-  width: 132px;
 }
 
 .submitInline {

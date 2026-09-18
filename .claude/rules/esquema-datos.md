@@ -67,6 +67,14 @@ directamente en el panel de Supabase sin reflejarlo en el archivo.
 - Los bloques de `insert` de valores iniciales (cuentas, categorías) están
   comentados en `schema.sql` a propósito — se ejecutan una vez, ya
   autenticado, para que `auth.uid()` resuelva al usuario real.
+- **`tags` es una tabla NO normativa** — un catálogo de autocompletado/gestión
+  para Ajustes → Tags, sin FK desde `transactions.tags` (que sigue siendo un
+  `text[]` libre, ver `motor-asignacion.md`). Se llena a mano desde esa
+  pantalla o automáticamente vía `tagsApi.ensureTags`, llamada desde
+  `createManualTransaction`, `updateTransactionTags`, `updateTransaction` e
+  `importTransactions` cada vez que se guarda un tag nuevo — filtrando con
+  `isReservedTag` para que un nombre de cuenta o un `IGNORED_TAGS` nunca
+  entre al catálogo como si fuera un tag real.
 
 ## Cambios de esquema en la base de datos ya viva
 

@@ -4,6 +4,7 @@ import { listAccounts } from './accountsApi.js'
 import { listCategories } from './categoriesApi.js'
 import { getRates, convertAmount } from './exchangeRatesApi.js'
 import { buildPocketIndex, resolvePocketKey } from './currencyPockets.js'
+import { ensureTags } from './tagsApi.js'
 
 // Tags de nivel 1 que marcan una fila del CSV que el dashboard NO debe contar,
 // porque el movimiento real ya está registrado en otro lado — ver
@@ -281,6 +282,19 @@ export async function importTransactions(rows, year, month) {
     newRowsWithCategory.map((r) => ({ purposeKey: normalizePurpose(r.purpose), categoryId: r.category_id, tag: r.tags?.[0] ?? null }))
   )
 
+  // Alimenta el catálogo de Ajustes → Tags con los tags descriptivos reales
+  // del CSV (una sola llamada en lote, no una por fila) — excluye los que
+  // son en realidad nombre de cuenta o IGNORED_TAGS (isReservedTag), porque
+  // esos no son tags de gasto de verdad, son vocabulario del motor de
+  // asignación.
+  const newDescriptiveTags = payload
+    .filter((r) => newMoniaIds.has(r.monia_id))
+    .flatMap((r) => r.tags)
+    .filter((t) => !isReservedTag(t, accounts))
+  if (newDescriptiveTags.length) {
+    try { await ensureTags(newDescriptiveTags) } catch { /* catálogo secundario, ver createManualTransaction */ }
+  }
+
   return { imported: data.length, skipped: payload.length - data.length, totalInMonth: monthRows.length }
 }
 
@@ -445,6 +459,9 @@ export async function createManualTransaction({ purpose, amount, occurredAt, cat
   if (categoryId) {
     await recordPurposeCategoryStats([{ purposeKey: normalizePurpose(purpose), categoryId, tag: tags?.[0] ?? null }])
   }
+  if (tags?.length) {
+    try { await ensureTags(tags) } catch { /* catálogo secundario: un tag nuevo no debe bloquear el guardado real */ }
+  }
   return data
 }
 
@@ -511,6 +528,9 @@ export async function updateTransactionTags(id, tags) {
   const cleaned = [...new Set(tags.map(normalizeTag).filter(Boolean))]
   const { error } = await supabase.from('transactions').update({ tags: cleaned }).eq('id', id)
   if (error) throw error
+  if (cleaned.length) {
+    try { await ensureTags(cleaned) } catch { /* catálogo secundario, ver createManualTransaction */ }
+  }
 }
 
 // Edición genérica de una transacción ya guardada (usada por la fila
@@ -529,6 +549,9 @@ export async function updateTransaction(id, { purpose, amount, categoryId, accou
   if (tags !== undefined) fields.tags = [...new Set(tags.map(normalizeTag).filter(Boolean))]
   const { data, error } = await supabase.from('transactions').update(fields).eq('id', id).select().single()
   if (error) throw error
+  if (fields.tags?.length) {
+    try { await ensureTags(fields.tags) } catch { /* catálogo secundario, ver createManualTransaction */ }
+  }
   return data
 }
 
@@ -701,24 +724,50 @@ export async function listRecentExpenses(monthsBack) {
 // listTransactionsForMonth, que solo trae el mes que se está gestionando en
 // pantalla. `limit` evita traer todo el histórico de una sola vez en una
 // tabla que puede crecer sin cota.
-export async function searchTransactions({ query, categoryId, accountId, tag, dateFrom, dateTo, limit = 200 } = {}) {
-  let q = supabase
-    .from('transactions')
-    .select('*, categories(name), accounts(name)')
-    .order('occurred_at', { ascending: false })
-    .limit(limit)
+//
+// `query` (el cuadro único de SearchPanel.jsx) busca por descripción,
+// categoría y tag a la vez, no solo por `purpose` — `matchCategoryIds` es la
+// lista de ids de categorías cuyo nombre matchea el texto, resuelta por el
+// llamador (que ya tiene las categorías en memoria), porque PostgREST no
+// permite un OR entre una columna propia (`purpose`), una tabla relacionada
+// (`categories.name`) y un array (`tags`) en una sola consulta. En vez de
+// eso se corren hasta 3 variantes de la misma consulta base en paralelo y
+// se de-duplican acá por id — sigue siendo una sola ida y vuelta lógica
+// desde la UI (el debounce ya evita disparar esto en cada tecla).
+export async function searchTransactions({ query, categoryId, accountId, tag, dateFrom, dateTo, matchCategoryIds, limit = 200 } = {}) {
+  function baseQuery() {
+    let q = supabase
+      .from('transactions')
+      .select('*, categories(name), accounts(name)')
+      .order('occurred_at', { ascending: false })
+      .limit(limit)
+    if (categoryId) q = q.eq('category_id', categoryId)
+    if (accountId === 'pending') q = q.is('account_id', null)
+    else if (accountId) q = q.eq('account_id', accountId)
+    if (tag?.trim()) q = q.contains('tags', [tag.trim().toLowerCase()])
+    if (dateFrom) q = q.gte('occurred_at', dateFrom)
+    if (dateTo) q = q.lte('occurred_at', dateTo)
+    return q
+  }
 
-  if (query?.trim()) q = q.ilike('purpose', `%${query.trim()}%`)
-  if (categoryId) q = q.eq('category_id', categoryId)
-  if (accountId === 'pending') q = q.is('account_id', null)
-  else if (accountId) q = q.eq('account_id', accountId)
-  if (tag?.trim()) q = q.contains('tags', [tag.trim().toLowerCase()])
-  if (dateFrom) q = q.gte('occurred_at', dateFrom)
-  if (dateTo) q = q.lte('occurred_at', dateTo)
+  const trimmed = query?.trim()
+  if (!trimmed) {
+    const { data, error } = await baseQuery()
+    if (error) throw error
+    return data
+  }
 
-  const { data, error } = await q
-  if (error) throw error
-  return data
+  const variants = [baseQuery().ilike('purpose', `%${trimmed}%`), baseQuery().contains('tags', [trimmed.toLowerCase()])]
+  if (matchCategoryIds?.length) variants.push(baseQuery().in('category_id', matchCategoryIds))
+
+  const results = await Promise.all(variants)
+  for (const r of results) if (r.error) throw r.error
+
+  const byId = new Map()
+  for (const r of results) for (const row of r.data) byId.set(row.id, row)
+  return [...byId.values()]
+    .sort((a, b) => new Date(b.occurred_at) - new Date(a.occurred_at))
+    .slice(0, limit)
 }
 
 // Tags más usados en el histórico reciente, para ofrecerlos como chips

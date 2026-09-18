@@ -5,13 +5,12 @@ import FixedExpensesSection from '../components/FixedExpensesSection.jsx'
 import MonthlyAllocationSection from '../components/MonthlyAllocationSection.jsx'
 import MonthlyInitialBalancesSection from '../components/MonthlyInitialBalancesSection.jsx'
 import TransferHistorySection from '../components/TransferHistorySection.jsx'
-import CurrencyExchangeSection from '../components/CurrencyExchangeSection.jsx'
 import { formatCOP, formatByCurrency, CURRENCIES } from '../lib/format.js'
 import {
   listAccounts, updateAccount, archiveAccount, fetchBalancesForMonth,
   addAccountCurrency, removeAccountCurrency,
 } from '../lib/accountsApi.js'
-import { getRates, setRate } from '../lib/exchangeRatesApi.js'
+import { getRates } from '../lib/exchangeRatesApi.js'
 import { getAccountFlowsForMonth } from '../lib/transactionsApi.js'
 import { flattenAccountPockets } from '../lib/currencyPockets.js'
 
@@ -33,8 +32,6 @@ export default function Cuentas() {
   const [editingId, setEditingId] = useState(null)
   const [edit, setEdit] = useState(emptyEdit)
   const [activePocket, setActivePocket] = useState({}) // accountId -> pocketKey
-  const [rateInputs, setRateInputs] = useState({}) // "base_quote" -> string
-  const [savingRatePair, setSavingRatePair] = useState(null) // "base_quote" | null
   const [confirmArchive, setConfirmArchive] = useState(null) // { id, name } | null
 
   async function reload() {
@@ -140,57 +137,6 @@ export default function Cuentas() {
     }
   }
 
-  // Una fila (base, quote, rate) siempre significa "1 quote = rate base"
-  // (ej. base='COP', quote='USD' -> "1 USD = rate COP"). Para el par
-  // USD/EUR eso significa "1 EUR = rate USD" — si el usuario da una tasa
-  // "de dólar a euro" (cuántos euros salen de 1 dólar), hay que guardar su
-  // recíproco (1 / tasa), no el valor tal cual. Esto ya mordió una vez.
-  async function handleSaveRate(e, base, quote) {
-    e.preventDefault()
-    const pairKey = `${base}_${quote}`
-    const input = rateInputs[pairKey]
-    if (!input) return
-    setSavingRatePair(pairKey)
-    try {
-      await setRate(base, quote, Number(input))
-      setRateInputs({ ...rateInputs, [pairKey]: '' })
-      await reload()
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setSavingRatePair(null)
-    }
-  }
-
-  // Fila compacta de tasa de cambio, para renderizar contextualmente dentro
-  // de la tarjeta de la cuenta que usa esa moneda, en vez de una tarjeta
-  // "Tasa de cambio" aparte y desconectada.
-  function renderRateRow(base, quote) {
-    const pairKey = `${base}_${quote}`
-    const existing = rates.find((r) => r.base_currency === base && r.quote_currency === quote)
-    return (
-      <div key={pairKey} style={{ marginTop: 8 }}>
-        <div style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', marginBottom: 4 }}>
-          {existing ? `1 ${quote} = ${formatByCurrency(existing.rate, base)}` : `1 ${quote} = ? ${base} (sin configurar)`}
-        </div>
-        <form onSubmit={(e) => handleSaveRate(e, base, quote)} style={{ display: 'flex', gap: 6 }}>
-          <input
-            type="number" placeholder={`Ej. ${base === 'COP' ? '4000' : '1.1'}`}
-            value={rateInputs[pairKey] ?? ''}
-            onChange={(e) => setRateInputs({ ...rateInputs, [pairKey]: e.target.value })}
-            style={{ flex: 1, minWidth: 0, minHeight: 32, borderRadius: 8, border: '1px solid var(--border-hairline)', padding: '0 8px', font: 'var(--font-caption)' }}
-          />
-          <button
-            type="submit" disabled={savingRatePair === pairKey}
-            style={{ minHeight: 32, padding: '0 10px', borderRadius: 8, background: 'var(--series-1)', color: '#fff', fontWeight: 600, font: 'var(--font-caption)', opacity: savingRatePair === pairKey ? 0.6 : 1 }}
-          >
-            Guardar
-          </button>
-        </form>
-      </div>
-    )
-  }
-
   if (error) {
     return <p style={{ color: 'var(--status-critical)' }}>Error cargando cuentas: {error}</p>
   }
@@ -218,7 +164,7 @@ export default function Cuentas() {
 
       {hijas.some((a) => (a.currency || 'COP') !== 'COP' && !rates.some((r) => r.base_currency === 'COP' && r.quote_currency === (a.currency || 'COP'))) && (
         <p style={{ font: 'var(--font-caption)', color: 'var(--status-warning)', margin: '0 0 var(--space-2)' }}>
-          Hay cuentas cuyos saldos no se están sumando en Panel General ni Deudas hasta que definas su tasa hacia COP (editá la cuenta correspondiente más abajo).
+          Hay cuentas cuyos saldos no se están sumando en Panel General ni Deudas hasta que definas su tasa hacia COP (Ajustes → Tasas de cambio).
         </p>
       )}
 
@@ -244,7 +190,6 @@ export default function Cuentas() {
           const usado = spentAmt + movidoAmt
           const pct = disponible > 0 ? Math.round((usado / disponible) * 100) : null
           const isEditing = editingId === account.id
-          const nonCopCurrencies = [...new Set(pockets.map((p) => p.currency).filter((c) => c !== 'COP'))]
 
           return (
             <Card key={account.id}>
@@ -349,13 +294,6 @@ export default function Cuentas() {
                   </div>
                 </>
               )}
-
-              {nonCopCurrencies.length > 0 && (
-                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border-hairline)' }}>
-                  {nonCopCurrencies.map((c) => renderRateRow('COP', c))}
-                  {nonCopCurrencies.includes('USD') && nonCopCurrencies.includes('EUR') && renderRateRow('USD', 'EUR')}
-                </div>
-              )}
             </Card>
           )
         })}
@@ -363,8 +301,6 @@ export default function Cuentas() {
         <MonthlyAllocationSection hijas={hijasCop} madre={madre} year={YEAR} month={MONTH} onSaved={reload} />
 
         <MonthlyInitialBalancesSection accounts={accounts} year={YEAR} month={MONTH} onSaved={reload} />
-
-        <CurrencyExchangeSection accounts={accounts} rates={rates} onSaved={reload} />
 
         <TransferHistorySection accounts={accounts} year={YEAR} month={MONTH} onSaved={reload} />
 

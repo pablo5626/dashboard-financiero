@@ -67,6 +67,17 @@ en este orden, priorizando siempre el dato explícito sobre la especulación:
       match por `currency` (punto c) y sobre la categoría inequívoca
       (nivel 2); solo un tag de cuenta (punto a) puede ganarle, si por algún
       motivo raro coexisten en la misma fila.
+
+      **`isReservedTag(tag, accounts)`** (`transactionsApi.js`) centraliza
+      este mismo criterio — `IGNORED_TAGS` + nombre de cuenta hija activa —
+      en una sola función reutilizable, para no repetir la lógica en cada
+      lugar que necesita saber "¿este texto ya significa algo especial acá?".
+      Hoy también la usa `tagsApi.ensureTags`/la sección Ajustes → Tags, para
+      que el catálogo de autocompletado de tags (`tags`, ver
+      `esquema-datos.md`) no se contamine con un nombre de cuenta o un
+      `IGNORED_TAGS` cuando se auto-crea desde el uso real. Ese catálogo
+      sigue sin ser la fuente de verdad de este motor: acá se sigue leyendo
+      `transactions.tags` en crudo, `isReservedTag` solo avisa/filtra.
    c. **Moneda de la fila** (`currency` del CSV, ej. `USD`): si es distinta
       de COP y existe exactamente una cuenta hija activa con esa moneda
       (ej. "arq" en USD, "arq eur" en EUR), se asigna esa cuenta

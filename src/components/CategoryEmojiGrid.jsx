@@ -16,9 +16,18 @@ export function seriesForName(name) {
 // categorías probablemente no lo tengan cargado todavía — el fallback de
 // letra hace que la grilla se vea completa desde el día uno, sin forzar al
 // usuario a ir a ponerle emoji a cada categoría antes de poder usar esto.
-export default function CategoryEmojiGrid({ categories, selectedId, onSelect }) {
+// `onCreateClick` es opcional: solo se pinta el tile "+" al principio de la
+// fila cuando el llamador lo pasa (hoy, solo QuickCaptureFAB.jsx, para poder
+// crear una categoría sin salir de la hoja de "+") — Diario.jsx sigue usando
+// este mismo componente sin ese prop y no ve ningún cambio.
+export default function CategoryEmojiGrid({ categories, selectedId, onSelect, onCreateClick }) {
   return (
     <div className={styles.grid}>
+      {onCreateClick && (
+        <button type="button" className={styles.addTile} onClick={onCreateClick} aria-label="Nueva categoría">
+          +
+        </button>
+      )}
       {categories.map((c) => (
         <button
           key={c.id}
@@ -39,8 +48,8 @@ export default function CategoryEmojiGrid({ categories, selectedId, onSelect }) 
           <span className={styles.name}>{c.name}</span>
         </button>
       ))}
-      {categories.length === 0 && (
-        <p className={styles.empty}>No hay categorías todavía — crealas en Gastos diarios.</p>
+      {categories.length === 0 && !onCreateClick && (
+        <p className={styles.empty}>No hay categorías todavía — crealas en Ajustes.</p>
       )}
     </div>
   )

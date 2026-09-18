@@ -31,10 +31,13 @@ Tanto `categories` como `accounts` son catálogos editables en Supabase (no
 personalizable — pero el conjunto inicial a precargar es exactamente el de la
 tabla del prompt, no el que aparece en el CSV.
 
-`categories` tiene UI completa de alta/edición/archivado en la card
-"Categorías" de `GastosDiarios.jsx` (`categoriesApi.js`:
+`categories` tiene UI completa de alta/edición/archivado en Ajustes →
+Categorías (`SettingsPanel.jsx`, `categoriesApi.js`:
 `createCategory`/`updateCategory`/`archiveCategory`) — ya no hace falta entrar
-a Supabase a mano para esto, igual que `accounts` en `Cuentas.jsx`. Esto no
+a Supabase a mano para esto, igual que `accounts` en Ajustes → Cuentas. La
+hoja del "+" (`QuickCaptureFAB.jsx`) también puede crear una categoría sin
+salir de esa hoja, vía el tile "+" al principio de la grilla de categorías —
+mismo `createCategory`, solo que inline en vez de navegar a Ajustes. Esto no
 cambia la regla de fondo: una categoría nueva solo se agrega cuando el usuario
 lo pide explícitamente, nunca para absorber una variante de nombre del CSV de
 MonIA.

@@ -12,6 +12,12 @@
   `src/index.css`), nunca tamaños de fuente sueltos hardcodeados en un
   componente.
 - Sin hamburger menu — la navegación siempre es tab bar o sidebar visibles.
+- **Formularios modales de captura rápida y overlays de búsqueda son
+  pantalla completa en móvil**: la hoja del "+" (`QuickCaptureFAB.jsx`) y el
+  buscador global (`SearchPanel.jsx`) usan `100dvh` sin `border-radius`
+  bajo 768px — no un bottom-sheet recortado con esquinas redondeadas — y
+  vuelven a ser una tarjeta centrada flotante en tablet/desktop (≥768px),
+  mismo breakpoint que el resto del layout responsive.
 - La skill es para iOS nativo (SwiftUI/UIKit); acá solo se traducen sus
   *principios* de layout, tipografía, color/Dark Mode y navegación a
   CSS/React — sus referencias de widgets, extensions, Siri/Shortcuts o

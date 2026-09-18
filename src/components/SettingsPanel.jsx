@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { IconSettings, IconClose, IconChevronRight, IconTag, IconAccounts, IconDebts, IconGoals, IconExchange } from './icons.jsx'
+import { IconSettings, IconClose, IconChevronRight, IconTag, IconHash, IconAccounts, IconDebts, IconGoals, IconExchange } from './icons.jsx'
 import ColorSwatchPicker from './ui/ColorSwatchPicker.jsx'
 import ConfirmDialog from './ui/ConfirmDialog.jsx'
 import { listCategories, createCategory, updateCategory, archiveCategory } from '../lib/categoriesApi.js'
-import { backfillPurposeCategoryStats, markLoanTransactionReviewed } from '../lib/transactionsApi.js'
+import { backfillPurposeCategoryStats, markLoanTransactionReviewed, isReservedTag } from '../lib/transactionsApi.js'
+import { listTags, createTag, deleteTag } from '../lib/tagsApi.js'
 import { listAccounts, createAccount, saveMonthlyInitialBalances } from '../lib/accountsApi.js'
 import { createDebt } from '../lib/debtsApi.js'
 import { createSavingsGoal } from '../lib/savingsApi.js'
@@ -47,6 +48,7 @@ const emptyNewGoal = { kind: 'puntual', name: '', accountId: '', targetAmount: '
 // usuario pida una sección concreta.
 const SETTINGS_SECTIONS = [
   { key: 'categorias', label: 'Categorías', subtitle: 'Crear, renombrar, colores, presupuestos', Icon: IconTag },
+  { key: 'tags', label: 'Tags', subtitle: 'Catálogo de tags para el "+" y el buscador', Icon: IconHash },
   { key: 'cuentas', label: 'Cuentas', subtitle: 'Agregar una cuenta hija, incluida multi-moneda', Icon: IconAccounts },
   { key: 'deudas', label: 'Deudas', subtitle: 'Agregar una deuda o un préstamo dado', Icon: IconDebts },
   { key: 'metas', label: 'Metas de ahorro', subtitle: 'Agregar una meta puntual o con propósito', Icon: IconGoals },
@@ -81,6 +83,11 @@ export default function SettingsPanel() {
 
   const [confirmArchive, setConfirmArchive] = useState(null) // { id, name } | null
 
+  const [tags, setTags] = useState([])
+  const [newTagName, setNewTagName] = useState('')
+  const [creatingTag, setCreatingTag] = useState(false)
+  const [confirmDeleteTag, setConfirmDeleteTag] = useState(null) // { id, name } | null
+
   const [backfilling, setBackfilling] = useState(false)
   const [backfillResult, setBackfillResult] = useState(null)
 
@@ -108,6 +115,7 @@ export default function SettingsPanel() {
     listCategories().then(setCategories).catch((err) => setError(err.message))
     listAccounts().then(setAccounts).catch((err) => setError(err.message))
     getRates().then(setRates).catch((err) => setError(err.message))
+    listTags().then(setTags).catch((err) => setError(err.message))
   }, [open])
 
   // Puente entre páginas hermanas bajo AppShell y este panel (que vive
@@ -196,6 +204,46 @@ export default function SettingsPanel() {
       await archiveCategory(target.id)
       if (editingId === target.id) setEditingId('')
       await reload()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  // Alta manual desde Ajustes — el catálogo también crece solo con el uso
+  // real (ver tagsApi.ensureTags, llamada desde createManualTransaction /
+  // updateTransactionTags), así que esto es un atajo para pre-cargar un tag
+  // antes de usarlo, no el único camino para que exista. Bloquea nombres
+  // reservados (isReservedTag: IGNORED_TAGS o el nombre de una cuenta hija)
+  // porque esos ya tienen un significado especial para el motor de
+  // asignación — crearlos como tag "normal" acá sería confuso, no un error
+  // técnico real.
+  async function handleCreateTag(e) {
+    e.preventDefault()
+    const trimmed = newTagName.trim()
+    if (!trimmed) return
+    if (isReservedTag(trimmed, accounts)) {
+      setError(`"${trimmed}" ya tiene un significado especial (nombre de cuenta o traslado/ignorar) — elegí otro nombre.`)
+      return
+    }
+    setCreatingTag(true)
+    setError(null)
+    try {
+      const created = await createTag(trimmed)
+      setTags((prev) => (prev.some((t) => t.id === created.id) ? prev : [...prev, created].sort((a, b) => a.name.localeCompare(b.name))))
+      setNewTagName('')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setCreatingTag(false)
+    }
+  }
+
+  async function doDeleteTag() {
+    const target = confirmDeleteTag
+    setConfirmDeleteTag(null)
+    try {
+      await deleteTag(target.id)
+      setTags((prev) => prev.filter((t) => t.id !== target.id))
     } catch (err) {
       setError(err.message)
     }
@@ -378,11 +426,17 @@ export default function SettingsPanel() {
     }
   }
 
+  // Dispatchea siempre, no solo cuando vino de QuickCaptureFAB — es un
+  // evento genérico "Ajustes se cerró"; QuickCaptureFAB es hoy el único
+  // listener (para retomar el movimiento a medio llenar si el "+" mandó acá
+  // a crear una categoría, ver handleCreateCategoryClick), pero cualquier
+  // otro consumidor futuro puede escucharlo igual.
   function close() {
     setOpen(false)
     setSection(null)
     setEditingId('')
     setError(null)
+    window.dispatchEvent(new Event('dashboard:settings-closed'))
   }
 
   const activeSection = SETTINGS_SECTIONS.find((s) => s.key === section)
@@ -532,6 +586,38 @@ export default function SettingsPanel() {
                 Se analizaron {backfillResult} movimientos con categoría — las sugerencias en "Agregar movimiento manual" y el "+" ya lo reflejan.
               </p>
             )}
+            </>
+            )}
+
+            {activeSection?.key === 'tags' && (
+            <>
+            <h3 className={styles.sectionTitle}>Tags</h3>
+            <p className={styles.hint}>
+              El catálogo se completa solo con lo que vayas usando en el "+" o al importar el CSV de MonIA — esto es
+              solo un atajo para precargar uno antes de usarlo, o para sacar uno que ya no hace falta.
+            </p>
+
+            <div className={styles.list}>
+              {tags.map((t) => (
+                <div key={t.id} className={styles.row}>
+                  <span className={styles.rowName}>#{t.name}</span>
+                  <button type="button" onClick={() => setConfirmDeleteTag({ id: t.id, name: t.name })} className={styles.archiveLink}>Eliminar</button>
+                </div>
+              ))}
+              {tags.length === 0 && <p className={styles.hint}>No hay tags todavía.</p>}
+            </div>
+
+            <form onSubmit={handleCreateTag} className={styles.createForm}>
+              <span className={styles.hint}>+ Nuevo tag</span>
+              <input
+                placeholder="Nombre (ej. mercado)" value={newTagName}
+                onChange={(e) => setNewTagName(e.target.value)}
+                className={styles.textInput}
+              />
+              <button type="submit" disabled={creatingTag || !newTagName.trim()} className={styles.saveButton}>
+                Crear
+              </button>
+            </form>
             </>
             )}
 
@@ -865,6 +951,16 @@ export default function SettingsPanel() {
         destructive
         onConfirm={doArchive}
         onCancel={() => setConfirmArchive(null)}
+      />
+
+      <ConfirmDialog
+        open={!!confirmDeleteTag}
+        title={`¿Eliminar el tag "#${confirmDeleteTag?.name}"?`}
+        message="Solo sale del catálogo de autocompletado — los movimientos que ya lo tienen no cambian, y se vuelve a crear solo si lo volvés a usar."
+        confirmLabel="Eliminar"
+        destructive
+        onConfirm={doDeleteTag}
+        onCancel={() => setConfirmDeleteTag(null)}
       />
     </>
   )

@@ -15,36 +15,30 @@
   }
 }
 
+/* Pantalla completa en mobile, mismo criterio que la hoja de "+"
+   (QuickCaptureFAB.module.css) — sin bottom-sheet recortado. Desktop/tablet
+   (≥768px) sigue como tarjeta centrada, sin cambios. */
 .panel {
   background: var(--surface-raised);
-  border: 1px solid var(--border-hairline);
-  border-radius: 28px 28px 0 0;
-  padding: 10px var(--space-2) calc(var(--space-3) + env(safe-area-inset-bottom));
+  border: none;
+  border-radius: 0;
+  padding: max(var(--space-2), env(safe-area-inset-top)) var(--space-2) calc(var(--space-2) + env(safe-area-inset-bottom));
   width: 100%;
   max-width: 640px;
-  max-height: 85dvh;
+  height: 100dvh;
+  max-height: 100dvh;
   overflow-y: auto;
-  box-shadow: 0 -16px 40px -12px color-mix(in srgb, var(--series-1) 16%, transparent);
+  box-shadow: none;
 }
 
 @media (min-width: 768px) {
   .panel {
+    border: 1px solid var(--border-hairline);
     border-radius: 28px;
     padding: var(--space-3);
-  }
-}
-
-.dragHandle {
-  width: 40px;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--gridline);
-  margin: 0 auto var(--space-2);
-}
-
-@media (min-width: 768px) {
-  .dragHandle {
-    display: none;
+    height: auto;
+    max-height: 85dvh;
+    box-shadow: 0 -16px 40px -12px color-mix(in srgb, var(--series-1) 16%, transparent);
   }
 }
 

@@ -19,6 +19,13 @@ function formatDate(iso) {
   return new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', timeZone: 'UTC' })
 }
 
+// Acento/mayúscula-insensible, mismo criterio que normalizeName en
+// QuickCaptureFAB.jsx — para que "cuidado" matchee "Cuidado personal" sin
+// pedirle al usuario que tipee tilde a tilde.
+function normalize(text) {
+  return (text || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+}
+
 // Menú desplegable de búsqueda, disparado por la lupa de QuickCaptureFAB
 // (controlado desde AppShell, mismo motivo que SettingsPanel: son hermanos,
 // no padre/hijo). Reemplaza el flujo anterior de navegar a /gastos y
@@ -78,6 +85,15 @@ export default function SearchPanel({ open, onClose }) {
     }
     setSearching(true)
     setError(null)
+    // El cuadro único busca por descripción, categoría y tag a la vez — las
+    // categorías cuyo nombre matchea el texto se resuelven acá (ya están en
+    // memoria) y se pasan como IDs, porque PostgREST no puede hacer un OR
+    // entre una columna propia y el nombre de una tabla relacionada en una
+    // sola consulta (ver transactionsApi.searchTransactions).
+    const needle = normalize(filters.query.trim())
+    const matchCategoryIds = needle
+      ? categories.filter((c) => normalize(c.name).includes(needle)).map((c) => c.id)
+      : []
     const timer = setTimeout(async () => {
       try {
         setResults(await searchTransactions({
@@ -87,6 +103,7 @@ export default function SearchPanel({ open, onClose }) {
           tag: filters.tag,
           dateFrom: filters.dateFrom || null,
           dateTo: filters.dateTo || null,
+          matchCategoryIds,
         }))
       } catch (err) {
         setError(err.message)
@@ -167,7 +184,6 @@ export default function SearchPanel({ open, onClose }) {
     <>
       <div className={styles.backdrop} onClick={close}>
         <div className={styles.panel} role="dialog" aria-modal="true" aria-labelledby="search-title" onClick={(e) => e.stopPropagation()}>
-          <div className={styles.dragHandle} />
           <div className={styles.header}>
             <div className={styles.titleRow}>
               <span className={styles.titleBadge}><IconSearch width={16} height={16} /></span>
@@ -183,7 +199,7 @@ export default function SearchPanel({ open, onClose }) {
           <div className={styles.searchRow}>
             <IconSearch width={16} height={16} className={styles.searchRowIcon} />
             <input
-              placeholder="Busca en todo el histórico… ej. Rappi" value={filters.query} autoFocus
+              placeholder="Busca por descripción, categoría o tag… ej. Rappi" value={filters.query} autoFocus
               onChange={(e) => setFilters({ ...filters, query: e.target.value })}
               className={styles.bigInput}
             />

@@ -19,19 +19,36 @@
   display: none;
 }
 
+/* Píldora horizontal (emoji + nombre en fila), no un panelito vertical —
+   referencia del usuario para que el "+" se vea más parecido a MonIA. */
 .tile {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   flex-shrink: 0;
-  width: 68px;
   min-height: var(--touch-target);
-  padding: var(--space-1) 4px;
-  border-radius: 12px;
+  padding: 6px 14px 6px 8px;
+  border-radius: 999px;
   border: 1px solid var(--border-hairline);
   background: var(--surface-1);
   color: var(--text-secondary);
+}
+
+/* Tile "+" opcional, primero en la fila — mismo alto que .tile pero circular
+   y sin nombre, para no competir visualmente con las categorías reales. */
+.addTile {
+  flex-shrink: 0;
+  width: var(--touch-target);
+  min-height: var(--touch-target);
+  border-radius: 50%;
+  border: 1.5px solid var(--series-1);
+  color: var(--series-1);
+  font-size: 20px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .selected {
@@ -41,12 +58,13 @@
 }
 
 .glyph {
-  width: 32px;
-  height: 32px;
+  width: 26px;
+  height: 26px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 22px;
+  font-size: 18px;
+  flex-shrink: 0;
 }
 
 /* Círculo de color de fondo — cuando la categoría tiene un color elegido a
@@ -64,12 +82,9 @@
 }
 
 .name {
-  font: var(--font-caption);
-  text-align: center;
+  font: var(--font-subheadline);
+  font-weight: 600;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
 }
 
 .empty {
