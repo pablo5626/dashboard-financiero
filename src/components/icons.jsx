@@ -146,6 +146,16 @@ export function IconChat(props) {
   )
 }
 
+// Botón "Filtros" de las tablas de movimientos — embudo clásico, mismo
+// estilo lineal que el resto de los íconos.
+export function IconFilter(props) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M4 5h16l-6 7.5V19l-4 2v-8.5z" />
+    </svg>
+  )
+}
+
 export function IconExchange(props) {
   return (
     <svg {...base} {...props}>

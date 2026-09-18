@@ -1,9 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell } from 'recharts'
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from 'recharts'
+import { estimateCategoryAxisWidth } from '../lib/chartUtils.js'
 import Card from '../components/ui/Card.jsx'
 import ConfirmDialog from '../components/ui/ConfirmDialog.jsx'
 import MonthYearPicker, { MONTH_NAMES } from '../components/ui/MonthYearPicker.jsx'
+import CategoryEmojiGrid, { seriesForName } from '../components/CategoryEmojiGrid.jsx'
+import AccountAutocomplete from '../components/AccountAutocomplete.jsx'
+import { IconFilter } from '../components/icons.jsx'
 import { formatCOP, formatByCurrency } from '../lib/format.js'
 import { listAccounts } from '../lib/accountsApi.js'
 import { getRates, toCOP } from '../lib/exchangeRatesApi.js'
@@ -16,9 +20,10 @@ import {
   parseMonIACSV, filterRowsByMonth, importTransactions,
   listPendingTransactions, fetchSuggestionsForCategories, confirmAssignment,
   listTransactionsForMonth, listRecentExpenses, detectRecurringCandidates,
-  deleteTransaction, isIgnoredRow,
-  listPendingCurrencyTransactions, confirmCurrencyAmount, updateTransactionTags,
+  deleteTransaction, isIgnoredRow, updateTransaction,
+  listPendingCurrencyTransactions, confirmCurrencyAmount,
 } from '../lib/transactionsApi.js'
+import styles from './GastosDiarios.module.css'
 
 const now = new Date()
 
@@ -27,6 +32,34 @@ const CHART_COLORS = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', '
 
 function formatDate(iso) {
   return new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', timeZone: 'UTC' })
+}
+
+// Misma escala de colores que budgetToneColor en Diario.jsx, para que el
+// "% usado" de una cuenta se lea igual en las dos páginas.
+function budgetToneColor(pct) {
+  if (pct == null) return 'var(--border-hairline)'
+  if (pct < 70) return 'var(--status-good)'
+  if (pct < 100) return 'var(--status-warning)'
+  if (pct < 120) return 'var(--status-serious)'
+  return 'var(--status-critical)'
+}
+
+// Mismo agrupado por día (más reciente primero) que Diario.jsx, para que
+// "Movimientos — mes" tenga la misma apariencia de lista (glyph de
+// categoría + header de fecha) en vez de una tabla plana con una fila por
+// columna de dato.
+function groupTransactionsByDate(rows) {
+  const groups = new Map()
+  for (const t of rows) {
+    const day = t.occurred_at.slice(0, 10)
+    if (!groups.has(day)) groups.set(day, [])
+    groups.get(day).push(t)
+  }
+  return [...groups.entries()].sort((a, b) => b[0].localeCompare(a[0]))
+}
+
+function formatDateHeader(dateStr) {
+  return new Date(`${dateStr}T00:00:00Z`).toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })
 }
 
 export default function GastosDiarios() {
@@ -45,6 +78,10 @@ export default function GastosDiarios() {
     accountId: searchParams.get('accountId') || '',
     tag: searchParams.get('tag') || '',
   }))
+  // Colapsados por default (mismo criterio que "Filtros" en SearchPanel.jsx)
+  // para no ocupar espacio permanente arriba de la lista — arrancan
+  // visibles solo si ya vienen precargados de un deep-link (ver arriba).
+  const [showTxFilters, setShowTxFilters] = useState(() => !!(searchParams.get('categoryId') || searchParams.get('accountId') || searchParams.get('tag')))
 
   const [accounts, setAccounts] = useState([])
   const [categories, setCategories] = useState([])
@@ -62,8 +99,19 @@ export default function GastosDiarios() {
   const [confirmingId, setConfirmingId] = useState(null)
   const [selectedAccountByTx, setSelectedAccountByTx] = useState({})
   const [amountByTx, setAmountByTx] = useState({})
-  const [tagsDraftByTx, setTagsDraftByTx] = useState({})
-  const [savingTagsId, setSavingTagsId] = useState(null)
+  // Movimiento seleccionado para edición completa (uno a la vez) — se activa
+  // al tocar la fila en "Movimientos — mes" y abre una ventana emergente,
+  // mismo look que la hoja del "+" (QuickCaptureFAB.jsx) en vez de expandir
+  // la fila in-line — pedido explícito del usuario para que se sienta como
+  // la misma pieza de UI que agregar un movimiento nuevo. Se guarda el
+  // objeto original completo (no solo el id) para no tener que volver a
+  // buscarlo en monthTransactions al guardar. editDraft.tags es un array
+  // (no el string único de Diario.jsx) para poder seguir editando los tags
+  // como píldoras individuales dentro del form.
+  const [editingTx, setEditingTx] = useState(null)
+  const [editDraft, setEditDraft] = useState(null) // { purpose, amount, categoryId, accountId, tags }
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [newTagDraft, setNewTagDraft] = useState('')
   const [allocations, setAllocations] = useState({})
   const [transferredOut, setTransferredOut] = useState({})
   const [fixedExpenses, setFixedExpenses] = useState([])
@@ -178,16 +226,60 @@ export default function GastosDiarios() {
     }
   }
 
-  async function handleSaveTags(txId) {
-    const raw = tagsDraftByTx[txId] ?? ''
-    setSavingTagsId(txId)
+  // Edición completa del movimiento (descripción, monto, cuenta, categoría,
+  // tags) — mismo criterio que renderTxRow en Diario.jsx, con la mejora de
+  // que acá los tags siguen siendo píldoras editables individualmente
+  // (editDraft.tags, array) en vez del único input de texto de Diario.jsx.
+  function startEdit(t) {
+    setEditingTx(t)
+    setEditDraft({
+      purpose: t.purpose || '',
+      amount: String(Math.abs(Number(t.amount))),
+      categoryId: t.category_id || '',
+      accountId: t.account_id || '',
+      tags: t.tags ?? [],
+    })
+    setNewTagDraft('')
+  }
+
+  function cancelEdit() {
+    setEditingTx(null)
+    setEditDraft(null)
+    setNewTagDraft('')
+  }
+
+  function handleDraftAddTag() {
+    const tag = newTagDraft.trim()
+    setNewTagDraft('')
+    if (!tag) return
+    setEditDraft((prev) => ({ ...prev, tags: [...new Set([...prev.tags, tag])] }))
+  }
+
+  function handleDraftRemoveTag(tag) {
+    setEditDraft((prev) => ({ ...prev, tags: prev.tags.filter((x) => x !== tag) }))
+  }
+
+  async function handleSaveEdit() {
+    if (!editDraft.amount) return
+    setSavingEdit(true)
     try {
-      await updateTransactionTags(txId, raw.split(',').map((t) => t.trim()).filter(Boolean))
+      const wasGasto = Number(editingTx.amount) < 0
+      const signedAmount = wasGasto ? -Math.abs(Number(editDraft.amount)) : Math.abs(Number(editDraft.amount))
+      const newCurrency = accounts.find((a) => a.id === editDraft.accountId)?.currency || editingTx.currency
+      await updateTransaction(editingTx.id, {
+        purpose: editDraft.purpose.trim() || editingTx.purpose,
+        amount: signedAmount,
+        categoryId: editDraft.categoryId || null,
+        accountId: editDraft.accountId || null,
+        currency: newCurrency,
+        tags: editDraft.tags,
+      })
       await reload()
+      cancelEdit()
     } catch (err) {
       setError(err.message)
     } finally {
-      setSavingTagsId(null)
+      setSavingEdit(false)
     }
   }
 
@@ -272,8 +364,13 @@ export default function GastosDiarios() {
     }
   }
 
+  // Color real de la categoría (mismo criterio que el glyph de Movimientos,
+  // cat.color con fallback a seriesForName) en vez de una paleta genérica
+  // que rota sin relación con el color que la categoría ya tiene en Ajustes
+  // — así la barra se asocia visualmente con la misma categoría en el resto
+  // de la app (Movimientos, Diario).
   const categoryChartData = categories
-    .map((c) => ({ name: c.name, value: spentByCategory[c.id] ?? 0 }))
+    .map((c) => ({ name: c.name, value: spentByCategory[c.id] ?? 0, color: c.color || seriesForName(c.name) }))
     .filter((c) => c.value > 0)
     .sort((a, b) => b.value - a.value)
 
@@ -442,13 +539,12 @@ export default function GastosDiarios() {
             <p style={{ color: 'var(--text-muted)' }}>Sin gastos categorizados este mes.</p>
           ) : (
             <ResponsiveContainer width="100%" height={twoColChartHeight}>
-              <BarChart data={categoryChartData} layout="vertical" margin={{ left: 8 }}>
-                <CartesianGrid horizontal={false} stroke="var(--gridline)" />
+              <BarChart data={categoryChartData} layout="vertical" margin={{ left: 4, right: 12 }} barCategoryGap="20%">
                 <XAxis type="number" hide />
-                <YAxis type="category" dataKey="name" width={110} tick={{ fill: 'var(--text-secondary)', fontSize: 12 }} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="name" width={estimateCategoryAxisWidth(categoryChartData.map((d) => d.name))} tick={{ fill: 'var(--text-secondary)', fontSize: 12 }} axisLine={false} tickLine={false} />
                 <Tooltip formatter={(v) => formatCOP(v)} contentStyle={{ background: 'var(--surface-raised)', border: '1px solid var(--border-hairline)', borderRadius: 8 }} labelStyle={{ color: 'var(--text-primary)' }} itemStyle={{ color: 'var(--text-primary)' }} cursor={{ fill: 'var(--gridline)' }} />
                 <Bar dataKey="value" radius={[0, 4, 4, 0]}>
-                  {categoryChartData.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                  {categoryChartData.map((d, i) => <Cell key={i} fill={d.color} />)}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -461,9 +557,8 @@ export default function GastosDiarios() {
           ) : (
             <ResponsiveContainer width="100%" height={twoColChartHeight}>
               <BarChart data={tagChartData} layout="vertical" margin={{ left: 8 }}>
-                <CartesianGrid horizontal={false} stroke="var(--gridline)" />
                 <XAxis type="number" hide />
-                <YAxis type="category" dataKey="name" width={90} tick={{ fill: 'var(--text-secondary)', fontSize: 12 }} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="name" width={estimateCategoryAxisWidth(tagChartData.map((d) => d.name))} tick={{ fill: 'var(--text-secondary)', fontSize: 12 }} axisLine={false} tickLine={false} />
                 <Tooltip formatter={(v) => formatCOP(v)} contentStyle={{ background: 'var(--surface-raised)', border: '1px solid var(--border-hairline)', borderRadius: 8 }} labelStyle={{ color: 'var(--text-primary)' }} itemStyle={{ color: 'var(--text-primary)' }} cursor={{ fill: 'var(--gridline)' }} />
                 <Bar dataKey="value" radius={[0, 4, 4, 0]}>
                   {tagChartData.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
@@ -471,49 +566,6 @@ export default function GastosDiarios() {
               </BarChart>
             </ResponsiveContainer>
           )}
-        </Card>
-
-        <Card title="Gasto real vs. presupuesto por cuenta" className="span-3">
-          <div className="table-scroll">
-          <table className="simple-table">
-            <thead><tr><th>Cuenta</th><th>Gastado este mes</th><th>Movido a otras cuentas</th><th>Asignado este mes</th><th>Ingresos este mes</th><th>% usado</th></tr></thead>
-            <tbody>
-              {flattenAccountPockets(hijas).map((p) => {
-                const currency = p.currency
-                const spent = spentByAccount[p.key] ?? 0
-                const pendingCount = pendingByAccount[p.key] ?? 0
-                const movido = transferredOut[p.key] ?? 0
-                const allocated = allocations[p.key]
-                const income = incomeByAccount[p.key] ?? 0
-                const disponible = (allocated ?? 0) + income
-                const pct = disponible > 0 ? Math.round(((spent + movido) / disponible) * 100) : null
-                return (
-                  <tr key={p.key}>
-                    <td>{p.label}</td>
-                    <td className="amount-cell">
-                      {pendingCount > 0 && (
-                        <span
-                          title={`Incluye ${pendingCount} monto(s) estimado(s) — confírmalos en "Compras en divisa por confirmar"`}
-                          style={{ color: 'var(--status-warning)', marginRight: 4 }}
-                        >
-                          ≈
-                        </span>
-                      )}
-                      {formatByCurrency(spent, currency)}
-                    </td>
-                    <td className="amount-cell">{movido > 0 ? formatByCurrency(movido, currency) : '—'}</td>
-                    <td className="amount-cell">{allocated != null ? formatByCurrency(allocated, currency) : 'sin definir'}</td>
-                    <td className="amount-cell">{income > 0 ? formatByCurrency(income, currency) : '—'}</td>
-                    <td style={{ color: pct != null && pct > 100 ? 'var(--status-critical)' : 'inherit' }}>{pct != null ? `${pct}%` : '—'}</td>
-                  </tr>
-                )
-              })}
-              {hijas.length === 0 && (
-                <tr><td colSpan={6} style={{ color: 'var(--text-muted)' }}>No hay cuentas hijas todavía.</td></tr>
-              )}
-            </tbody>
-          </table>
-          </div>
         </Card>
 
         {recurringCandidates.length > 0 && (
@@ -552,84 +604,244 @@ export default function GastosDiarios() {
             <p style={{ color: 'var(--text-muted)' }}>Cargando…</p>
           ) : (
             <>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 'var(--space-1)' }}>
-              <select value={txFilters.categoryId} onChange={(e) => setTxFilters({ ...txFilters, categoryId: e.target.value })} style={formInput}>
-                <option value="">Todas las categorías</option>
-                {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-              <select value={txFilters.accountId} onChange={(e) => setTxFilters({ ...txFilters, accountId: e.target.value })} style={formInput}>
-                <option value="">Todas las cuentas</option>
-                <option value="pending">Pendiente de banco</option>
-                {accounts.map((a) => <option key={a.id} value={a.id}>{a.kind === 'madre' ? `${a.name} (madre)` : a.name}</option>)}
-              </select>
-              <input
-                placeholder="Tag (ej. rappi)" value={txFilters.tag}
-                onChange={(e) => setTxFilters({ ...txFilters, tag: e.target.value })}
-                style={{ ...formInput, width: 140 }}
-              />
+            <div className={styles.filterToggleRow}>
+              <button
+                type="button"
+                className={hasTxFilters ? `${styles.filterToggle} ${styles.filterToggleActive}` : styles.filterToggle}
+                onClick={() => setShowTxFilters((v) => !v)}
+              >
+                <IconFilter width={14} height={14} />
+                Filtros{hasTxFilters ? ` (${[txFilters.categoryId, txFilters.accountId, txFilters.tag].filter(Boolean).length})` : ''}
+              </button>
               {hasTxFilters && (
                 <button type="button" onClick={() => setTxFilters({ categoryId: '', accountId: '', tag: '' })} style={{ font: 'var(--font-caption)', color: 'var(--text-muted)' }}>
                   Limpiar filtros
                 </button>
               )}
             </div>
-            <div className="table-scroll">
-            <table className="simple-table">
-              <thead>
-                <tr><th>Fecha</th><th>Descripción</th><th>Monto</th><th>Categoría</th><th>Cuenta</th><th>Tags</th><th></th></tr>
-              </thead>
-              <tbody>
-                {filteredMonthTransactions.map((t) => (
-                  <tr key={t.id}>
-                    <td>{formatDate(t.occurred_at)}</td>
-                    <td>{t.purpose}</td>
-                    <td className="amount-cell">
-                      {t.currency_pending && (
+            {showTxFilters && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 'var(--space-1)' }}>
+                <select value={txFilters.categoryId} onChange={(e) => setTxFilters({ ...txFilters, categoryId: e.target.value })} style={formInput}>
+                  <option value="">Todas las categorías</option>
+                  {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <select value={txFilters.accountId} onChange={(e) => setTxFilters({ ...txFilters, accountId: e.target.value })} style={formInput}>
+                  <option value="">Todas las cuentas</option>
+                  <option value="pending">Pendiente de banco</option>
+                  {accounts.map((a) => <option key={a.id} value={a.id}>{a.kind === 'madre' ? `${a.name} (madre)` : a.name}</option>)}
+                </select>
+                <input
+                  placeholder="Tag (ej. rappi)" value={txFilters.tag}
+                  onChange={(e) => setTxFilters({ ...txFilters, tag: e.target.value })}
+                  style={{ ...formInput, width: 140 }}
+                />
+              </div>
+            )}
+            <div className={styles.txList}>
+              {groupTransactionsByDate(filteredMonthTransactions).map(([day, rows]) => (
+                <div key={day}>
+                  <p className={styles.txDateHeader}>{formatDateHeader(day)}</p>
+                  {rows.map((t) => {
+                    const cat = categories.find((c) => c.id === t.category_id)
+                    const isGasto = Number(t.amount) < 0
+                    return (
+                      <div key={t.id} className={styles.txRow}>
                         <span
-                          title="Monto estimado con la tasa guardada — todavía no confirmado en Compras en divisa por confirmar"
-                          style={{ color: 'var(--status-warning)', marginRight: 4 }}
+                          className={styles.txGlyph}
+                          style={{ background: cat ? (cat.color || seriesForName(cat.name)) : 'var(--text-muted)' }}
                         >
-                          ≈
+                          {cat?.emoji || cat?.name?.charAt(0).toUpperCase() || '?'}
                         </span>
-                      )}
-                      {formatByCurrency(t.amount, t.currency)}
-                    </td>
-                    <td>{t.categories?.name ?? '—'}</td>
-                    <td>{t.accounts?.name ?? (t.assignment_confirmed ? '— ignorado (sin cuenta) —' : '— pendiente —')}</td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                        <input
-                          style={{ ...cellInput, width: 130 }}
-                          placeholder="tag1, tag2…"
-                          value={tagsDraftByTx[t.id] ?? (t.tags ?? []).join(', ')}
-                          onChange={(e) => setTagsDraftByTx({ ...tagsDraftByTx, [t.id]: e.target.value })}
-                        />
-                        <button
-                          onClick={() => handleSaveTags(t.id)} disabled={savingTagsId === t.id}
-                          style={{ font: 'var(--font-caption)', whiteSpace: 'nowrap' }}
-                        >
-                          {savingTagsId === t.id ? '…' : 'Guardar'}
-                        </button>
+                        {/* Tocar el movimiento lo selecciona para editarlo entero
+                            (descripción, monto, cuenta, categoría y tags) — mismo
+                            criterio que el ✎ de Diario.jsx, pero acá el toque en
+                            la fila ya lo abre, sin ícono aparte. */}
+                        <div className={styles.txInfo} onClick={() => startEdit(t)}>
+                          {cat && <span className={styles.txCategory}>{cat.name}</span>}
+                          <span className={styles.txPurpose}>{t.purpose}</span>
+                          {t.tags?.length > 0 && (
+                            <div className={styles.txTags}>
+                              {t.tags.map((tag) => <span key={tag} className={styles.txTag}>#{tag}</span>)}
+                            </div>
+                          )}
+                          <span className={styles.txMeta}>
+                            {t.accounts?.name ?? (t.assignment_confirmed ? 'ignorado' : 'pendiente')}
+                          </span>
+                        </div>
+                        <div className={styles.txRight}>
+                          <span className={isGasto ? `${styles.txAmount} ${styles.txAmountGasto}` : `${styles.txAmount} ${styles.txAmountIngreso}`}>
+                            {t.currency_pending && (
+                              <span
+                                title="Monto estimado con la tasa guardada — todavía no confirmado en Compras en divisa por confirmar"
+                                className={styles.txPendingMark}
+                              >
+                                ≈
+                              </span>
+                            )}
+                            {formatByCurrency(Math.abs(t.amount), t.currency)}
+                          </span>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDeleteTx(t) }}
+                            className={styles.txDelete} aria-label="Eliminar movimiento"
+                          >
+                            ×
+                          </button>
+                        </div>
                       </div>
-                    </td>
-                    <td>
-                      <button onClick={() => handleDeleteTx(t)} style={{ font: 'var(--font-caption)', color: 'var(--status-critical)' }}>Eliminar</button>
-                    </td>
-                  </tr>
-                ))}
-                {filteredMonthTransactions.length === 0 && (
-                  <tr>
-                    <td colSpan={7} style={{ color: 'var(--text-muted)' }}>
-                      {hasTxFilters ? 'Ningún movimiento coincide con esos filtros.' : 'No hay movimientos importados para este mes todavía.'}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                    )
+                  })}
+                </div>
+              ))}
+              {filteredMonthTransactions.length === 0 && (
+                <p style={{ color: 'var(--text-muted)' }}>
+                  {hasTxFilters ? 'Ningún movimiento coincide con esos filtros.' : 'No hay movimientos importados para este mes todavía.'}
+                </p>
+              )}
             </div>
             </>
           )}
         </Card>
+
+        <Card title="Gasto real vs. presupuesto por cuenta" className="span-3">
+          {hijas.length === 0 ? (
+            <p style={{ color: 'var(--text-muted)' }}>No hay cuentas hijas todavía.</p>
+          ) : (
+            <div className={styles.budgetGrid}>
+              {flattenAccountPockets(hijas).map((p) => {
+                const currency = p.currency
+                const spent = spentByAccount[p.key] ?? 0
+                const pendingCount = pendingByAccount[p.key] ?? 0
+                const movido = transferredOut[p.key] ?? 0
+                const allocated = allocations[p.key]
+                const income = incomeByAccount[p.key] ?? 0
+                const disponible = (allocated ?? 0) + income
+                const usado = spent + movido
+                const pct = disponible > 0 ? Math.round((usado / disponible) * 100) : null
+                const tone = budgetToneColor(pct)
+                const barWidth = pct == null ? 0 : Math.min(100, pct)
+                return (
+                  <div key={p.key} className={styles.budgetCard}>
+                    <div className={styles.budgetHeader}>
+                      <span className={styles.budgetName}>{p.label}</span>
+                      <span className={styles.budgetPct} style={{ color: tone }}>
+                        {pct != null ? `${pct}%` : 'sin presupuesto'}
+                      </span>
+                    </div>
+                    <div className={styles.budgetBarTrack}>
+                      <div
+                        className={styles.budgetBarFill}
+                        style={{ width: `${barWidth}%`, background: tone }}
+                      />
+                    </div>
+                    <div className={styles.budgetMetaRow}>
+                      <span>
+                        Gastado{' '}
+                        {pendingCount > 0 && (
+                          <span
+                            title={`Incluye ${pendingCount} monto(s) estimado(s) — confírmalos en "Compras en divisa por confirmar"`}
+                            style={{ color: 'var(--status-warning)' }}
+                          >
+                            ≈
+                          </span>
+                        )}
+                        <strong>{formatByCurrency(spent, currency)}</strong>
+                      </span>
+                      {movido > 0 && (
+                        <span>
+                          Movido <strong>{formatByCurrency(movido, currency)}</strong>
+                        </span>
+                      )}
+                    </div>
+                    <div className={styles.budgetMetaRow}>
+                      <span>
+                        Asignado{' '}
+                        <strong>{allocated != null ? formatByCurrency(allocated, currency) : 'sin definir'}</strong>
+                      </span>
+                      {income > 0 && (
+                        <span>
+                          Ingresos <strong>{formatByCurrency(income, currency)}</strong>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </Card>
+
+        {/* Editar movimiento: ventana emergente con el mismo look que la
+            hoja del "+" (QuickCaptureFAB.module.css) — pantalla completa en
+            móvil, tarjeta centrada en desktop — en vez de expandir la fila
+            in-line, para que se sienta como la misma pieza de UI que
+            agregar un movimiento nuevo. */}
+        {editingTx && editDraft && (
+          <div className={styles.editBackdrop} onClick={cancelEdit}>
+            <div className={styles.editSheet} onClick={(e) => e.stopPropagation()}>
+              <div className={styles.editHeader}>
+                <h2 className={styles.editTitle}>Editar movimiento</h2>
+                <button type="button" className={styles.editClose} onClick={cancelEdit} aria-label="Cerrar">×</button>
+              </div>
+
+              <input
+                value={editDraft.purpose} onChange={(e) => setEditDraft({ ...editDraft, purpose: e.target.value })}
+                className={styles.bigInput} placeholder="Descripción"
+              />
+
+              <div className={styles.amountCard}>
+                <span className={styles.amountCardLabel}>Monto</span>
+                <div className={styles.amountCardRow}>
+                  <span className={styles.amountCardSign}>$</span>
+                  <input
+                    type="number" inputMode="decimal" value={editDraft.amount}
+                    onChange={(e) => setEditDraft({ ...editDraft, amount: e.target.value })}
+                    className={styles.amountCardInput} placeholder="0"
+                  />
+                </div>
+              </div>
+
+              <AccountAutocomplete
+                accounts={accounts}
+                value={editDraft.accountId}
+                onChange={(id) => setEditDraft({ ...editDraft, accountId: id })}
+                placeholder="Cuenta"
+              />
+              <CategoryEmojiGrid
+                categories={categories}
+                selectedId={editDraft.categoryId}
+                onSelect={(id) => setEditDraft((prev) => ({ ...prev, categoryId: prev.categoryId === id ? '' : id }))}
+              />
+              <div className={styles.txTagsEditor}>
+                {editDraft.tags.map((tag) => (
+                  <span key={tag} className={styles.txTagEditable}>
+                    #{tag}
+                    <button
+                      type="button" onClick={() => handleDraftRemoveTag(tag)}
+                      className={styles.txTagRemove} aria-label={`Quitar tag ${tag}`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                <input
+                  className={styles.txTagAddInput}
+                  placeholder="+ tag"
+                  value={newTagDraft}
+                  onChange={(e) => setNewTagDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleDraftAddTag() } }}
+                  onBlur={() => { if (newTagDraft.trim()) handleDraftAddTag() }}
+                />
+              </div>
+
+              <div className={styles.txEditActions}>
+                <button type="button" onClick={handleSaveEdit} disabled={savingEdit || !editDraft.amount} className={styles.txEditSave}>
+                  {savingEdit ? 'Guardando…' : 'Guardar'}
+                </button>
+                <button type="button" onClick={cancelEdit} className={styles.txEditCancel}>Cancelar</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <Card title="Importar CSV de MonIA" className="span-3">
           <p style={{ font: 'var(--font-subheadline)', color: 'var(--text-secondary)', margin: '0 0 var(--space-2)' }}>

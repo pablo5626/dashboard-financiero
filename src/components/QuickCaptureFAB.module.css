@@ -574,6 +574,30 @@
   color: #fff;
 }
 
+/* Select chico que aparece debajo de un chip "Desde"/"Hacia" solo cuando la
+   cuenta elegida tiene más de un bolsillo (multi-moneda, ej. arq) — mismo
+   criterio que el selector de moneda de MonthlyInitialBalancesSection.jsx:
+   una cuenta multi-moneda es un solo chip, no uno por bolsillo. */
+/* font-size explícito en vez de font: var(--font-caption) (12px) a propósito
+   -- .pocketSelect es un <select> real, y una clase con más especificidad
+   que la regla global `select { font-size: max(16px, 1em) }` de index.css
+   (skill ios-safari-input-zoom-fix) la pisaría, disparando el zoom de
+   Safari en iOS al abrirlo. font-family/weight sí se toman de --font-caption
+   por separado, solo el tamaño queda con el piso de 16px. */
+.pocketSelect {
+  align-self: flex-start;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  font-size: max(16px, 1em);
+  font-weight: 600;
+  margin-top: -4px;
+}
+
 /* Selector de cuenta en gasto/ingreso — fila horizontal deslizable de
    chips con avatar de color + saldo del mes, mismo ciclo de color que
    "Distribución por cuenta" (ACCOUNT_COLORS), no un hex por cuenta. */

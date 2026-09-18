@@ -344,9 +344,16 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch, onOpenMoneyAsk 
   function pocketOf(key) {
     return pockets.find((p) => p.key === key)
   }
+  function pocketsOfAccount(accountId) {
+    return pockets.filter((p) => p.accountId === accountId)
+  }
   const fromPocket = pocketOf(form.fromKey)
   const toPocket = pocketOf(form.toKey)
-  const toOptions = form.fromKey ? pockets.filter((p) => p.key !== form.fromKey) : pockets
+  // Bolsillos de destino válidos para la cuenta actualmente elegida en
+  // "Hacia" — excluye el bolsillo ya elegido en "Desde" (no tiene sentido
+  // transferir un bolsillo a sí mismo), pero sí permite el resto de los
+  // bolsillos de esa misma cuenta (ej. arq USD -> arq EUR).
+  const toAccountPocketOptions = toPocket ? pocketsOfAccount(toPocket.accountId).filter((p) => p.key !== form.fromKey) : []
   const crossCurrency = !!(form.mode === 'transferencia' && fromPocket && toPocket
     && toPocket.currency !== fromPocket.currency)
   const askConsumesBudget = !!(form.mode === 'transferencia'
@@ -931,37 +938,76 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch, onOpenMoneyAsk 
                         />
                       </div>
                     </div>
+                    {/* Un chip por CUENTA, no por bolsillo — antes "arq" y "arq (EUR)"
+                        aparecían como dos chips separados en la misma fila, lo cual
+                        se veía duplicado. Elegir la cuenta selecciona su moneda
+                        primaria por default; si tiene más de un bolsillo, un select
+                        chico aparece debajo para elegir cuál (mismo criterio que el
+                        selector de moneda en MonthlyInitialBalancesSection.jsx). */}
                     <div className={styles.chipRow}>
                       <span className={styles.chipLabel}>Desde</span>
-                      {pockets.map((p) => (
+                      {accounts.map((a) => (
                         <button
-                          key={p.key} type="button"
-                          className={form.fromKey === p.key ? `${styles.chip} ${styles.chipActive}` : styles.chip}
+                          key={a.id} type="button"
+                          className={fromPocket?.accountId === a.id ? `${styles.chip} ${styles.chipActive}` : styles.chip}
                           onClick={() => {
-                            setForm({
-                              ...form,
-                              fromKey: p.key,
-                              toKey: form.toKey === p.key ? '' : form.toKey,
-                            })
+                            // Conserva el bolsillo ya elegido si es la misma cuenta
+                            // (ej. venías de elegir "arq (EUR)" y tocás "arq" de
+                            // nuevo sin querer), si no arranca en la moneda primaria.
+                            const nextKey = fromPocket?.accountId === a.id ? form.fromKey : a.id
+                            setForm({ ...form, fromKey: nextKey, toKey: form.toKey === nextKey ? '' : form.toKey })
                             setToAmountTouchedByUser(false)
                           }}
                         >
-                          {p.label}
+                          {a.name}
                         </button>
                       ))}
                     </div>
+                    {fromPocket && pocketsOfAccount(fromPocket.accountId).length > 1 && (
+                      <select
+                        className={styles.pocketSelect}
+                        value={form.fromKey}
+                        onChange={(e) => {
+                          const nextKey = e.target.value
+                          setForm({ ...form, fromKey: nextKey, toKey: form.toKey === nextKey ? '' : form.toKey })
+                          setToAmountTouchedByUser(false)
+                        }}
+                      >
+                        {pocketsOfAccount(fromPocket.accountId).map((p) => (
+                          <option key={p.key} value={p.key}>{p.currency}</option>
+                        ))}
+                      </select>
+                    )}
                     <div className={styles.chipRow}>
                       <span className={styles.chipLabel}>Hacia</span>
-                      {toOptions.map((p) => (
-                        <button
-                          key={p.key} type="button" disabled={!form.fromKey}
-                          className={form.toKey === p.key ? `${styles.chip} ${styles.chipActive}` : styles.chip}
-                          onClick={() => { setForm({ ...form, toKey: p.key }); setToAmountTouchedByUser(false) }}
-                        >
-                          {p.label}
-                        </button>
-                      ))}
+                      {accounts
+                        .filter((a) => pocketsOfAccount(a.id).some((p) => p.key !== form.fromKey))
+                        .map((a) => (
+                          <button
+                            key={a.id} type="button" disabled={!form.fromKey}
+                            className={toPocket?.accountId === a.id ? `${styles.chip} ${styles.chipActive}` : styles.chip}
+                            onClick={() => {
+                              const validPockets = pocketsOfAccount(a.id).filter((p) => p.key !== form.fromKey)
+                              const keepsCurrent = toPocket?.accountId === a.id && validPockets.some((p) => p.key === form.toKey)
+                              setForm({ ...form, toKey: keepsCurrent ? form.toKey : validPockets[0].key })
+                              setToAmountTouchedByUser(false)
+                            }}
+                          >
+                            {a.name}
+                          </button>
+                        ))}
                     </div>
+                    {toAccountPocketOptions.length > 1 && (
+                      <select
+                        className={styles.pocketSelect}
+                        value={form.toKey}
+                        onChange={(e) => { setForm({ ...form, toKey: e.target.value }); setToAmountTouchedByUser(false) }}
+                      >
+                        {toAccountPocketOptions.map((p) => (
+                          <option key={p.key} value={p.key}>{p.currency}</option>
+                        ))}
+                      </select>
+                    )}
                     {/* Monto recibido: se completa solo apenas hay monto y las dos
                         cuentas elegidas, a partir de la tasa guardada — sigue
                         editable a mano para el caso puntual de una tasa real

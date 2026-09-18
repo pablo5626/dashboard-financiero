@@ -1,0 +1,435 @@
+/* "Movimientos — mes": misma apariencia de lista que Diario.jsx
+   (Diario.module.css) — glyph de categoría, categoría+descripción, tags
+   como píldoras, agrupado por día — en vez de una tabla plana de columnas.
+   Clases y valores copiados 1:1 de ahí para que ambas listas se vean como
+   la misma pieza de UI reusada, no dos estilos distintos. */
+
+/* Filtros colapsados detrás de un botón con ícono — mismo criterio que
+   "Filtros" en SearchPanel.module.css: categoría/cuenta/tag no ocupan
+   espacio permanente arriba de la lista, solo cuando el usuario los abre. */
+.filterToggleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: var(--space-1);
+}
+
+.filterToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border-hairline);
+  color: var(--text-secondary);
+  font: var(--font-caption);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.filterToggleActive {
+  background: var(--series-1);
+  border-color: var(--series-1);
+  color: #fff;
+  box-shadow: 0 2px 10px -2px color-mix(in srgb, var(--series-1) 45%, transparent);
+}
+
+/* "Gasto real vs. presupuesto por cuenta": tarjeta con barra de progreso
+   por cuenta, en vez de una fila de tabla por columna de dato — mismo
+   criterio visual que la lista de Movimientos (glyph/pill), pero acá el
+   dato central es el % usado, así que la barra es la protagonista. */
+.budgetGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-1);
+}
+
+.budgetCard {
+  background: var(--surface-1);
+  border: 1px solid var(--border-hairline);
+  border-radius: 14px;
+  padding: var(--space-1) var(--space-1) 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.budgetHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.budgetName {
+  font: var(--font-subheadline);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.budgetPct {
+  font: var(--font-caption);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.budgetBarTrack {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-raised);
+  overflow: hidden;
+}
+
+.budgetBarFill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.2s;
+}
+
+.budgetMetaRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font: var(--font-caption);
+  color: var(--text-muted);
+}
+
+.budgetMetaRow strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.txDateHeader {
+  font: var(--font-caption);
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin: var(--space-1) 0 4px;
+}
+
+.txList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.txRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.txRow:last-child {
+  border-bottom: none;
+}
+
+.txGlyph {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  color: #fff;
+}
+
+/* Tocar el movimiento lo selecciona para editarlo entero (ver .txEditRow
+   más abajo) — cursor pointer como pista de que es clickeable. */
+.txInfo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+}
+
+.txCategory {
+  font: var(--font-caption);
+  color: var(--text-muted);
+}
+
+.txPurpose {
+  font: var(--font-subheadline);
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.txTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.txTag {
+  font: var(--font-caption);
+  color: var(--text-muted);
+  background: var(--surface-1);
+  border-radius: 8px;
+  padding: 0 6px;
+}
+
+.txMeta {
+  font: var(--font-caption);
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* Editor de tags dentro de .txEditRow — cada tag es su propia píldora con
+   "×" para quitarlo (igual que la vista de solo lectura .txTag) en vez de
+   un input de texto separado por comas; a diferencia de Diario.jsx (que
+   solo permite un tag vía un input de texto plano), acá se conserva un
+   array completo. Las altas/bajas modifican editDraft.tags en memoria —
+   el guardado real ocurre recién al tocar "Guardar" del form completo. */
+.txTagsEditor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  margin-top: 2px;
+}
+
+.txTagEditable {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font: var(--font-caption);
+  color: var(--text-primary);
+  background: var(--surface-1);
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  padding: 0 4px 0 6px;
+}
+
+.txTagRemove {
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px;
+}
+
+/* font-size explícito (no font: var(--font-caption), 12px) por el mismo
+   motivo que .pocketSelect en QuickCaptureFAB.module.css — es un <input>
+   real, una clase más específica que la regla global anti-zoom de Safari
+   la pisaría. */
+.txTagAddInput {
+  min-height: 24px;
+  width: 70px;
+  border-radius: 8px;
+  border: 1px dashed var(--border-hairline);
+  padding: 0 6px;
+  font-family: var(--font-family);
+  font-size: max(16px, 1em);
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.txRight {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.txAmount {
+  font: var(--font-subheadline);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.txAmountGasto {
+  color: var(--status-critical);
+}
+
+.txAmountIngreso {
+  color: var(--status-good);
+}
+
+.txPendingMark {
+  color: var(--status-warning);
+  margin-right: 4px;
+}
+
+.txDelete {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Fila de edición completa (descripción, monto, cuenta, categoría, tags) —
+   reemplaza la fila de solo lectura entera mientras editingId === t.id,
+   mismos valores que .txEditRow/.txEditInput/etc. en Diario.module.css. */
+/* Ventana emergente de "Editar movimiento" — mismos valores que
+   .backdrop/.sheet/.bigInput/.amountCard* en QuickCaptureFAB.module.css
+   (pantalla completa en móvil con el mismo negro var(--page-plane) del
+   resto de la app, tarjeta centrada var(--surface-raised) en desktop/
+   tablet) para que se sienta como la misma pieza de UI que la hoja del
+   "+", como pidió el usuario, en vez de una fila expandida in-line. */
+.editBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 100;
+}
+
+@media (min-width: 768px) {
+  .editBackdrop {
+    align-items: center;
+    padding: var(--space-2);
+  }
+}
+
+.editSheet {
+  background: var(--page-plane);
+  border: none;
+  border-radius: 0;
+  padding: max(var(--space-2), env(safe-area-inset-top)) var(--space-2) calc(var(--space-2) + env(safe-area-inset-bottom));
+  width: 100%;
+  max-width: 420px;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow-y: auto;
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+@media (min-width: 768px) {
+  .editSheet {
+    background: var(--surface-raised);
+    border: 1px solid var(--border-hairline);
+    border-radius: 28px;
+    padding: var(--space-3);
+    height: auto;
+    max-height: 85dvh;
+    box-shadow: 0 -16px 40px -12px color-mix(in srgb, var(--series-1) 16%, transparent);
+  }
+}
+
+.editHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: var(--space-1);
+}
+
+.editTitle {
+  font: var(--font-headline);
+  margin: 0;
+}
+
+.editClose {
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.bigInput {
+  border: none;
+  outline: none;
+  background: transparent;
+  font: var(--font-title);
+  padding: 8px 2px;
+  color: var(--text-primary);
+}
+
+.bigInput::placeholder {
+  color: var(--text-muted);
+}
+
+.amountCard {
+  background: var(--surface-1);
+  border: 1px solid var(--border-hairline);
+  border-radius: 16px;
+  padding: 10px var(--space-1) 8px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.amountCard:focus-within {
+  border-color: var(--series-1);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--series-1) 18%, transparent);
+}
+
+.amountCardLabel {
+  display: block;
+  font: var(--font-caption);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+.amountCardRow {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.amountCardSign {
+  font: var(--font-title);
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.amountCardInput {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font: var(--font-largetitle);
+  color: var(--text-primary);
+  padding: 0;
+}
+
+.amountCardInput::placeholder {
+  color: var(--text-muted);
+}
+
+.txEditActions {
+  display: flex;
+  gap: 8px;
+}
+
+.txEditSave {
+  min-height: var(--touch-target);
+  padding: 0 var(--space-2);
+  border-radius: 10px;
+  background: var(--series-1);
+  color: #fff;
+  font-weight: 600;
+}
+
+.txEditSave:disabled {
+  opacity: 0.5;
+}
+
+.txEditCancel {
+  min-height: var(--touch-target);
+  padding: 0 var(--space-1);
+  color: var(--text-muted);
+}

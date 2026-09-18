@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, Legend,
   BarChart, Bar, Cell,
 } from 'recharts'
 import Card from '../components/ui/Card.jsx'
 import StatTile from '../components/ui/StatTile.jsx'
 import MonthYearPicker from '../components/ui/MonthYearPicker.jsx'
 import { formatCOP, formatCompact, formatByCurrency } from '../lib/format.js'
+import { estimateCategoryAxisWidth } from '../lib/chartUtils.js'
 import { listAccounts, fetchBalancesForMonth, totalBalanceInCOP } from '../lib/accountsApi.js'
 import { lastNMonths, fetchMonthlyTrend, fetchTotalDebt, fetchAlerts, findFirstDataMonth } from '../lib/panelApi.js'
 import { listUpcomingFixedExpenses, setPaidStatus } from '../lib/fixedExpensesApi.js'
@@ -253,9 +254,8 @@ export default function PanelGeneral() {
         <Card title="Distribución por cuenta">
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={hijas.map((a) => ({ name: a.name, balance: totalBalanceInCOP(a, balances, rates, toCOP) }))} layout="vertical" margin={{ left: 8 }}>
-              <CartesianGrid horizontal={false} stroke="var(--gridline)" />
               <XAxis type="number" hide />
-              <YAxis type="category" dataKey="name" width={70} tick={{ fill: 'var(--text-secondary)', fontSize: 12 }} axisLine={false} tickLine={false} />
+              <YAxis type="category" dataKey="name" width={estimateCategoryAxisWidth(hijas.map((a) => a.name))} tick={{ fill: 'var(--text-secondary)', fontSize: 12 }} axisLine={false} tickLine={false} />
               <Tooltip formatter={(v) => formatCOP(v)} contentStyle={{ background: 'var(--surface-raised)', border: '1px solid var(--border-hairline)', borderRadius: 8 }} labelStyle={{ color: 'var(--text-primary)' }} itemStyle={{ color: 'var(--text-primary)' }} cursor={{ fill: 'var(--gridline)' }} />
               <Bar dataKey="balance" radius={[0, 4, 4, 0]}>
                 {hijas.map((_, i) => (
@@ -269,9 +269,8 @@ export default function PanelGeneral() {
         <Card title="Patrimonio neto" className="span-2">
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={netWorthTrend}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--gridline)" vertical={false} />
               <XAxis dataKey="month" tick={{ fill: 'var(--text-muted)', fontSize: 12 }} axisLine={{ stroke: 'var(--gridline)' }} tickLine={false} />
-              <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 12 }} axisLine={false} tickLine={false} width={70} tickFormatter={formatCompact} />
+              <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 12 }} axisLine={false} tickLine={false} width={46} tickFormatter={formatCompact} />
               <Tooltip formatter={(v) => formatCOP(v)} contentStyle={{ background: 'var(--surface-raised)', border: '1px solid var(--border-hairline)', borderRadius: 8 }} labelStyle={{ color: 'var(--text-primary)' }} itemStyle={{ color: 'var(--text-primary)' }} />
               <Line type="monotone" dataKey="patrimonio" stroke="var(--series-1)" strokeWidth={2} dot={{ r: 3 }} name="Patrimonio neto" />
             </LineChart>
@@ -281,9 +280,8 @@ export default function PanelGeneral() {
         <Card title={`Tendencia ${TREND_MONTHS} meses`} className="span-3">
           <ResponsiveContainer width="100%" height={240}>
             <LineChart data={monthlyTrend}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--gridline)" vertical={false} />
               <XAxis dataKey="month" tick={{ fill: 'var(--text-muted)', fontSize: 12 }} axisLine={{ stroke: 'var(--gridline)' }} tickLine={false} />
-              <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 12 }} axisLine={false} tickLine={false} width={70} tickFormatter={formatCompact} />
+              <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 12 }} axisLine={false} tickLine={false} width={46} tickFormatter={formatCompact} />
               <Tooltip formatter={(v) => formatCOP(v)} contentStyle={{ background: 'var(--surface-raised)', border: '1px solid var(--border-hairline)', borderRadius: 8 }} labelStyle={{ color: 'var(--text-primary)' }} itemStyle={{ color: 'var(--text-primary)' }} />
               <Legend />
               <Line type="monotone" dataKey="ingresos" stroke="var(--series-1)" strokeWidth={2} name="Ingresos" dot={false} />
@@ -310,9 +308,8 @@ export default function PanelGeneral() {
           </div>
           <ResponsiveContainer width="100%" height={240}>
             <LineChart data={yoyChartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--gridline)" vertical={false} />
               <XAxis dataKey="month" tick={{ fill: 'var(--text-muted)', fontSize: 12 }} axisLine={{ stroke: 'var(--gridline)' }} tickLine={false} />
-              <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 12 }} axisLine={false} tickLine={false} width={70} tickFormatter={formatCompact} />
+              <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 12 }} axisLine={false} tickLine={false} width={46} tickFormatter={formatCompact} />
               <Tooltip formatter={(v) => formatCOP(v)} contentStyle={{ background: 'var(--surface-raised)', border: '1px solid var(--border-hairline)', borderRadius: 8 }} labelStyle={{ color: 'var(--text-primary)' }} itemStyle={{ color: 'var(--text-primary)' }} cursor={{ fill: 'var(--gridline)' }} />
               <Legend />
               <Line type="monotone" dataKey="ingresosActual" stroke="var(--series-1)" strokeWidth={2} name={`Ingresos ${year}`} dot={false} />

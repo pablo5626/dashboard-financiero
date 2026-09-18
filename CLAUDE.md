@@ -1637,6 +1637,35 @@ schema or UI.
 
 These were explicitly discussed and left out — don't "fix" them
 unprompted, they're deliberate cuts, not oversights:
+- **AI-powered fallback for the purpose→category/tag suggestion
+  (`purpose_category_stats`) was evaluated and explicitly declined.** The
+  user asked whether the system generalizes semantically (e.g. typing
+  "comida" suggesting "Salida a comer", or "cívica" suggesting
+  "Transporte") the way a human would, instead of only matching
+  previously-seen exact text. A Plan subagent analysis confirmed it does
+  not: `normalizePurpose`/`suggestCategoryForPurpose` in
+  `transactionsApi.js` only do an exact-text match (`trim + lowercase`, no
+  stemming/fuzzy matching/AI), by explicit prior design (see
+  `.claude/rules/esquema-datos.md`'s note on `purpose_category_stats`).
+  Three options were considered: (1) local fuzzy text matching
+  (substring/Levenshtein) — free but doesn't solve true synonyms like
+  "comida"/"almuerzo"; (2) a real AI call (Gemini 2.5 Flash, same pattern
+  as `voice-parse`) as a fallback only when no exact match exists —
+  actually solves semantic cases, estimated at well under $0.15/month even
+  at 500 transactions/month since it would only fire on genuinely new
+  descriptions, not repeats; (3) Postgres `pg_trgm` trigram similarity —
+  free, better than plain substring for typos/partial phrases, but still
+  text-based, not semantic. **Decision: don't implement any of the three
+  for now** — the user's reasoning was that the existing exact-match system
+  already keeps improving on its own as more of the user's real, repeated
+  vocabulary gets saved over time (`backfillPurposeCategoryStats` already
+  seeds it from history), so the added complexity/latency of an AI
+  fallback wasn't worth it yet. If this is revisited later, option 2
+  (exact match first, Gemini fallback only on a miss) was the recommended
+  approach precisely because it keeps repeated descriptions instant and
+  free, and the "never auto-assign, always prefill for review" contract
+  that `suggestCategoryForPurpose` already follows must be preserved
+  regardless of which matching mechanism ends up used.
 - `MonthlyAllocationSection.jsx` still has zero currency awareness by design
   (non-COP accounts — arq's USD and EUR pockets — are filtered out before
   reaching it via `hijasCop` in `Cuentas.jsx`, not made to understand

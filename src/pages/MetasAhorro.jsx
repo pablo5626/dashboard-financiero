@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts'
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip } from 'recharts'
 import Card from '../components/ui/Card.jsx'
 import ConfirmDialog from '../components/ui/ConfirmDialog.jsx'
 import { formatCOP, formatByCurrency, formatCompact } from '../lib/format.js'
@@ -310,9 +310,8 @@ export default function MetasAhorro() {
               {growthChartData.length > 1 && (
                 <ResponsiveContainer width="100%" height={140}>
                   <LineChart data={growthChartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--gridline)" vertical={false} />
                     <XAxis dataKey="label" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} axisLine={{ stroke: 'var(--gridline)' }} tickLine={false} />
-                    <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11 }} axisLine={false} tickLine={false} width={60} tickFormatter={formatCompact} />
+                    <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11 }} axisLine={false} tickLine={false} width={42} tickFormatter={formatCompact} />
                     <Tooltip formatter={(v) => formatByCurrency(v, goalCurrency)} contentStyle={{ background: 'var(--surface-raised)', border: '1px solid var(--border-hairline)', borderRadius: 8 }} labelStyle={{ color: 'var(--text-primary)' }} itemStyle={{ color: 'var(--text-primary)' }} />
                     <Line type="monotone" dataKey="value" stroke="var(--series-1)" strokeWidth={2} dot={{ r: 3 }} name="Acumulado" />
                   </LineChart>

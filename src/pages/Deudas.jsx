@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell } from 'recharts'
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from 'recharts'
+import { estimateCategoryAxisWidth } from '../lib/chartUtils.js'
 import Card from '../components/ui/Card.jsx'
 import ConfirmDialog from '../components/ui/ConfirmDialog.jsx'
 import StatTile from '../components/ui/StatTile.jsx'
@@ -462,9 +463,8 @@ export default function Deudas() {
         <Card title="Salud financiera general" className="span-3">
           <ResponsiveContainer width="100%" height={120}>
             <BarChart data={healthData} layout="vertical" margin={{ left: 8 }}>
-              <CartesianGrid horizontal={false} stroke="var(--gridline)" />
               <XAxis type="number" hide />
-              <YAxis type="category" dataKey="name" width={100} tick={{ fill: 'var(--text-secondary)', fontSize: 12 }} axisLine={false} tickLine={false} />
+              <YAxis type="category" dataKey="name" width={estimateCategoryAxisWidth(healthData.map((d) => d.name))} tick={{ fill: 'var(--text-secondary)', fontSize: 12 }} axisLine={false} tickLine={false} />
               <Tooltip formatter={(v) => formatCOP(v)} contentStyle={{ background: 'var(--surface-raised)', border: '1px solid var(--border-hairline)', borderRadius: 8 }} labelStyle={{ color: 'var(--text-primary)' }} itemStyle={{ color: 'var(--text-primary)' }} cursor={{ fill: 'var(--gridline)' }} />
               <Bar dataKey="value" radius={[0, 4, 4, 0]}>
                 <Cell fill="var(--series-1)" />
