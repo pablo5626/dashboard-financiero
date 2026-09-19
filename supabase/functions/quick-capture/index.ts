@@ -1,48 +1,21 @@
 // Endpoint único para los Shortcuts de iOS "Gasto rápido" y "Transferencia
-// rápida" (ver .claude/rules/shortcuts-ios.md). Reemplaza el flujo
-// login -> resolver UUIDs a mano -> armar el JSON completo por una sola
-// llamada: el Shortcut solo manda nombres de cuenta y un monto, y esta
-// función hace el resto usando la service role key (bypassa RLS a
-// propósito, porque no hay JWT de usuario real en un Shortcut).
+// rápida" (ver .claude/rules/shortcuts-ios.md). Reemplaza el flujo de armar el
+// JSON completo y resolver UUIDs a mano por una sola llamada: el Shortcut solo
+// manda nombres de cuenta y un monto, y esta función resuelve el resto.
 //
-// Auth: no se usa el JWT de Supabase — se valida un secreto propio
-// (header `x-quick-capture-secret`) contra el secret QUICK_CAPTURE_SECRET,
-// y todas las filas se escriben con QUICK_CAPTURE_USER_ID (single-user app).
-// Por eso el función se despliega con verify_jwt = false (supabase/config.toml).
+// Multiusuario: cada persona usa el JWT de su propia sesión (el Shortcut hace
+// primero el login con su correo y contraseña y manda `Authorization: Bearer
+// <access_token>`). El cliente que arma requireUser usa ese JWT, así que RLS
+// decide qué cuentas ve y solo puede escribir filas propias -- ya no hay
+// service role key, secreto compartido ni user_id fijo.
 
-import { createClient } from 'npm:@supabase/supabase-js@2'
-
-const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
-const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-const QUICK_CAPTURE_SECRET = Deno.env.get('QUICK_CAPTURE_SECRET')!
-const QUICK_CAPTURE_USER_ID = Deno.env.get('QUICK_CAPTURE_USER_ID')!
-
-const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
-
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  })
-}
+import { json, requireUser } from '../_shared/auth.ts'
 
 // Misma normalización que parseMonIACSV en transactionsApi.js: MonIA (y por
 // consistencia, el Shortcut) no puede escribir espacios en un tag, así que
 // "arq_eur" debe seguir resolviendo a la cuenta "arq eur".
 function normalizeName(name: string) {
   return name.toLowerCase().trim().replace(/_/g, ' ')
-}
-
-async function findAccount(name: string) {
-  const target = normalizeName(name)
-  const { data, error } = await supabase
-    .from('accounts')
-    .select('id, name, currency')
-    .eq('user_id', QUICK_CAPTURE_USER_ID)
-    .eq('is_active', true)
-
-  if (error) throw error
-  return (data ?? []).find((a: { name: string }) => normalizeName(a.name) === target) ?? null
 }
 
 function randomDigits(n: number) {
@@ -56,9 +29,9 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: 'method not allowed' }, 405)
   }
 
-  if (req.headers.get('x-quick-capture-secret') !== QUICK_CAPTURE_SECRET) {
-    return json({ ok: false, error: 'unauthorized' }, 401)
-  }
+  const auth = await requireUser(req)
+  if ('error' in auth) return auth.error
+  const { client, userId } = auth
 
   let body: Record<string, unknown>
   try {
@@ -72,6 +45,16 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: 'monto invalido' }, 400)
   }
 
+  async function findAccount(name: string) {
+    const target = normalizeName(name)
+    const { data, error } = await client
+      .from('accounts')
+      .select('id, name, currency')
+      .eq('is_active', true)
+    if (error) throw error
+    return (data ?? []).find((a: { name: string }) => normalizeName(a.name) === target) ?? null
+  }
+
   try {
     if (body.action === 'expense') {
       const cuentaNombre = String(body.cuenta ?? '')
@@ -81,13 +64,16 @@ Deno.serve(async (req: Request) => {
       }
 
       const now = new Date()
-      const { error } = await supabase.from('transactions').insert({
-        user_id: QUICK_CAPTURE_USER_ID,
+      const { error } = await client.from('transactions').insert({
+        user_id: userId,
         monia_id: `shortcut-${now.getTime()}-${randomDigits(4)}`,
         occurred_at: now.toISOString(),
         purpose: 'Gasto rápido',
         amount: -Math.abs(monto),
-        currency: 'COP',
+        // La moneda sale de la cuenta: fetchBalancesForMonth solo suma filas
+        // cuya moneda coincide con la de la cuenta, así que un gasto en COP
+        // contra una cuenta USD/EUR se descartaría en silencio del saldo.
+        currency: account.currency || 'COP',
         account_id: account.id,
         assignment_level: 3,
         assignment_confirmed: true,
@@ -116,15 +102,19 @@ Deno.serve(async (req: Request) => {
         )
       }
 
-      // Fecha local de Bogotá (UTC-5 fijo, sin horario de verano) calculada en
-      // el servidor -- current_date en Postgres sería UTC y desde las 7pm en
-      // Bogotá ya marcaría el día siguiente (ver shortcuts-ios.md).
-      const transferDate = new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'America/Bogota',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-      }).format(new Date())
+      // El Shortcut puede mandar la fecha local del teléfono (`fecha`,
+      // yyyy-MM-dd). Si no la manda, se calcula la de Bogotá (UTC-5 fijo, sin
+      // horario de verano): current_date en Postgres sería UTC y desde las
+      // 7pm en Bogotá ya marcaría el día siguiente (ver shortcuts-ios.md).
+      const fecha = typeof body.fecha === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.fecha) ? body.fecha : null
+      const transferDate =
+        fecha ??
+        new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'America/Bogota',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        }).format(new Date())
 
       // Idempotencia sin pedirle nada al Shortcut: un reintento de red real
       // de la MISMA llamada cae en la misma ventana de 3s y coincide en la
@@ -133,9 +123,9 @@ Deno.serve(async (req: Request) => {
       const bucket = Math.floor(Date.now() / 3000)
       const idempotencyKey = `shortcut-${origen.id}-${destino.id}-${monto}-${bucket}`
 
-      const { error } = await supabase.from('account_transfers').upsert(
+      const { error } = await client.from('account_transfers').upsert(
         {
-          user_id: QUICK_CAPTURE_USER_ID,
+          user_id: userId,
           from_account_id: origen.id,
           to_account_id: destino.id,
           amount: monto,

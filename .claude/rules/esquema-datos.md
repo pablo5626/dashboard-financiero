@@ -12,8 +12,14 @@ directamente en el panel de Supabase sin reflejarlo en el archivo.
 
 - **RLS obligatorio en toda tabla nueva**: `user_id uuid not null references
   auth.users(id) default auth.uid()` + políticas `select/insert/update/delete`
-  con `user_id = auth.uid()`. Es un solo usuario hoy, pero el diseño ya
-  contempla un segundo creador (pareja) sin romper el modelo.
+  con `user_id = auth.uid()`. La app es multiusuario con registro abierto:
+  cada persona que se registra empieza con cero filas (no hay triggers ni
+  seeds sobre `auth.users`), y el aislamiento entre personas es solo RLS.
+- **`ai_usage` + `consume_ai_quota(p_limit)`**: contador diario por usuario
+  (`user_id`, `day`, `count`) de llamadas a las Edge Functions de IA, que
+  comparten una sola `GEMINI_API_KEY`. La función es `security invoker`, así
+  que solo toca la fila del propio usuario; devuelve `false` al pasar el
+  límite (60 por día, definido en `supabase/functions/_shared/quota.ts`).
 - **`transactions.account_id` es nullable a propósito**: representa el estado
   "pendiente de banco" del motor de asignación (ver `motor-asignacion.md`). No
   se reemplaza por una cuenta ficticia tipo "Sin asignar".

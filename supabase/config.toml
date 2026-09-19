@@ -1,7 +1,4 @@
 project_id = "qxiqqozogggfynkanevt"
 
-[functions.quick-capture]
-verify_jwt = false
-
 [functions.rates-auto-update]
 verify_jwt = false

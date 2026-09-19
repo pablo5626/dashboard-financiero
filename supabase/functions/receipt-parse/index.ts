@@ -7,43 +7,33 @@
 //
 // Mismo cambio de proveedor que voice-parse/index.ts (Anthropic -> Gemini,
 // misma GEMINI_API_KEY/GEMINI_MODEL) -- ver esa nota para el motivo.
+//
+// Las categorías posibles no están fijas acá: cada usuario tiene las suyas,
+// así que el cliente las manda en el body (`categories`, solo nombres) y se
+// inyectan en el prompt; sin ninguna, el modelo devuelve null en ese campo.
+// Sin lista de cuentas: una foto de recibo no trae ninguna señal de qué
+// cuenta se usó.
+import { CORS_HEADERS, json, requireUser } from '../_shared/auth.ts'
+import { consumeAiQuota } from '../_shared/quota.ts'
+import { sanitizeNameList } from '../_shared/input.ts'
+
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')
 const GEMINI_MODEL = 'gemini-2.5-flash'
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-}
-
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
-  })
-}
-
-// Mismas categorías que voice-parse/index.ts (ver .claude/rules/nomenclatura.md)
-// -- nunca las variantes del CSV de MonIA. Sin lista de cuentas: una foto de
-// recibo no trae ninguna señal de qué cuenta se usó.
-const CATEGORIES = [
-  'Anita de mi corazón', 'Aportes', 'Compras', 'Cuidado personal',
-  'Deuda o cuadre', 'Donativo', 'Educación', 'Medicina', 'Mekato', 'Mercado',
-  'Ocio', 'Préstamo', 'Regalo - festividades', 'Ropa', 'Salida a comer',
-  'Servicios', 'Suscripciones', 'Tarjeta', 'Transporte', 'Viaje',
-]
-
-const SYSTEM_PROMPT = `Te muestro la foto o el PDF de un recibo o factura (incluida una factura electrónica DIAN, que puede traer varias líneas de detalle) de una compra en Colombia. Devolvés SOLO un JSON estricto (sin texto extra, sin markdown) con esta forma exacta:
+function buildSystemPrompt(categories: string[]) {
+  const categoryList = categories.length > 0 ? categories.join(', ') : '(ninguna todavía)'
+  return `Te muestro la foto o el PDF de un recibo o factura (incluida una factura electrónica DIAN, que puede traer varias líneas de detalle) de una compra en Colombia. Devolvés SOLO un JSON estricto (sin texto extra, sin markdown) con esta forma exacta:
 
 {"purpose":"<string o null>","amount":<number>,"categoryName":"<string o null>"}
 
 Reglas:
 - "amount": el TOTAL FINAL pagado (no un subtotal, no un impuesto ni una línea suelta), número entero positivo en pesos colombianos.
 - "purpose": un nombre corto del comercio/establecimiento tal como aparece en el recibo, o null si no se alcanza a leer.
-- "categoryName": la que mejor calce de esta lista exacta según el tipo de comercio, o null si no es clara: ${CATEGORIES.join(', ')}.
+- "categoryName": la que mejor calce de esta lista exacta según el tipo de comercio, o null si no es clara o la lista está vacía: ${categoryList}.
 - Nunca inventes una categoría que no esté en la lista exacta de arriba.
 - Si la imagen no es un recibo legible, poné amount en null.
 - Devolvé JSON válido y nada más.`
+}
 
 // 'application/pdf' cubre una factura electrónica emitida directamente en
 // PDF (muy común en Colombia/DIAN) -- Gemini la lee igual que una imagen en
@@ -66,6 +56,9 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: 'GEMINI_API_KEY no configurada todavía en los secrets de Supabase' }, 500)
   }
 
+  const auth = await requireUser(req)
+  if ('error' in auth) return auth.error
+
   let body: Record<string, unknown>
   try {
     body = await req.json()
@@ -82,6 +75,11 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: 'imagen vacía o demasiado grande' }, 400)
   }
 
+  const systemPrompt = buildSystemPrompt(sanitizeNameList(body.categories))
+
+  const quotaError = await consumeAiQuota(auth.client)
+  if (quotaError) return quotaError
+
   try {
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
       method: 'POST',
@@ -90,7 +88,7 @@ Deno.serve(async (req: Request) => {
         'x-goog-api-key': GEMINI_API_KEY,
       },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        systemInstruction: { parts: [{ text: systemPrompt }] },
         contents: [{
           role: 'user',
           parts: [

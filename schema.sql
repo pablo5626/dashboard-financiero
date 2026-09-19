@@ -1,7 +1,12 @@
 -- ============================================================================
 -- Dashboard Financiero Personal — Esquema Supabase (Postgres)
 -- Basado en prompt-dashboard-financiero.md
--- Ejecutar completo en el SQL Editor de Supabase (un solo usuario vía auth.uid())
+-- Ejecutar completo en el SQL Editor de Supabase. Multiusuario: cada tabla
+-- lleva user_id (default auth.uid()) + RLS, así que cada persona que se
+-- registra en la app empieza con cero filas — nada de lo de abajo se
+-- precarga. Los bloques de INSERT comentados más abajo son solo ejemplos del
+-- dueño original: NO ejecutarlos si ya hay más de un usuario (sus
+-- "select id from accounts where name = ..." no filtran por usuario).
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
@@ -360,6 +365,35 @@ create table user_settings (
   created_at timestamptz not null default now()
 );
 
+-- Contador diario de llamadas a las Edge Functions de IA (voice-parse,
+-- receipt-parse, money-ask), que comparten una sola GEMINI_API_KEY — sin un
+-- tope por usuario, cualquiera que se registre podría gastarla. Una fila por
+-- usuario y día (UTC); la función consume_ai_quota la incrementa y dice si
+-- todavía está dentro del límite.
+create table ai_usage (
+  user_id uuid not null references auth.users(id) default auth.uid(),
+  day date not null default current_date,
+  count integer not null default 0,
+  primary key (user_id, day)
+);
+
+-- security invoker (default): corre con los permisos y la RLS del usuario que
+-- llama, así solo puede tocar su propia fila.
+create or replace function consume_ai_quota(p_limit integer default 60)
+returns boolean
+language plpgsql
+as $$
+declare
+  v_count integer;
+begin
+  insert into ai_usage (user_id, day, count)
+  values (auth.uid(), current_date, 1)
+  on conflict (user_id, day) do update set count = ai_usage.count + 1
+  returning count into v_count;
+  return v_count <= p_limit;
+end;
+$$;
+
 -- ============================================================================
 -- ROW LEVEL SECURITY: cada tabla solo expone las filas del usuario dueño
 -- ============================================================================
@@ -372,7 +406,7 @@ begin
     'account_transfers', 'categories', 'transactions', 'category_account_stats',
     'purpose_category_stats',
     'fixed_expenses', 'fixed_expense_month_status', 'debts', 'debt_installments',
-    'savings_goals', 'savings_contributions', 'tags', 'user_settings'
+    'savings_goals', 'savings_contributions', 'tags', 'user_settings', 'ai_usage'
   ])
   loop
     execute format('alter table %I enable row level security;', t);
@@ -384,7 +418,8 @@ begin
 end $$;
 
 -- ============================================================================
--- Catálogo inicial de categorías (tomado de la tabla de mapeo del prompt)
+-- Catálogo inicial de categorías del dueño original (tomado de la tabla de
+-- mapeo del prompt). Un usuario nuevo NO lo hereda: crea las suyas desde la app.
 -- Ejecutar UNA VEZ ya autenticado (auth.uid() debe resolver a tu usuario)
 -- ============================================================================
 -- insert into categories (user_id, name, is_ambiguous) values

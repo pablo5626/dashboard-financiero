@@ -66,7 +66,11 @@ export default function Cuentas() {
   // cada cuenta se actualice sin recargar la página entera.
   useEffect(() => {
     window.addEventListener('dashboard:rates-changed', reload)
-    return () => window.removeEventListener('dashboard:rates-changed', reload)
+    window.addEventListener('dashboard:accounts-changed', reload)
+    return () => {
+      window.removeEventListener('dashboard:rates-changed', reload)
+      window.removeEventListener('dashboard:accounts-changed', reload)
+    }
   }, [])
 
   const madre = accounts?.find((a) => a.kind === 'madre')
@@ -160,9 +164,18 @@ export default function Cuentas() {
       ) : (
         <Card className="span-3" style={{ marginBottom: 'var(--space-2)' }}>
           <p style={{ font: 'var(--font-subheadline)', color: 'var(--text-muted)', margin: 0 }}>
-            Todavía no hay una cuenta madre creada. Andá a Ajustes → Cuentas y marcá "Es la cuenta madre" al crearla,
-            antes de agregar cuentas hijas.
+            Todavía no hay una cuenta madre creada. Créala primero, antes de agregar cuentas hijas.
           </p>
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent('dashboard:open-settings', { detail: { section: 'cuentas' } }))}
+            style={{
+              minHeight: 'var(--touch-target)', padding: 0, background: 'none', border: 'none',
+              color: 'var(--series-1)', font: 'var(--font-subheadline)', fontWeight: 600, cursor: 'pointer',
+            }}
+          >
+            Crear cuenta madre →
+          </button>
         </Card>
       )}
 

@@ -5,7 +5,7 @@
 > superadas por la implementación real: la app no es un artifact sino un
 > proyecto Vite desplegado en GitHub Pages, el multi-moneda incluye EUR además
 > de COP y USD, la tasa de cambio no es "un valor" sino una fila por par de
-> monedas (editable tanto en Cuentas como en Ajustes → Tasas de cambio, con un
+> monedas (editable solo desde Ajustes → Tasas de cambio, con un
 > botón para traerla del día desde una API real), una cuenta multi-moneda
 > (como `arq`) es **una sola fila** con varios bolsillos de moneda
 > (`is_multi_currency` + `account_currencies`), no dos cuentas separadas como
@@ -137,7 +137,7 @@ En ambos casos se debe poder ver: % completado, próximo aporte sugerido (si hay
 ---
 
 ## 🔐 Autenticación
-- Uso individual (un único usuario, no hay pareja con login propio).
+- Uso individual por cuenta: cada persona se registra con su propio correo y ve solo sus datos (RLS). Una persona nueva empieza vacía: sin cuentas, categorías, tags, deudas ni ahorros. Las cuentas y categorías de este documento son las del dueño original, no un catálogo que se precargue a nadie más.
 - Login simple vía Supabase Auth (email/password) para proteger los datos y que sean accesibles desde cualquier dispositivo de forma segura.
 - El usuario **aún no tiene proyecto de Supabase creado** — se necesita una guía paso a paso para crearlo antes de construir la app.
 

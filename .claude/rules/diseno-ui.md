@@ -23,6 +23,37 @@
   CSS/React — sus referencias de widgets, extensions, Siri/Shortcuts o
   app-icons no aplican a esta web app.
 
+## Edición y altas: tocar para editar, un diseño por pantalla
+
+- **Ninguna fila ni tarjeta editable lleva un botón "Editar"** — tocar la fila
+  o el encabezado abre la edición (mismo criterio que Movimientos en
+  Diario/Gastos y las categorías en Ajustes). "Eliminar" queda como enlace
+  discreto en el encabezado (con `stopPropagation`) y también dentro de la
+  edición, siempre detrás de `ConfirmDialog`.
+- El vocabulario visual compartido vive en `src/components/ui/FormKit.jsx`:
+  `Field` (etiqueta en mayúsculas arriba del control, pista opcional a la
+  derecha), `ChipPicker` (píldoras seleccionables; `allowClear` en campos
+  opcionales), `Segmented`, `SwitchRow` (switch iOS + texto de ayuda),
+  `InfoCard` (explica dónde se usa el dato; `tone="warning"` para
+  advertencias reales), `EditHeader` (avatar cuadrado que refleja lo tipeado,
+  leyenda "EDITANDO X" e insignia de tipo), `EditActions`, `MeterPreview` y
+  `EditSheet`. Usarlas antes de escribir inputs/estilos sueltos.
+- **Cada pantalla compone su propia edición; no se clona un mismo
+  formulario genérico.** Hoy: Cuentas = la tarjeta se ensancha en formulario;
+  Gastos fijos = lista agrupada Pendientes/Pagados con ficha de día y edición
+  inline bajo la fila; Deudas = hoja modal (`EditSheet`) con avance en vivo;
+  Metas = tarjeta inline con proyección de aporte mensual en vivo. Una
+  edición nueva debe elegir su forma según el dato que edita, con estos
+  mismos componentes.
+- Una hoja modal (`EditSheet`) es pantalla completa en móvil y tarjeta
+  centrada desde 768px, igual que la hoja del "+" — se usa cuando la edición
+  tiene muchos campos; si son pocos, mejor inline.
+- Todo `<input type="number">` que admita decimales (tasas, montos en USD/EUR,
+  porcentajes) lleva `step="any"`: sin eso la validación nativa del navegador
+  rechaza el envío del formulario con cualquier valor no entero.
+- Colores del avatar/insignia siempre por tokens (`--series-N`, `--status-*`),
+  nunca hex, para que el modo oscuro siga funcionando.
+
 ## Paleta y forma de los gráficos (skill `dataviz`)
 
 - Los tokens de color están en `src/index.css` (`--series-1`…`--series-8`,

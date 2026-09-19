@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { IconSettings, IconClose, IconChevronRight, IconTag, IconHash, IconAccounts, IconDebts, IconGoals, IconExchange, IconExpenses, IconBudget } from './icons.jsx'
 import ColorSwatchPicker from './ui/ColorSwatchPicker.jsx'
 import ConfirmDialog from './ui/ConfirmDialog.jsx'
-import { Field, InfoCard, SwitchRow, ChipPicker, Segmented } from './ui/FormKit.jsx'
+import { Field, InfoCard, ChipPicker, Segmented } from './ui/FormKit.jsx'
 import { listCategories, createCategory, updateCategory, archiveCategory } from '../lib/categoriesApi.js'
 import { backfillPurposeCategoryStats, markLoanTransactionReviewed, isReservedTag } from '../lib/transactionsApi.js'
 import { listTags, createTag, deleteTag } from '../lib/tagsApi.js'
@@ -28,7 +28,7 @@ const RATE_PAIRS = [...CURRENCIES.filter((c) => c !== 'COP').map((c) => ['COP', 
 const emptyNewCategory = { name: '', emoji: '', color: '', isAmbiguous: true, monthlyBudget: '' }
 const emptyEditDraft = { name: '', emoji: '', color: '', isAmbiguous: true, monthlyBudget: '' }
 const MULTI = 'MULTI' // valor del <select> de tipo de cuenta para "multi-moneda"
-const emptyNewAccount = { name: '', type: 'COP', pockets: [], draftCurrency: '', draftAmount: '', isMadre: false, initialBalance: '' }
+const emptyNewAccount = { name: '', type: 'COP', pockets: [], draftCurrency: '', draftAmount: '', initialBalance: '' }
 
 const RELATIONSHIP_OPTIONS = [
   { value: 'amigo', label: 'Amigo' },
@@ -106,6 +106,7 @@ export default function SettingsPanel() {
   const [backfillResult, setBackfillResult] = useState(null)
 
   const [accounts, setAccounts] = useState([])
+  const [accountsLoaded, setAccountsLoaded] = useState(false)
   const [newAccount, setNewAccount] = useState(emptyNewAccount)
   const [creatingAccount, setCreatingAccount] = useState(false)
   const [accountCreated, setAccountCreated] = useState(null) // nombre de la última cuenta creada, o null
@@ -135,7 +136,7 @@ export default function SettingsPanel() {
   useEffect(() => {
     if (!open) return
     listCategories().then(setCategories).catch((err) => setError(err.message))
-    listAccounts().then(setAccounts).catch((err) => setError(err.message))
+    listAccounts().then((accs) => { setAccounts(accs); setAccountsLoaded(true) }).catch((err) => setError(err.message))
     getRates().then(setRates).catch((err) => setError(err.message))
     listTags().then(setTags).catch((err) => setError(err.message))
     getUserSettings().then(setBudgetSettings).catch((err) => setError(err.message))
@@ -194,6 +195,7 @@ export default function SettingsPanel() {
   async function reload() {
     try {
       setCategories(await listCategories())
+      window.dispatchEvent(new Event('dashboard:accounts-changed'))
     } catch (err) {
       setError(err.message)
     }
@@ -337,17 +339,20 @@ export default function SettingsPanel() {
 
   async function handleCreateAccount(e) {
     e.preventDefault()
-    if (!newAccount.name.trim()) return
-    if (!newAccount.isMadre && newAccount.type === MULTI && newAccount.pockets.length < 2) return
+    if (!newAccount.name.trim() || !accountsLoaded) return
+    if (!isMadreForm && newAccount.type === MULTI && newAccount.pockets.length < 2) return
     const madreId = accounts.find((a) => a.kind === 'madre')?.id ?? null
     setCreatingAccount(true)
     setError(null)
     setAccountCreated(null)
     try {
-      if (newAccount.isMadre) {
+      if (isMadreForm) {
         // La madre es siempre una sola cuenta COP (el ritual mensual
         // madre→hijas la asume así) — sin multi-moneda ni cuenta padre.
-        await createAccount({ name: newAccount.name.trim(), kind: 'madre', parentAccountId: null, currency: 'COP' })
+        await createAccount({
+          name: newAccount.name.trim(), kind: 'madre', parentAccountId: null, currency: 'COP',
+          initialBalance: newAccount.initialBalance,
+        })
       } else if (newAccount.type === MULTI) {
         const [primary, ...rest] = newAccount.pockets
         const created = await createAccount({
@@ -374,6 +379,10 @@ export default function SettingsPanel() {
       }
       setAccountCreated(newAccount.name.trim())
       setNewAccount(emptyNewAccount)
+      // Sin esto hasMadre sigue en false hasta reabrir el panel y se podría
+      // crear una segunda madre; además avisa a Panel/Cuentas/"+" del cambio.
+      setAccounts(await listAccounts())
+      window.dispatchEvent(new Event('dashboard:accounts-changed'))
     } catch (err) {
       setError(err.message)
     } finally {
@@ -526,6 +535,9 @@ export default function SettingsPanel() {
 
   const activeSection = SETTINGS_SECTIONS.find((s) => s.key === section)
   const hasMadre = accounts.some((a) => a.kind === 'madre')
+  // Sin madre solo se puede crear la madre: una hija sin madre no tendría de
+  // dónde recibir su distribución mensual.
+  const isMadreForm = accountsLoaded && !hasMadre
   const fixedExpenseCurrency = accounts.find((a) => a.id === newFixedExpense.accountId)?.currency || 'COP'
 
   return (
@@ -913,9 +925,9 @@ export default function SettingsPanel() {
             <>
             <h3 className={styles.sectionTitle}>Cuentas</h3>
             <p className={styles.hint}>
-              {hasMadre
-                ? 'Creá una cuenta hija nueva — para renombrar, archivar o editar saldos de una ya existente, andá a la página "Cuentas".'
-                : 'Todavía no tenés una cuenta madre — creála primero (activá el interruptor de abajo) antes de agregar hijas.'}
+              {isMadreForm
+                ? 'Empieza creando tu cuenta madre: es la cuenta desde la que repartes tu plata cada mes hacia las hijas. Solo hay una y siempre es en COP.'
+                : 'Crea una cuenta hija nueva — para renombrar, archivar o editar saldos de una ya existente, ve a la página "Cuentas".'}
             </p>
 
             <form onSubmit={handleCreateAccount} className={`${styles.editForm} ${styles.categoryEditCard}`}>
@@ -923,25 +935,16 @@ export default function SettingsPanel() {
                 <span className={`${styles.categoryEditAvatar} ${styles.avatarAccent}`}>
                   {newAccount.name.trim() ? newAccount.name.trim().charAt(0).toUpperCase() : <IconAccounts width={26} height={26} />}
                 </span>
-                <Field label={newAccount.isMadre ? 'Nombre de la cuenta madre' : 'Nombre de la cuenta'}>
+                <Field label={isMadreForm ? 'Nombre de la cuenta madre' : 'Nombre de la cuenta'}>
                   <input
-                    placeholder={newAccount.isMadre ? 'Ej. Bold' : 'Ej. Pibank, Nequi, Dale'} value={newAccount.name}
+                    placeholder={isMadreForm ? 'Ej. Mi banco principal' : 'Ej. Billetera, Efectivo, Ahorros'} value={newAccount.name}
                     onChange={(e) => setNewAccount({ ...newAccount, name: e.target.value })}
                     className={styles.textInput}
                   />
                 </Field>
               </div>
 
-              {!hasMadre && (
-                <SwitchRow
-                  title="Es la cuenta madre"
-                  helper="De acá sale la distribución mensual hacia las hijas. Solo hay una y siempre es en COP."
-                  checked={newAccount.isMadre}
-                  onChange={(isMadre) => setNewAccount({ ...newAccount, isMadre })}
-                />
-              )}
-
-              {!newAccount.isMadre && (
+              {!isMadreForm && (
                 <Field label="Moneda">
                   <ChipPicker
                     options={ACCOUNT_TYPE_OPTIONS} value={newAccount.type}
@@ -950,9 +953,9 @@ export default function SettingsPanel() {
                 </Field>
               )}
 
-              {!newAccount.isMadre && newAccount.type !== MULTI && (
+              {(isMadreForm || newAccount.type !== MULTI) && (
                 <div className={`${styles.categoryFieldGroup} ${styles.categoryEditBudgetGroup}`}>
-                  <Field label="Saldo inicial (opcional)" hint={`En ${newAccount.type}`}>
+                  <Field label="Saldo inicial (opcional)" hint={`En ${isMadreForm ? 'COP' : newAccount.type}`}>
                     <input
                       type="number" step="any" placeholder="0" value={newAccount.initialBalance}
                       onChange={(e) => setNewAccount({ ...newAccount, initialBalance: e.target.value })}
@@ -966,7 +969,7 @@ export default function SettingsPanel() {
                 </div>
               )}
 
-              {!newAccount.isMadre && newAccount.type === MULTI && (
+              {!isMadreForm && newAccount.type === MULTI && (
                 <div className={`${styles.categoryFieldGroup} ${styles.categoryEditBudgetGroup}`}>
                   <div className={styles.categoryLabelRow}>
                     <span className={styles.categoryLabel}>Monedas de la cuenta</span>
@@ -1023,15 +1026,15 @@ export default function SettingsPanel() {
 
               <button
                 type="submit"
-                disabled={creatingAccount || !newAccount.name.trim() || (!newAccount.isMadre && newAccount.type === MULTI && newAccount.pockets.length < 2)}
+                disabled={creatingAccount || !accountsLoaded || !newAccount.name.trim() || (!isMadreForm && newAccount.type === MULTI && newAccount.pockets.length < 2)}
                 className={styles.saveButton}
               >
-                {creatingAccount ? 'Creando…' : newAccount.isMadre ? 'Crear cuenta madre' : 'Crear cuenta'}
+                {creatingAccount ? 'Creando…' : isMadreForm ? 'Crear cuenta madre' : 'Crear cuenta'}
               </button>
             </form>
 
             {accountCreated && (
-              <p className={styles.successCard}>Cuenta "{accountCreated}" creada — ya aparece en la página "Cuentas".</p>
+              <p className={styles.successCard}>Cuenta "{accountCreated}" creada — ya la puedes ver en la página "Cuentas".</p>
             )}
             </>
             )}

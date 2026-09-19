@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient.js'
+import { edgeFunctionErrorMessage } from './functionErrors.js'
 import { listAccounts, fetchBalancesForMonth } from './accountsApi.js'
 import { listTransactionsForMonth, isIgnoredRow } from './transactionsApi.js'
 import { fetchAlerts, fetchMonthlyTrend, fetchTotalDebt, lastNMonths } from './panelApi.js'
@@ -80,7 +81,7 @@ export async function askMoney(question) {
   const { data, error } = await supabase.functions.invoke('money-ask', {
     body: { question, context },
   })
-  if (error) throw error
+  if (error) throw new Error(await edgeFunctionErrorMessage(error))
   if (!data?.ok) throw new Error(data?.error || 'no se pudo responder la pregunta')
   return data.answer
 }

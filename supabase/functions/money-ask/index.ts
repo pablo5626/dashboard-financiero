@@ -11,21 +11,13 @@
 // redacte una respuesta en español a partir de esos números, nunca que
 // invente uno nuevo (mismo principio de "nunca inventar" que toCOP/
 // convertAmount en el resto de la app).
+import { CORS_HEADERS, json, requireUser } from '../_shared/auth.ts'
+import { consumeAiQuota } from '../_shared/quota.ts'
+
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')
 const GEMINI_MODEL = 'gemini-2.5-flash'
-
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-}
-
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
-  })
-}
+const MAX_QUESTION_LENGTH = 500
+const MAX_CONTEXT_LENGTH = 60_000 // caracteres del JSON ya serializado
 
 const SYSTEM_PROMPT = `Sos el asistente financiero personal de una app de finanzas en Colombia. Te paso un JSON con datos financieros REALES del usuario (cuentas, saldos, gasto del mes por categoría y por tag, alertas, tendencia de los últimos meses, deuda total) y una pregunta en español.
 
@@ -49,6 +41,9 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: 'GEMINI_API_KEY no configurada todavía en los secrets de Supabase' }, 500)
   }
 
+  const auth = await requireUser(req)
+  if ('error' in auth) return auth.error
+
   let body: Record<string, unknown>
   try {
     body = await req.json()
@@ -60,11 +55,21 @@ Deno.serve(async (req: Request) => {
   if (!question) {
     return json({ ok: false, error: 'pregunta vacía' }, 400)
   }
+  if (question.length > MAX_QUESTION_LENGTH) {
+    return json({ ok: false, error: 'pregunta demasiado larga' }, 400)
+  }
   if (!body.context || typeof body.context !== 'object') {
     return json({ ok: false, error: 'falta el contexto financiero' }, 400)
   }
+  const contextJson = JSON.stringify(body.context)
+  if (contextJson.length > MAX_CONTEXT_LENGTH) {
+    return json({ ok: false, error: 'el contexto financiero es demasiado grande' }, 400)
+  }
 
-  const userMessage = `Datos financieros del usuario:\n${JSON.stringify(body.context)}\n\nPregunta: ${question}`
+  const quotaError = await consumeAiQuota(auth.client)
+  if (quotaError) return quotaError
+
+  const userMessage = `Datos financieros del usuario:\n${contextJson}\n\nPregunta: ${question}`
 
   try {
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {

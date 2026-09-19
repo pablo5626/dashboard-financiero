@@ -7,6 +7,7 @@ import {
 import Card from '../components/ui/Card.jsx'
 import StatTile from '../components/ui/StatTile.jsx'
 import MonthYearPicker from '../components/ui/MonthYearPicker.jsx'
+import OnboardingCard from '../components/OnboardingCard.jsx'
 import { formatCOP, formatCompact, formatByCurrency } from '../lib/format.js'
 import { estimateCategoryAxisWidth } from '../lib/chartUtils.js'
 import { listAccounts, fetchBalancesForMonth, totalBalanceInCOP } from '../lib/accountsApi.js'
@@ -78,6 +79,13 @@ export default function PanelGeneral() {
   const [upcomingFixedExpenses, setUpcomingFixedExpenses] = useState([])
   const [markingPaidId, setMarkingPaidId] = useState(null)
   const [error, setError] = useState(null)
+  const [reloadKey, setReloadKey] = useState(0)
+
+  useEffect(() => {
+    const onAccountsChanged = () => setReloadKey((k) => k + 1)
+    window.addEventListener('dashboard:accounts-changed', onAccountsChanged)
+    return () => window.removeEventListener('dashboard:accounts-changed', onAccountsChanged)
+  }, [])
 
   useEffect(() => {
     async function load() {
@@ -127,7 +135,7 @@ export default function PanelGeneral() {
       }
     }
     load()
-  }, [year, month])
+  }, [year, month, reloadKey])
 
   async function handleMarkFixedExpensePaid(id) {
     setMarkingPaidId(id)
@@ -164,17 +172,26 @@ export default function PanelGeneral() {
     patrimonio: t.balanceTotal - totalDebt,
   }))
 
-  const lastMonth = trend[trend.length - 1]
+  // trend queda vacío cuando el mes elegido es anterior al primer dato real
+  // (o a la creación de la primera cuenta) — sin este respaldo la página entera se rompe.
+  const lastMonth = trend[trend.length - 1] ?? { ingresos: 0, gastos: 0 }
   const prevMonth = trend[trend.length - 2]
   const gastoDelta = prevMonth ? lastMonth.gastos - prevMonth.gastos : 0
 
-  const yoyChartData = MONTH_LABELS.slice(yoyStartMonth - 1, month).map((label, i) => ({
-    month: label,
-    gastosActual: yoyCurrent?.[i]?.gastos ?? 0,
-    gastosAnterior: yoyPrevious?.[i]?.gastos ?? 0,
-    ingresosActual: yoyCurrent?.[i]?.ingresos ?? 0,
-    ingresosAnterior: yoyPrevious?.[i]?.ingresos ?? 0,
-  }))
+  // fetchMonthlyTrend solo devuelve desde el ancla de saldo más antigua, así
+  // que se busca por número de mes en vez de por posición.
+  const yoyChartData = MONTH_LABELS.slice(yoyStartMonth - 1, month).map((label, i) => {
+    const monthNumber = yoyStartMonth + i
+    const cur = yoyCurrent?.find((r) => r.month === monthNumber)
+    const prev = yoyPrevious?.find((r) => r.month === monthNumber)
+    return {
+      month: label,
+      gastosActual: cur?.gastos ?? 0,
+      gastosAnterior: prev?.gastos ?? 0,
+      ingresosActual: cur?.ingresos ?? 0,
+      ingresosAnterior: prev?.ingresos ?? 0,
+    }
+  })
   const ytdIngresosActual = (yoyCurrent ?? []).reduce((sum, m) => sum + m.ingresos, 0)
   const ytdIngresosAnterior = (yoyPrevious ?? []).reduce((sum, m) => sum + m.ingresos, 0)
   const ytdGastosActual = (yoyCurrent ?? []).reduce((sum, m) => sum + m.gastos, 0)
@@ -194,6 +211,8 @@ export default function PanelGeneral() {
         <h1 className="page-title" style={{ margin: 0 }}>Panel general</h1>
         <MonthYearPicker year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m) }} />
       </div>
+
+      <OnboardingCard />
 
       <div className="kpi-row" style={{ marginBottom: 'var(--space-2)' }}>
         <Card><StatTile label="Balance total" value={formatCOP(balanceTotal)} /></Card>

@@ -10,10 +10,19 @@ import Login from './pages/Login.jsx'
 import { useAuth } from './lib/AuthContext.jsx'
 
 export default function App() {
-  const { user, loading } = useAuth()
+  const { user, loading, recovering } = useAuth()
 
-  if (loading) return null
-  if (!user) return <Login />
+  if (loading) {
+    return (
+      <div style={{
+        minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        font: 'var(--font-body)', color: 'var(--text-secondary)',
+      }}>
+        Cargando…
+      </div>
+    )
+  }
+  if (!user || recovering) return <Login />
 
   return (
     <AppShell>

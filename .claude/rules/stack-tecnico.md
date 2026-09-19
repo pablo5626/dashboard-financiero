@@ -17,7 +17,8 @@
 - **`src/lib/supabaseClient.js`** es el único punto de creación del cliente
   de Supabase — no instanciar `createClient` en otros archivos.
 - Estructura de carpetas: `src/pages/` (una por sección), `src/components/ui/`
-  (piezas genéricas: Card, ConfirmDialog, ColorSwatchPicker), `src/components/layout/`
+  (piezas genéricas: Card, ConfirmDialog, ColorSwatchPicker, FormKit — el
+  vocabulario de formularios de edición/alta: campos, píldoras, switch, hoja modal), `src/components/layout/`
   (AppShell, navegación), `src/components/` a nivel raíz (`QuickCaptureFAB.jsx`,
   `SettingsPanel.jsx`, `SearchPanel.jsx`, `CategoryEmojiGrid.jsx`,
   `AccountAutocomplete.jsx`, `icons.jsx` — componentes globales que no
@@ -37,3 +38,8 @@
   `CLAUDE.md`). Si algún día se agrega una sección nueva antes de tener su
   tabla lista, sus datos de ejemplo van en un archivo dedicado bajo
   `src/lib/`, nunca hardcodeados dentro de un componente de página.
+- **CSS Modules por página solo para lo que lo necesita**: `Cuentas`, `Deudas`,
+  `MetasAhorro` y `FixedExpensesSection` tienen su propio `.module.css`, pero
+  únicamente para su UI de edición (encabezado tocable, filas, hoja); el resto
+  de esas páginas conserva estilos en línea. Una pantalla nueva con UI propia
+  de edición va con su `.module.css`, no con más estilos en línea.

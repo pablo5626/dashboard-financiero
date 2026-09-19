@@ -159,8 +159,9 @@ Notas:
   confirmada con el usuario para mantener el Shortcut en 3 prompts (el caso
   más común es mover plata para gastarla desde la otra cuenta). Si alguna
   vez es solo reacomodo entre bolsillos sin gastar, ya no hace falta borrar y
-  recrear la transferencia: `TransferHistorySection` tiene un checkbox
-  inline en la tabla (mismo criterio que al crear — solo en filas donde
+  recrear la transferencia: `TransferHistorySection` tiene una
+  insignia tocable en cada fila ("Descuenta presupuesto" / "No descuenta";
+  mismo criterio que al crear — solo en filas donde
   ninguna punta es la madre) que llama a `transfersApi.updateConsumesBudget`
   y recarga al instante. Es la única excepción a "una transferencia no tiene
   UI de edición" — todo el resto de los campos de una transferencia sigue
@@ -186,6 +187,38 @@ Notas:
   determinística por madre+hija+año+mes (`transfersApi.buildMonthlyAllocationKey`)
   en vez de una con milisegundos — para protegerse de un doble click, una
   recarga con estado viejo, o dos pestañas confirmando el mismo mes.
+
+## Alternativa: endpoint `quick-capture` (una sola llamada tras el login)
+
+La Edge Function `supabase/functions/quick-capture` resuelve nombres de cuenta
+y arma el insert por vos. **Es multiusuario**: ya no usa un secreto compartido
+ni un user_id fijo — cada persona hace el login del paso 1 con su propio correo
+y contraseña y manda su `access_token`, así RLS decide qué cuentas ve y solo
+puede escribir filas propias.
+
+```
+POST https://<SUPABASE_URL>/functions/v1/quick-capture
+Headers:
+  apikey: <ANON_KEY>
+  Authorization: Bearer <access_token>
+  Content-Type: application/json
+Body (gasto):
+  { "action": "expense", "monto": 15000, "cuenta": "<nombre de la cuenta>" }
+Body (transferencia):
+  { "action": "transfer", "monto": 50000, "origen": "<cuenta>", "destino": "<cuenta>",
+    "fecha": "2026-09-19" }   // fecha opcional (yyyy-MM-dd); sin ella usa la de Bogotá
+```
+
+- Sin `Authorization` (o con solo la anon key) responde 401.
+- `cuenta`/`origen`/`destino` se resuelven por nombre, sin mayúsculas y con `_`
+  equivalente a espacio (`arq_eur` → `arq eur`).
+- El gasto se guarda en la **moneda de la cuenta elegida** (antes iba siempre
+  en COP y un gasto contra una cuenta USD/EUR quedaba fuera del saldo).
+- Una transferencia entre monedas distintas se rechaza: usar el "+" de la app.
+- **Migración desde la versión anterior**: quien tenga un Shortcut armado con
+  el header `x-quick-capture-secret` debe agregarle el paso de login y cambiar
+  ese header por `Authorization: Bearer <access_token>`. Los secrets
+  `QUICK_CAPTURE_SECRET` y `QUICK_CAPTURE_USER_ID` ya no se usan.
 
 ## Cambio de esquema requerido
 

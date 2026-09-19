@@ -7,6 +7,12 @@ paths:
 
 # Nomenclatura: categorías y cuentas
 
+> **Alcance**: esta regla describe el catálogo del **dueño original** del
+> proyecto. La app es multiusuario: una persona nueva se registra con cero
+> cuentas y cero categorías y crea las suyas desde Ajustes — nada de lo de
+> abajo se le precarga ni se le impone. Para los datos de cada usuario, lo que
+> manda es lo que él crea en la app.
+
 La única fuente válida de nombres de **categorías** y **cuentas** es la tabla de
 mapeo de `prompt-dashboard-financiero.md` (sección "Motor de asignación de
 cuenta"), más las cuentas hijas iniciales ahí listadas (Bold como madre; Dale,

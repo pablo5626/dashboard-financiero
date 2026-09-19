@@ -394,6 +394,11 @@ export default function GastosDiarios() {
             <p style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', margin: '0 0 var(--space-1)' }}>
               Sin tag de banco reconocido ni categoría inequívoca con histórico — confirma manualmente a qué cuenta corresponde cada uno.
             </p>
+            {hijas.length === 0 && (
+              <p style={{ font: 'var(--font-caption)', color: 'var(--status-warning)', margin: '0 0 var(--space-1)' }}>
+                Todavía no tienes cuentas hijas para asignar estos movimientos — créalas en Ajustes → Cuentas.
+              </p>
+            )}
             <div className="table-scroll">
             <table className="simple-table">
               <thead>

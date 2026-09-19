@@ -6,51 +6,43 @@
 // la invoca el navegador con el JWT real del usuario logueado, así que se
 // despliega con verify_jwt = true (default) y no aparece en config.toml.
 //
+// Las categorías y cuentas que puede devolver NO están fijas acá: cada
+// usuario tiene las suyas, así que el cliente las manda en el body
+// (`categories` y `accounts`, solo nombres) y se inyectan en el prompt. Sin
+// ninguna (usuario recién registrado), el modelo devuelve null en esos campos.
+//
 // Proveedor cambiado de Anthropic a Gemini a pedido del usuario (por ahora
 // usa la key de Gemini que ya tiene, con posibilidad de volver a cambiar
 // más adelante) -- mismo patrón de "un solo fetch directo a la API REST del
 // proveedor", sin capa de abstracción multi-proveedor, para no anticipar
 // una necesidad que todavía no existe.
+import { CORS_HEADERS, json, requireUser } from '../_shared/auth.ts'
+import { consumeAiQuota } from '../_shared/quota.ts'
+import { sanitizeNameList } from '../_shared/input.ts'
+
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')
 const GEMINI_MODEL = 'gemini-2.5-flash'
+const MAX_TEXT_LENGTH = 1000
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+function listForPrompt(names: string[]) {
+  return names.length > 0 ? names.join(', ') : '(ninguna todavía)'
 }
 
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
-  })
-}
-
-// Mismas categorías/cuentas que prompt-dashboard-financiero.md (ver
-// .claude/rules/nomenclatura.md) -- nunca las variantes del CSV de MonIA.
-const CATEGORIES = [
-  'Anita de mi corazón', 'Aportes', 'Compras', 'Cuidado personal',
-  'Deuda o cuadre', 'Donativo', 'Educación', 'Medicina', 'Mekato', 'Mercado',
-  'Ocio', 'Préstamo', 'Regalo - festividades', 'Ropa', 'Salida a comer',
-  'Servicios', 'Suscripciones', 'Tarjeta', 'Transporte', 'Viaje',
-]
-
-const ACCOUNTS = ['Dale', 'Nequi', 'Rappi', 'Nubank', 'Efectivo', 'Pibank', 'arq', 'arq eur']
-
-const SYSTEM_PROMPT = `Interpretás frases habladas en español colombiano que describen un movimiento de dinero personal, y devolvés SOLO un JSON estricto (sin texto extra, sin markdown) con esta forma exacta:
+function buildSystemPrompt(categories: string[], accounts: string[]) {
+  return `Interpretás frases habladas en español colombiano que describen un movimiento de dinero personal, y devolvés SOLO un JSON estricto (sin texto extra, sin markdown) con esta forma exacta:
 
 {"mode":"gasto|ingreso","amount":<number>,"categoryName":"<string o null>","accountName":"<string o null>","purpose":"<string o null>","tag":"<string o null>"}
 
 Reglas:
 - "mode": "gasto" salvo que la frase indique claramente un ingreso (recibí, me pagaron, me depositaron...).
 - "amount": siempre en pesos colombianos, número entero positivo. Jerga: "mil"/"lucas" = x1.000 (ej. "15 mil" = 15000, "20 lucas" = 20000); "palo"/"palos" = x1.000.000 (ej. "1 palo" = 1000000, "2 palos y medio" = 2500000).
-- "categoryName": la que mejor calce de esta lista exacta, o null si no es clara: ${CATEGORIES.join(', ')}.
-- "accountName": la cuenta mencionada, solo si calza con esta lista exacta, o null si no se menciona ninguna: ${ACCOUNTS.join(', ')}.
+- "categoryName": la que mejor calce de esta lista exacta, o null si no es clara o la lista está vacía: ${listForPrompt(categories)}.
+- "accountName": la cuenta mencionada, solo si calza con esta lista exacta, o null si no se menciona ninguna o la lista está vacía: ${listForPrompt(accounts)}.
 - "purpose": una descripción corta de qué fue el movimiento (ej. "salchipapa"), o null si no hay nada claro más allá de monto/cuenta/categoría.
 - "tag": un tag descriptivo corto en minúscula si la frase lo sugiere, o null.
 - Nunca inventes una cuenta o categoría que no esté en las listas exactas de arriba.
 - Devolvé JSON válido y nada más.`
+}
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -65,6 +57,9 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: 'GEMINI_API_KEY no configurada todavía en los secrets de Supabase' }, 500)
   }
 
+  const auth = await requireUser(req)
+  if ('error' in auth) return auth.error
+
   let body: Record<string, unknown>
   try {
     body = await req.json()
@@ -76,6 +71,14 @@ Deno.serve(async (req: Request) => {
   if (!text) {
     return json({ ok: false, error: 'texto vacío' }, 400)
   }
+  if (text.length > MAX_TEXT_LENGTH) {
+    return json({ ok: false, error: 'texto demasiado largo' }, 400)
+  }
+
+  const systemPrompt = buildSystemPrompt(sanitizeNameList(body.categories), sanitizeNameList(body.accounts))
+
+  const quotaError = await consumeAiQuota(auth.client)
+  if (quotaError) return quotaError
 
   try {
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
@@ -85,7 +88,7 @@ Deno.serve(async (req: Request) => {
         'x-goog-api-key': GEMINI_API_KEY,
       },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        systemInstruction: { parts: [{ text: systemPrompt }] },
         contents: [{ role: 'user', parts: [{ text }] }],
         generationConfig: { temperature: 0, maxOutputTokens: 300, responseMimeType: 'application/json' },
       }),

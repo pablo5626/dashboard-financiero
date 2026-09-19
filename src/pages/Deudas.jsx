@@ -442,7 +442,7 @@ export default function Deudas() {
       {activeDirection === 'me_deben' && loanCandidates.length > 0 && (
         <Card title={`Préstamos detectados sin registrar (${loanCandidates.length})`} style={{ marginBottom: 'var(--space-2)' }}>
           <p style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', margin: '0 0 var(--space-1)' }}>
-            Movimientos importados de MonIA en la categoría "Préstamo" (dinero prestado que salió de una cuenta) que todavía no tienen un préstamo registrado acá — "Precargar" pone el nombre, el monto y la fecha en el formulario de abajo para que confirmes antes de guardar.
+            Movimientos importados de MonIA en la categoría "Préstamo" (dinero prestado que salió de una cuenta) que todavía no tienen un préstamo registrado acá — "Precargar" pone el nombre, el monto y la fecha en el formulario de Ajustes → Deudas para que confirmes antes de guardar.
           </p>
           <div className="table-scroll">
             <table className="simple-table">

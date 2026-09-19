@@ -150,6 +150,57 @@ optional decoration: every table has RLS keyed on `auth.uid()`
 returns empty rows rather than erroring — an empty page can mean "not
 authenticated," not "no data."
 
+**Multi-user model (open sign-up, everyone starts empty)**: the app is no
+longer single-user. `Login.jsx` has four modes on one screen — Entrar /
+Crear cuenta / Olvidé mi contraseña, plus "Nueva contraseña" when
+`AuthContext` sees the `PASSWORD_RECOVERY` event (`recovering` state; `App.jsx`
+shows `Login` while it's true even though a session exists). Sign-up and
+recovery emails redirect back to `window.location.origin + BASE_URL`. **A new
+user has zero rows in every table**: `schema.sql` has no trigger on
+`auth.users` and no active seed (the commented `insert` blocks are the
+original owner's example data and must never run once there is more than one
+user, since their `select id from accounts where name = ...` subqueries don't
+filter by user). Isolation is 100% RLS — no client query filters by `user_id`.
+The account/category names listed elsewhere in this file (Bold, Nequi, Arq,
+the `prompt-dashboard-financiero.md` mapping table…) describe the **original
+owner's** setup, not something every user gets; each user builds their own from
+Ajustes. First-run guidance is `src/components/OnboardingCard.jsx`, a
+"Empieza aquí" card at the top of Panel (crear madre → crear una hija → crear
+categorías), derived from the data itself (no flag or table) and hidden once
+all three exist. While there is no madre, Ajustes → Cuentas only offers to
+create the madre (`isMadreForm`), and it accepts an optional initial balance
+like any other account. `SettingsPanel` dispatches
+`dashboard:accounts-changed` after creating/editing an account or category so
+Panel, Cuentas and the onboarding card refresh (same window-event pattern as
+`dashboard:debts-changed`); the "+" sheet re-fetches accounts/categories/rates
+every time it opens for the same reason.
+
+**Supabase Auth settings live outside the repo**: sign-ups must be enabled,
+and Site URL / Redirect URLs must include the GitHub Pages URL
+(`.../dashboard-financiero/`) or confirmation/recovery links land on the wrong
+page. The default Supabase SMTP allows very few emails per hour, so with email
+confirmation on, set up custom SMTP (or turn confirmation off).
+
+**Edge Functions are multi-user** (`supabase/functions/_shared/`): `auth.ts`
+(`requireUser` builds a client from the anon key + the caller's JWT, so RLS
+applies, and rejects with 401 unless `auth.getUser()` finds a real user — the
+gateway's `verify_jwt` also lets the public anon key through), `quota.ts`
+(`consumeAiQuota` calls the SQL function `consume_ai_quota`, backed by the
+`ai_usage` table, and answers 429 past 60 AI calls per user per day — the
+Gemini key is shared, so this is what stops one account from burning it) and
+`input.ts` (`sanitizeNameList`). `voice-parse` and `receipt-parse` no longer
+hardcode categories/accounts: the client sends the user's own names in the
+body (`categories`, `accounts`) and they're injected into the prompt; empty
+lists make the model answer `null`. `money-ask` got size caps. Errors from
+`supabase.functions.invoke` are unwrapped with
+`src/lib/functionErrors.js` so the 429 message reaches the UI instead of
+"non-2xx status code". `rates-auto-update` (cron, `verify_jwt = false`, guarded by
+`RATES_CRON_SECRET`) upserts the rate pairs for every user that has at least
+one account. `quick-capture` (iOS Shortcuts) no longer uses the service role or
+a fixed owner: the Shortcut logs in first (see `.claude/rules/shortcuts-ios.md`)
+and sends `Authorization: Bearer <access_token>`; the expense currency now
+comes from the chosen account.
+
 **Data layer pattern**: each domain gets one `src/lib/*Api.js` module that
 wraps the raw Supabase queries for that domain — `accountsApi.js`,
 `allocationsApi.js`, `fixedExpensesApi.js`, `categoriesApi.js`,
@@ -385,19 +436,21 @@ tag like `arq_eur` (normalized to `"arq eur"`) targets on an account that
 otherwise has a single id. `isReservedTag` also checks `extraCurrencies[].tag`
 now, so a manually-typed `"arq eur"` tag is still recognized as reserved.
 
-**Editing** happens on the account as a whole in `Cuentas.jsx` (name, primary
-currency, and a "Cuenta multi-moneda" checkbox that reveals an add/remove list
-of extra `{ currency, tag }` pockets, calling `accountsApi.addAccountCurrency`/
-`removeAccountCurrency`) — there's no more separate "¿Es otra moneda de...?"
-picker on a second account row, since there is no second row. **Creating** a
-multi-currency account from scratch also happens in one step: the "Agregar
-cuenta hija" form's currency `<select>` has a `Multi-moneda` option that
-reveals checkboxes for each of `CURRENCIES` (`COP`/`USD`/`EUR`, min. 2) plus
-an optional "cuánto tiene hoy" amount per checked currency — `createAccount`
-inserts the `account_currencies` rows and seeds `monthly_initial_balances`
-for the current month from those amounts in the same call, so standing up
-something like arq no longer requires creating one account then editing a
-second one to link it. A pill switcher inside the card
+**Editing** happens on the account as a whole in `Cuentas.jsx`: tapping a card's
+header turns the card into a full-width edit form (name, primary currency as
+`ChipPicker` pills, a "Cuenta multi-moneda" `SwitchRow` that reveals an add/remove
+list of extra `{ currency, tag }` pockets, calling
+`accountsApi.addAccountCurrency`/`removeAccountCurrency`) — see "The four pages
+that used a text 'Editar' button" below. There's no more separate "¿Es otra
+moneda de...?" picker on a second account row, since there is no second row.
+**Creating** a multi-currency account from scratch also happens in one step, in
+Ajustes → Cuentas: picking `Multi-moneda` among the currency pills reveals a
+builder (tap a currency to add it, min. 2, optional "cuánto tiene" amount each,
+the first one added is the primary) — `createAccount` inserts the
+`account_currencies` rows and seeds `monthly_initial_balances` for the current
+month from those amounts in the same call, so standing up something like arq no
+longer requires creating one account then editing a second one to link it. A pill
+switcher inside the card
 (`flattenAccountPockets([account])` fed into a local `activePocket` state,
 `{ [accountId]: pocketKey }`) still lets the user flip between an account's
 pockets instantly, same UX as the old grouped-card design, just backed by
@@ -673,10 +726,11 @@ and returns `{ mode, amount, categoryName, accountName, purpose, tag }`; the
 component maps those names to ids via `normalizeName` (accent/case-insensitive)
 and only ever **prefills** the form — same "never guess and save" principle as
 the rest of the app, the user still has to review "Más opciones" and tap
-"Guardar". Unlike `quick-capture` (used by the iOS Shortcuts with no
-session), `voice-parse` is called from the browser with the user's real
+"Guardar". `voice-parse` is called from the browser with the user's real
 session, so it's deliberately **not** listed in `supabase/config.toml` and
-deploys with default JWT verification.
+deploys with default JWT verification (see "Edge Functions are multi-user"
+above — the category/account list in the prompt is now the caller's own, sent
+in the request body, not a fixed one).
 
 **Live transcript while listening**: adapted from a Google Stitch mockup the
 user dropped in `other recursos/` (`entrada_de_voz_registro_inteligente.html`)
@@ -1199,8 +1253,8 @@ pattern as everywhere else that creates a transaction/expense tied to an
 account) and dispatches `dashboard:fixed-expenses-changed` on success, which
 `FixedExpensesSection.jsx` listens for to `reload()` — same shape as
 `dashboard:debts-changed`/`dashboard:goals-changed`. `Cuentas.jsx` keeps
-everything else about fixed expenses (list, inline edit, toggle paid,
-archive) — only *creating* one moved.
+everything else about fixed expenses (the grouped Pendientes/Pagados list,
+tap-to-edit rows, toggle paid, archive) — only *creating* one moved.
 
 **Fifth section, `'tasas'`**: a centralized "Tasas de cambio" editor for the
 3 fixed pairs (`RATE_PAIRS` — `CURRENCIES` only has COP/USD/EUR, so this
@@ -1734,12 +1788,13 @@ Supabase, no sample data left anywhere:
   rather than re-deriving from `fetchAlerts`'s composite `fx-${id}` alert
   id, so this card gets the real uuid directly instead of string-parsing an
   id that alert objects only assemble for their own `href` purposes.
-- **`Cuentas.jsx`**: cuenta madre + hijas CRUD (name, currency, and
+- **`Cuentas.jsx`**: cuenta madre + hijas CRUD (tap a card's header to edit it —
+  name, currency, and
   optionally `is_multi_currency` + extra `account_currencies` pockets so one
   account (like `arq`) can hold several real currency balances at once — see
   "Multi-currency accounts are a real single row now" above for the full
-  mechanics; no standalone "Tasa de cambio" card anymore, each account's
-  rate row now renders inline in its own card), an optional saldo-adjustment
+  mechanics; no standalone "Tasa de cambio" card and no inline rate row either —
+  rates are edited only in Ajustes → Tasas de cambio), an optional saldo-adjustment
   section covering every active account (`MonthlyInitialBalancesSection.jsx`
   — manual entry or via the iPhone Shortcut described in
   `prompt-dashboard-financiero.md`'s "Fase 2"; both write to
@@ -1773,7 +1828,8 @@ Supabase, no sample data left anywhere:
   add-transfer form and the "+" FAB's traslado mode (which also
   pre-fills "Monto recibido" from the saved rate, see "Quick capture (FAB)")
   are the two remaining ways to register one of these. Also fixed-expenses
-  list/edit/toggle-paid/archive (`FixedExpensesSection.jsx` — *creating* one
+  grouped list (Pendientes/Pagados este mes) with tap-to-edit rows,
+  toggle-paid and archive (`FixedExpensesSection.jsx` — *creating* one
   moved to Ajustes → Gastos fijos, same relocation pattern as `'cuentas'`/
   `'deudas'`/`'metas'` below; this component now just listens for
   `dashboard:fixed-expenses-changed` to refresh after a create there).
@@ -2127,8 +2183,9 @@ unprompted, they're deliberate cuts, not oversights:
   once `currency` stopped being a dead value — no changes were needed there
   beyond passing `currency` through the `select`s.
 - A transfer's `consumes_budget` **is** now editable after creation, as a
-  deliberate, narrow exception to "no edit UI for transfers": an inline
-  checkbox in `TransferHistorySection.jsx`'s table (shown only for rows
+  deliberate, narrow exception to "no edit UI for transfers": a tappable
+  badge ("Descuenta presupuesto" / "No descuenta") on each row of
+  `TransferHistorySection.jsx`'s list (shown only for rows
   where neither end is the madre, same condition as at creation) calls
   `transfersApi.updateConsumesBudget(id, value)` and reloads — no
   `ConfirmDialog`, since it's non-destructive and instantly reversible.

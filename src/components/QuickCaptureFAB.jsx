@@ -10,6 +10,7 @@ import { flattenAccountPockets } from '../lib/currencyPockets.js'
 import { resizeImageFileToBase64, fileToBase64 } from '../lib/imageUtils.js'
 import { formatByCurrency, formatCOP } from '../lib/format.js'
 import { supabase } from '../lib/supabaseClient.js'
+import { edgeFunctionErrorMessage } from '../lib/functionErrors.js'
 import styles from './QuickCaptureFAB.module.css'
 
 // Mismo ciclo fijo de colores categóricos que usa PanelGeneral.jsx para
@@ -234,8 +235,10 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch, onOpenMoneyAsk 
     return () => window.removeEventListener('dashboard:settings-closed', handleSettingsClosed)
   }, [pendingResumeAfterSettings])
 
+  // Se recarga cada vez que se abre la hoja (no solo la primera): una cuenta o
+  // categoría creada después en Ajustes tiene que aparecer sin recargar la página.
   useEffect(() => {
-    if (!open || accounts.length > 0) return
+    if (!open) return
     listAccounts().then((accs) => {
       setAccounts(accs)
       const now = new Date()
@@ -246,7 +249,7 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch, onOpenMoneyAsk 
     listCategories().then(setCategories).catch(() => {})
     listRecentPurposes().then(setRecentPurposes).catch(() => {})
     getRates().then(setRates).catch(() => {}) // sin tasa guardada, el "Monto recibido" cruzado queda vacío para completar a mano, no bloquea el traslado
-  }, [open, accounts.length])
+  }, [open])
 
   // Sugiere "Monto recibido" en un traslado entre monedas distintas a partir
   // de la tasa guardada para ese par en exchange_rates — el usuario sigue
@@ -446,9 +449,13 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch, onOpenMoneyAsk 
     setVoiceError(null)
     try {
       const { data, error: invokeError } = await supabase.functions.invoke('voice-parse', {
-        body: { text: transcript },
+        body: {
+          text: transcript,
+          categories: categories.map((c) => c.name),
+          accounts: accounts.map((a) => a.name),
+        },
       })
-      if (invokeError) throw invokeError
+      if (invokeError) throw new Error(await edgeFunctionErrorMessage(invokeError))
       if (!data?.ok) throw new Error(data?.error || 'no se pudo interpretar')
 
       const result = data.result
@@ -503,9 +510,9 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch, onOpenMoneyAsk 
     try {
       const { base64, mediaType } = isPdf ? await fileToBase64(file) : await resizeImageFileToBase64(file)
       const { data, error: invokeError } = await supabase.functions.invoke('receipt-parse', {
-        body: { mediaType, imageBase64: base64 },
+        body: { mediaType, imageBase64: base64, categories: categories.map((c) => c.name) },
       })
-      if (invokeError) throw invokeError
+      if (invokeError) throw new Error(await edgeFunctionErrorMessage(invokeError))
       if (!data?.ok) throw new Error(data?.error || 'no se pudo leer el recibo')
       setReceiptResult(data.result)
     } catch (err) {
@@ -1116,6 +1123,11 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch, onOpenMoneyAsk 
                             </span>
                           </button>
                         ))}
+                        {accountOptions.length === 0 && (
+                          <p className={styles.hintCaption}>
+                            Aún no tienes cuentas. Puedes guardar sin cuenta o crear una en Ajustes → Cuentas.
+                          </p>
+                        )}
                       </div>
                     </div>
 
@@ -1130,8 +1142,12 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch, onOpenMoneyAsk 
                     )}
 
                     {error && <p className={styles.error}>{error}</p>}
-                    {form.amount && !form.categoryId && (
-                      <p className={styles.hintCaption}>Elegí una categoría para poder guardar.</p>
+                    {!form.categoryId && (form.amount || categories.length === 0) && (
+                      <p className={styles.hintCaption}>
+                        {categories.length === 0
+                          ? 'Crea tu primera categoría con el botón "+" de arriba para poder guardar.'
+                          : 'Elegí una categoría para poder guardar.'}
+                      </p>
                     )}
 
                     <div className={styles.bottomRow}>
