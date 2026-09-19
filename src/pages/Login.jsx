@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../lib/AuthContext.jsx'
+import { isPasswordPwned } from '../lib/passwordCheck.js'
 
 const MIN_PASSWORD_LENGTH = 8
 
@@ -71,6 +72,10 @@ export default function Login() {
 
     setLoading(true)
     try {
+      if (needsConfirm && (await isPasswordPwned(password))) {
+        setError('Esa contraseña aparece en filtraciones de datos conocidas. Elige otra distinta.')
+        return
+      }
       if (activeMode === 'entrar') {
         const { error } = await signIn(email, password)
         if (error) setError(translateAuthError(error.message))

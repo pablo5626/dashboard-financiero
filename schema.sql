@@ -377,15 +377,29 @@ create table ai_usage (
   primary key (user_id, day)
 );
 
--- security invoker (default): corre con los permisos y la RLS del usuario que
--- llama, así solo puede tocar su propia fila.
+-- ai_usage NO usa las políticas genéricas de más abajo: si el usuario pudiera
+-- hacer update/delete sobre su propia fila, pondría el contador en 0 y se
+-- saltaría el tope. Solo puede LEER su fila; escribir lo hace únicamente
+-- consume_ai_quota, que es security definer.
+alter table ai_usage enable row level security;
+create policy "select_own" on ai_usage for select using (user_id = auth.uid());
+
+-- security definer: corre con los permisos del dueño de la función, por eso
+-- ignora la RLS de ai_usage (que no tiene políticas de escritura) pero solo
+-- toca la fila de auth.uid(). search_path fijo para evitar secuestro de
+-- nombres; sin sesión (auth.uid() null) falla en vez de escribir nada.
 create or replace function consume_ai_quota(p_limit integer default 60)
 returns boolean
 language plpgsql
+security definer
+set search_path = public
 as $$
 declare
   v_count integer;
 begin
+  if auth.uid() is null then
+    raise exception 'no autenticado';
+  end if;
   insert into ai_usage (user_id, day, count)
   values (auth.uid(), current_date, 1)
   on conflict (user_id, day) do update set count = ai_usage.count + 1
@@ -393,6 +407,9 @@ begin
   return v_count <= p_limit;
 end;
 $$;
+
+revoke execute on function consume_ai_quota(integer) from public, anon;
+grant execute on function consume_ai_quota(integer) to authenticated;
 
 -- ============================================================================
 -- ROW LEVEL SECURITY: cada tabla solo expone las filas del usuario dueño
@@ -406,7 +423,7 @@ begin
     'account_transfers', 'categories', 'transactions', 'category_account_stats',
     'purpose_category_stats',
     'fixed_expenses', 'fixed_expense_month_status', 'debts', 'debt_installments',
-    'savings_goals', 'savings_contributions', 'tags', 'user_settings', 'ai_usage'
+    'savings_goals', 'savings_contributions', 'tags', 'user_settings'
   ])
   loop
     execute format('alter table %I enable row level security;', t);

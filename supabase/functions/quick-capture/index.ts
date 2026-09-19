@@ -142,6 +142,7 @@ Deno.serve(async (req: Request) => {
 
     return json({ ok: false, error: 'action invalida (usa "expense" o "transfer")' }, 400)
   } catch (err) {
-    return json({ ok: false, error: String(err) }, 500)
+    console.error('quick-capture', err)
+    return json({ ok: false, error: 'error interno' }, 500)
   }
 })

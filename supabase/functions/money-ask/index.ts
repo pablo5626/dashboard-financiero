@@ -11,7 +11,7 @@
 // redacte una respuesta en español a partir de esos números, nunca que
 // invente uno nuevo (mismo principio de "nunca inventar" que toCOP/
 // convertAmount en el resto de la app).
-import { CORS_HEADERS, json, requireUser } from '../_shared/auth.ts'
+import { json, requireUser, withCors } from '../_shared/auth.ts'
 import { consumeAiQuota } from '../_shared/quota.ts'
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')
@@ -28,11 +28,7 @@ Reglas:
 - Respuesta corta y directa (1-3 frases), tono natural, sin markdown ni listas salvo que la pregunta pida explícitamente comparar varias cosas.
 - Nunca dés consejos financieros genéricos no pedidos -- respondé exactamente lo que se preguntó.`
 
-Deno.serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: CORS_HEADERS })
-  }
-
+Deno.serve(withCors(async (req: Request) => {
   if (req.method !== 'POST') {
     return json({ ok: false, error: 'method not allowed' }, 405)
   }
@@ -86,8 +82,9 @@ Deno.serve(async (req: Request) => {
     })
 
     if (!response.ok) {
-      const errText = await response.text()
-      return json({ ok: false, error: `Gemini API error: ${errText}` }, 502)
+      // El detalle del proveedor queda solo en el log del servidor.
+      console.error('Gemini error', response.status, await response.text())
+      return json({ ok: false, error: `El servicio de IA no respondió bien (código ${response.status})` }, 502)
     }
 
     const data = await response.json()
@@ -98,6 +95,7 @@ Deno.serve(async (req: Request) => {
 
     return json({ ok: true, answer })
   } catch (err) {
-    return json({ ok: false, error: String(err) }, 500)
+    console.error('money-ask', err)
+    return json({ ok: false, error: 'error interno' }, 500)
   }
-})
+}))

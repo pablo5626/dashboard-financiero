@@ -17,8 +17,12 @@ directamente en el panel de Supabase sin reflejarlo en el archivo.
   seeds sobre `auth.users`), y el aislamiento entre personas es solo RLS.
 - **`ai_usage` + `consume_ai_quota(p_limit)`**: contador diario por usuario
   (`user_id`, `day`, `count`) de llamadas a las Edge Functions de IA, que
-  comparten una sola `GEMINI_API_KEY`. La función es `security invoker`, así
-  que solo toca la fila del propio usuario; devuelve `false` al pasar el
+  comparten una sola `GEMINI_API_KEY`. **Excepción a la regla de las cuatro
+  políticas**: `ai_usage` solo tiene `select`; si el usuario pudiera hacer
+  `update`/`delete` sobre su fila, reiniciaría su propio contador. La única
+  vía de escritura es `consume_ai_quota`, `security definer` con
+  `search_path` fijo, que solo toca la fila de `auth.uid()`, exige sesión y
+  solo puede ejecutarla el rol `authenticated`; devuelve `false` al pasar el
   límite (60 por día, definido en `supabase/functions/_shared/quota.ts`).
 - **`transactions.account_id` es nullable a propósito**: representa el estado
   "pendiente de banco" del motor de asignación (ver `motor-asignacion.md`). No

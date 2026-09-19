@@ -201,6 +201,49 @@ a fixed owner: the Shortcut logs in first (see `.claude/rules/shortcuts-ios.md`)
 and sends `Authorization: Bearer <access_token>`; the expense currency now
 comes from the chosen account.
 
+**Security posture (audited Sep 2026 against a 20-point checklist)**:
+- **RLS is the only isolation** and was verified live: every table answers `[]`
+  to the public anon key and an anonymous `insert` is rejected. The one
+  deliberate exception is `ai_usage`, which has a `select` policy only — a
+  generic owner `update` policy would let a user reset their own daily AI
+  counter — and is written solely by the `security definer`
+  `consume_ai_quota` (execute granted to `authenticated` only).
+- **CORS is an allowlist, not `*`**: `_shared/auth.ts` `withCors` reflects the
+  origin only for `https://pablo5626.github.io` (the site, and the APK, which
+  opens it in Chrome), `localhost`/private-LAN dev origins, or whatever the
+  optional `ALLOWED_ORIGINS` secret adds. Bearer-token auth means `*` was never
+  CSRF-exploitable, but there is no reason to leave it open.
+- **CSP** is injected only at build time by `vite.config.js` (dev needs inline
+  scripts for hot reload) as a `<meta>`: `connect-src` is limited to the app's
+  own Supabase origin (derived from `VITE_SUPABASE_URL`), `open.er-api.com` and
+  `api.pwnedpasswords.com`; inline scripts are allowed by hash computed at build,
+  so editing the SPA-redirect snippet can't silently break it. **Any new
+  third-party host the browser must call has to be added to `connect-src`
+  there**, or the request is blocked. `frame-ancestors` can't be set from a
+  `<meta>`, so clickjacking can't be prevented on GitHub Pages.
+- **Sessions live in `localStorage`** (supabase-js default); with no
+  `dangerouslySetInnerHTML`/`innerHTML` anywhere and the CSP above, that is the
+  accepted trade-off. Sign-up checks passwords against Have I Been Pwned by
+  k-anonymity (`src/lib/passwordCheck.js`, only a 5-char hash prefix leaves the
+  browser, fails open if unreachable).
+- **Edge Functions**: upstream (Gemini) and internal errors are logged
+  server-side and returned to the client as generic messages; `receipt-parse`
+  checks file signatures (magic bytes) against the declared type; the cron
+  secret in `rates-auto-update` is compared in constant time and the function
+  refuses to run if the secret is unset.
+- **Known and accepted**: `npm audit` reports vite/esbuild (dev-server only,
+  never in the production bundle — but don't run `npm run dev --host` on an
+  untrusted network) and react-router (open redirect via attacker-controlled
+  `<Link>` targets, which this app doesn't have); both need major upgrades
+  (vite 8, react-router 7) and should be done as a separate, browser-tested
+  change. FKs between tables aren't user-scoped, but a foreign id only lets a
+  user corrupt their *own* rows (RLS hides everything else), so it isn't
+  exploitable. Supabase Auth settings live outside the repo: sign-ups are open
+  and email confirmation is on (verified via `/auth/v1/settings`); minimum
+  password length, CAPTCHA and leaked-password protection are dashboard
+  settings. The repo is public, and `CLAUDE.md`/`prompt-dashboard-financiero.md`
+  describe the owner's personal accounts and categories.
+
 **Data layer pattern**: each domain gets one `src/lib/*Api.js` module that
 wraps the raw Supabase queries for that domain — `accountsApi.js`,
 `allocationsApi.js`, `fixedExpensesApi.js`, `categoriesApi.js`,

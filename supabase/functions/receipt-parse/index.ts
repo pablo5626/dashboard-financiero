@@ -13,7 +13,7 @@
 // inyectan en el prompt; sin ninguna, el modelo devuelve null en ese campo.
 // Sin lista de cuentas: una foto de recibo no trae ninguna señal de qué
 // cuenta se usó.
-import { CORS_HEADERS, json, requireUser } from '../_shared/auth.ts'
+import { json, requireUser, withCors } from '../_shared/auth.ts'
 import { consumeAiQuota } from '../_shared/quota.ts'
 import { sanitizeNameList } from '../_shared/input.ts'
 
@@ -43,11 +43,30 @@ Reglas:
 const ALLOWED_MEDIA_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
 const MAX_BASE64_LENGTH = 8_000_000 // ~6MB antes de base64, generoso para una foto ya redimensionada en el cliente o un PDF de pocas páginas
 
-Deno.serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: CORS_HEADERS })
+// El mediaType lo declara el cliente, así que no se le cree: se lee la firma
+// (los primeros bytes) del archivo y debe coincidir con lo declarado. El
+// archivo no se guarda ni se ejecuta en ningún lado (solo se le pasa a Gemini),
+// pero así un archivo cualquiera disfrazado de imagen no llega ni a la IA.
+function detectMediaType(base64: string): string | null {
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(base64)) return null
+  let head: string
+  try {
+    head = atob(base64.slice(0, 16))
+  } catch {
+    return null
   }
+  const bytes = [...head].map((c) => c.charCodeAt(0))
+  const startsWith = (sig: number[]) => sig.every((b, i) => bytes[i] === b)
+  if (startsWith([0xff, 0xd8, 0xff])) return 'image/jpeg'
+  if (startsWith([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return 'image/png'
+  if (startsWith([0x25, 0x50, 0x44, 0x46, 0x2d])) return 'application/pdf'
+  if (startsWith([0x52, 0x49, 0x46, 0x46]) && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) {
+    return 'image/webp'
+  }
+  return null
+}
 
+Deno.serve(withCors(async (req: Request) => {
   if (req.method !== 'POST') {
     return json({ ok: false, error: 'method not allowed' }, 405)
   }
@@ -73,6 +92,9 @@ Deno.serve(async (req: Request) => {
   }
   if (!imageBase64 || imageBase64.length > MAX_BASE64_LENGTH) {
     return json({ ok: false, error: 'imagen vacía o demasiado grande' }, 400)
+  }
+  if (detectMediaType(imageBase64) !== mediaType) {
+    return json({ ok: false, error: 'el archivo no coincide con el tipo declarado' }, 400)
   }
 
   const systemPrompt = buildSystemPrompt(sanitizeNameList(body.categories))
@@ -101,8 +123,9 @@ Deno.serve(async (req: Request) => {
     })
 
     if (!response.ok) {
-      const errText = await response.text()
-      return json({ ok: false, error: `Gemini API error: ${errText}` }, 502)
+      // El detalle del proveedor queda solo en el log del servidor.
+      console.error('Gemini error', response.status, await response.text())
+      return json({ ok: false, error: `El servicio de IA no respondió bien (código ${response.status})` }, 502)
     }
 
     const data = await response.json()
@@ -113,7 +136,7 @@ Deno.serve(async (req: Request) => {
     try {
       parsed = JSON.parse(cleaned)
     } catch {
-      return json({ ok: false, error: `respuesta no interpretable: ${rawText}` }, 502)
+      return json({ ok: false, error: 'la IA devolvió una respuesta que no se pudo interpretar' }, 502)
     }
 
     const amount = Number(parsed.amount)
@@ -131,6 +154,7 @@ Deno.serve(async (req: Request) => {
       },
     })
   } catch (err) {
-    return json({ ok: false, error: String(err) }, 500)
+    console.error('receipt-parse', err)
+    return json({ ok: false, error: 'error interno' }, 500)
   }
-})
+}))

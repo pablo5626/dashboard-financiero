@@ -17,10 +17,11 @@
 // aplica igual a todos los usuarios.
 
 import { createClient } from 'npm:@supabase/supabase-js@2'
+import { timingSafeEqual } from '../_shared/auth.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-const RATES_CRON_SECRET = Deno.env.get('RATES_CRON_SECRET')!
+const RATES_CRON_SECRET = Deno.env.get('RATES_CRON_SECRET') ?? ''
 
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
 
@@ -68,7 +69,11 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: 'method not allowed' }, 405)
   }
 
-  if (req.headers.get('x-rates-cron-secret') !== RATES_CRON_SECRET) {
+  // Sin secreto configurado (o vacío) la función queda cerrada, en vez de
+  // aceptar un header vacío; la comparación no cortocircuita en el primer
+  // carácter distinto.
+  const providedSecret = req.headers.get('x-rates-cron-secret') ?? ''
+  if (!RATES_CRON_SECRET || !timingSafeEqual(providedSecret, RATES_CRON_SECRET)) {
     return json({ ok: false, error: 'unauthorized' }, 401)
   }
 
@@ -113,6 +118,7 @@ Deno.serve(async (req: Request) => {
 
     return json({ ok: true, users: userIds.length, updated: updates.length })
   } catch (err) {
-    return json({ ok: false, error: String(err) }, 500)
+    console.error('rates-auto-update', err)
+    return json({ ok: false, error: 'error interno' }, 500)
   }
 })

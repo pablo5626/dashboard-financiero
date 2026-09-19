@@ -16,7 +16,7 @@
 // más adelante) -- mismo patrón de "un solo fetch directo a la API REST del
 // proveedor", sin capa de abstracción multi-proveedor, para no anticipar
 // una necesidad que todavía no existe.
-import { CORS_HEADERS, json, requireUser } from '../_shared/auth.ts'
+import { json, requireUser, withCors } from '../_shared/auth.ts'
 import { consumeAiQuota } from '../_shared/quota.ts'
 import { sanitizeNameList } from '../_shared/input.ts'
 
@@ -44,11 +44,7 @@ Reglas:
 - Devolvé JSON válido y nada más.`
 }
 
-Deno.serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: CORS_HEADERS })
-  }
-
+Deno.serve(withCors(async (req: Request) => {
   if (req.method !== 'POST') {
     return json({ ok: false, error: 'method not allowed' }, 405)
   }
@@ -95,8 +91,10 @@ Deno.serve(async (req: Request) => {
     })
 
     if (!response.ok) {
-      const errText = await response.text()
-      return json({ ok: false, error: `Gemini API error: ${errText}` }, 502)
+      // El detalle del proveedor queda solo en el log del servidor: no se le
+      // devuelve al cliente (puede incluir datos de la solicitud o la cuenta).
+      console.error('Gemini error', response.status, await response.text())
+      return json({ ok: false, error: `El servicio de IA no respondió bien (código ${response.status})` }, 502)
     }
 
     const data = await response.json()
@@ -107,7 +105,7 @@ Deno.serve(async (req: Request) => {
     try {
       parsed = JSON.parse(cleaned)
     } catch {
-      return json({ ok: false, error: `respuesta no interpretable: ${rawText}` }, 502)
+      return json({ ok: false, error: 'la IA devolvió una respuesta que no se pudo interpretar' }, 502)
     }
 
     const amount = Number(parsed.amount)
@@ -127,6 +125,7 @@ Deno.serve(async (req: Request) => {
       },
     })
   } catch (err) {
-    return json({ ok: false, error: String(err) }, 500)
+    console.error('voice-parse', err)
+    return json({ ok: false, error: 'error interno' }, 500)
   }
-})
+}))
