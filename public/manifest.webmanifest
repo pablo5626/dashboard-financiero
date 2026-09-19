@@ -1,12 +1,20 @@
 {
+  "id": "/dashboard-financiero/",
   "name": "Dashboard Financiero",
   "short_name": "Finanzas",
+  "description": "Tus cuentas, gastos, deudas y metas de ahorro en un solo lugar.",
+  "lang": "es",
   "start_url": "/dashboard-financiero/",
+  "scope": "/dashboard-financiero/",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#0d366b",
-  "theme_color": "#0d366b",
+  "theme_color": "#f9f9f7",
+  "categories": ["finance", "productivity"],
   "icons": [
-    { "src": "pwa-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "pwa-512.png", "sizes": "512x512", "type": "image/png" }
+    { "src": "pwa-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "pwa-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "pwa-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "pwa-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }
