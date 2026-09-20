@@ -335,9 +335,9 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch, onOpenMoneyAsk 
     return accounts.find((a) => a.id === id)?.currency || 'COP'
   }
 
-  const hijas = accounts.filter((a) => a.kind === 'hija')
   const madreId = accounts.find((a) => a.kind === 'madre')?.id
-  const accountOptions = form.mode === 'ingreso' ? accounts : hijas
+  // Gasto e ingreso pueden ser de cualquier cuenta, la madre incluida.
+  const accountOptions = accounts
 
   // Un "bolsillo" por moneda de cada cuenta — mismo mecanismo que
   // TransferHistorySection.jsx, para poder elegir como destino de un

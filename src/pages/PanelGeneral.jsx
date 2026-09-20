@@ -101,12 +101,16 @@ export default function PanelGeneral() {
         const startMonth = firstData && firstData.year === year ? firstData.month : 1
         setYoyStartMonth(startMonth)
 
-        const currentYearMonths = Array.from({ length: month - startMonth + 1 }, (_, i) => ({ year, month: startMonth + i }))
+        // Sin ningún dato real todavía (cuenta recién creada) no hay meses que
+        // comparar: se devuelven listas vacías en vez de 6 meses en $0.
+        const hasData = firstData != null
+        const currentYearMonths = hasData
+          ? Array.from({ length: Math.max(0, month - startMonth + 1) }, (_, i) => ({ year, month: startMonth + i }))
+          : []
         const previousYearMonths = currentYearMonths.map((m) => ({ year: year - 1, month: m.month }))
-        let trendMonths = lastNMonths(year, month, TREND_MONTHS)
-        if (firstDataKey != null) {
-          trendMonths = trendMonths.filter((m) => m.year * 12 + m.month >= firstDataKey)
-        }
+        const trendMonths = hasData
+          ? lastNMonths(year, month, TREND_MONTHS).filter((m) => m.year * 12 + m.month >= firstDataKey)
+          : []
 
         // Alertas y "Próximos pagos" siempre miran "hoy real" (REAL_YEAR/
         // REAL_MONTH), sin importar qué mes esté navegando el resto del
@@ -180,6 +184,13 @@ export default function PanelGeneral() {
 
   // fetchMonthlyTrend solo devuelve desde el ancla de saldo más antigua, así
   // que se busca por número de mes en vez de por posición.
+  const hasTrend = trend.length > 0
+  const emptyTrendNote = (
+    <p style={{ font: 'var(--font-subheadline)', color: 'var(--text-muted)', margin: 0 }}>
+      Aún no hay movimientos para mostrar en este período. Cuando registres el primero, aquí verás tu evolución mes a mes.
+    </p>
+  )
+
   const yoyChartData = MONTH_LABELS.slice(yoyStartMonth - 1, month).map((label, i) => {
     const monthNumber = yoyStartMonth + i
     const cur = yoyCurrent?.find((r) => r.month === monthNumber)
@@ -278,6 +289,11 @@ export default function PanelGeneral() {
         </Card>
 
         <Card title="Distribución por cuenta">
+          {hijas.length === 0 ? (
+            <p style={{ font: 'var(--font-subheadline)', color: 'var(--text-muted)', margin: 0 }}>
+              Aún no tienes cuentas hijas. Créalas en Ajustes → Cuentas para ver cómo se reparte tu plata.
+            </p>
+          ) : (
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={hijas.map((a) => ({ name: a.name, balance: totalBalanceInCOP(a, balances, rates, toCOP) }))} layout="vertical" margin={{ left: 8 }}>
               <XAxis type="number" hide />
@@ -290,9 +306,12 @@ export default function PanelGeneral() {
               </Bar>
             </BarChart>
           </ResponsiveContainer>
+          )}
         </Card>
 
         <Card title="Patrimonio neto" className="span-2">
+          {!hasTrend ? emptyTrendNote : (
+          <>
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={netWorthTrend}>
               <XAxis dataKey="month" tick={{ fill: 'var(--text-muted)', fontSize: 12 }} axisLine={{ stroke: 'var(--gridline)' }} tickLine={false} />
@@ -301,9 +320,13 @@ export default function PanelGeneral() {
               <Line type="monotone" dataKey="patrimonio" stroke="var(--series-1)" strokeWidth={2} dot={{ r: 3 }} name="Patrimonio neto" />
             </LineChart>
           </ResponsiveContainer>
+          </>
+          )}
         </Card>
 
         <Card title={`Tendencia ${TREND_MONTHS} meses`} className="span-3">
+          {!hasTrend ? emptyTrendNote : (
+          <>
           <ResponsiveContainer width="100%" height={240}>
             <LineChart data={monthlyTrend}>
               <XAxis dataKey="month" tick={{ fill: 'var(--text-muted)', fontSize: 12 }} axisLine={{ stroke: 'var(--gridline)' }} tickLine={false} />
@@ -315,9 +338,13 @@ export default function PanelGeneral() {
               <Line type="monotone" dataKey="ahorro" stroke="var(--series-3)" strokeWidth={2} name="Ahorro neto" dot={false} />
             </LineChart>
           </ResponsiveContainer>
+          </>
+          )}
         </Card>
 
         <Card title={`Comparativa año a año (${MONTH_LABELS[yoyStartMonth - 1]}–${MONTH_LABELS[month - 1]})`} className="span-3">
+          {!hasTrend ? emptyTrendNote : (
+          <>
           <div className="kpi-row" style={{ marginBottom: 'var(--space-2)' }}>
             <StatTile
               label={`Ingresos ${year}`}
@@ -344,9 +371,13 @@ export default function PanelGeneral() {
               <Line type="monotone" dataKey="gastosAnterior" stroke="var(--series-2)" strokeWidth={2} strokeDasharray="5 4" name={`Gastos ${year - 1}`} dot={false} />
             </LineChart>
           </ResponsiveContainer>
+          </>
+          )}
         </Card>
 
         <Card title="Comparativa mes a mes" className="span-3">
+          {!hasTrend ? emptyTrendNote : (
+          <>
           <div style={{ overflowX: 'auto' }}>
             <table className="simple-table">
               <thead>
@@ -367,6 +398,8 @@ export default function PanelGeneral() {
               </tbody>
             </table>
           </div>
+          </>
+          )}
         </Card>
       </div>
     </div>

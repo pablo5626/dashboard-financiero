@@ -201,6 +201,24 @@ a fixed owner: the Shortcut logs in first (see `.claude/rules/shortcuts-ios.md`)
 and sends `Authorization: Bearer <access_token>`; the expense currency now
 comes from the chosen account.
 
+**Expenses can be booked on the madre too**: the "+" sheet, the "Pendientes de
+banco" queue in Gastos, the account picker for paying a debt installment
+(Deudas) and the account picker for a `'puntual'` savings contribution
+(Metas) all list every account, madre included — an earlier rule kept expenses
+off the madre ("the money never leaves it directly"), but a real user does pay
+things straight from their main account. The madre's balance is computed like
+any other (`fetchBalancesForMonth` never distinguished by `kind`), so a
+spend there lowers it and counts in Panel's monthly gastos. Unchanged on
+purpose: the bank-assignment engine's tag vocabulary is still the hijas' names,
+and the per-hija "% usado" budget concept doesn't apply to the madre.
+
+**Panel shows no trend until there is real data**: `findFirstDataMonth()`
+returning `null` (nothing but an empty account) now yields empty month lists in
+`PanelGeneral.jsx`, so "Patrimonio neto", "Tendencia", "Comparativa año a año"
+and "Comparativa mes a mes" show a short notice instead of six months of $0.
+Once the first balance, transaction or transfer exists, the months start at
+that one.
+
 **Security posture (audited Sep 2026 against a 20-point checklist)**:
 - **RLS is the only isolation** and was verified live: every table answers `[]`
   to the public anon key and an anonymous `insert` is rejected. The one

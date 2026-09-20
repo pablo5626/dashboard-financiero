@@ -394,9 +394,9 @@ export default function GastosDiarios() {
             <p style={{ font: 'var(--font-caption)', color: 'var(--text-muted)', margin: '0 0 var(--space-1)' }}>
               Sin tag de banco reconocido ni categoría inequívoca con histórico — confirma manualmente a qué cuenta corresponde cada uno.
             </p>
-            {hijas.length === 0 && (
+            {accounts.length === 0 && (
               <p style={{ font: 'var(--font-caption)', color: 'var(--status-warning)', margin: '0 0 var(--space-1)' }}>
-                Todavía no tienes cuentas hijas para asignar estos movimientos — créalas en Ajustes → Cuentas.
+                Todavía no tienes cuentas para asignar estos movimientos — créalas en Ajustes → Cuentas.
               </p>
             )}
             <div className="table-scroll">
@@ -408,10 +408,8 @@ export default function GastosDiarios() {
                 {pending.map((t) => {
                   const suggested = suggestions[t.category_id] ?? []
                   const selected = selectedAccountByTx[t.id] ?? suggested[0]?.accountId ?? ''
-                  // Un ingreso puede confirmarse contra la madre (le puede llegar plata
-                  // directo a ella); un gasto se queda restringido a hijas — el dinero
-                  // nunca sale de la madre directamente en este modelo.
-                  const pickableAccounts = Number(t.amount) > 0 ? accounts : hijas
+                  // Ingreso o gasto: la madre también puede recibirlo o pagarlo.
+                  const pickableAccounts = accounts
                   return (
                     <tr key={t.id}>
                       <td>{formatDate(t.occurred_at)}</td>

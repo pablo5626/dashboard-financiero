@@ -450,7 +450,7 @@ export default function MetasAhorro() {
                     style={{ ...formInput, flex: '1 1 150px', minWidth: 0 }}
                   >
                     <option value="">Dinero externo (no descuenta de ninguna cuenta)</option>
-                    {hijas.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    {accounts.map((a) => <option key={a.id} value={a.id}>{a.kind === 'madre' ? `${a.name} (madre)` : a.name}</option>)}
                   </select>
                 )}
                 <input placeholder="Nota (opcional)" value={draft.note} onChange={(e) => setContribForm({ ...contribForm, [g.id]: { ...draft, note: e.target.value } })} style={{ ...formInput, flex: '1 1 140px' }} />

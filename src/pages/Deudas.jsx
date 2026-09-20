@@ -640,7 +640,7 @@ export default function Deudas() {
                                 style={{ ...formInput, width: 150, minHeight: 32 }}
                               >
                                 <option value="">Dinero externo</option>
-                                {accounts.filter((a) => a.kind === 'hija').map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                                {accounts.map((a) => <option key={a.id} value={a.id}>{a.kind === 'madre' ? `${a.name} (madre)` : a.name}</option>)}
                               </select>
                             )}
                           </td>
