@@ -351,23 +351,61 @@
   color: var(--text-muted);
 }
 
-.receiptResultAmountRow {
+/* Una fila por compra detectada. Con varias compras la fila es un <label>
+   (toda la fila marca/desmarca) y respeta el mínimo táctil de 44px. */
+.receiptPurchaseRow {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--touch-target);
+  padding: 6px 0;
+  border-top: 1px solid var(--border-hairline);
 }
 
-.receiptResultLabel {
-  font: var(--font-caption);
-  color: var(--text-muted);
-  display: block;
+.receiptPurchaseRow:first-of-type {
+  border-top: none;
 }
 
-.receiptResultAmount {
+.receiptPurchaseCheck {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  accent-color: var(--series-1);
+}
+
+.receiptPurchaseMain {
+  flex: 1;
+  min-width: 0;
+}
+
+.receiptPurchaseAmount {
   font: var(--font-title);
   font-weight: 800;
   color: var(--status-good);
+  white-space: nowrap;
+}
+
+.receiptPurchasePills {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.receiptResultAccount {
+  font: var(--font-caption);
+  font-weight: 600;
+  color: var(--series-1);
+  background: color-mix(in srgb, var(--series-1) 14%, transparent);
+  border-radius: 10px;
+  padding: 4px 8px;
+}
+
+.receiptResultHint {
+  font: var(--font-caption);
+  color: var(--text-muted);
+  margin: 4px 0 0;
 }
 
 .receiptResultCategory {

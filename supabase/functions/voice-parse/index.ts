@@ -1,6 +1,6 @@
 // Interpreta el texto transcripto por la Web Speech API del navegador
 // (botón de micrófono en QuickCaptureFAB) y lo convierte en los campos del
-// formulario de captura rápida vía Gemini 2.5 Flash. Nunca escribe en la
+// formulario de captura rápida vía Gemini (modelo en _shared/gemini.ts). Nunca escribe en la
 // base de datos ni usa la service role key -- a diferencia de
 // quick-capture/index.ts (llamado por Shortcuts sin sesión), a esta función
 // la invoca el navegador con el JWT real del usuario logueado, así que se
@@ -19,9 +19,9 @@
 import { json, requireUser, withCors } from '../_shared/auth.ts'
 import { consumeAiQuota } from '../_shared/quota.ts'
 import { sanitizeNameList } from '../_shared/input.ts'
+import { GEMINI_MODEL, buildGenerationConfig, geminiErrorResponse } from '../_shared/gemini.ts'
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')
-const GEMINI_MODEL = 'gemini-2.5-flash'
 const MAX_TEXT_LENGTH = 1000
 
 function listForPrompt(names: string[]) {
@@ -86,7 +86,7 @@ Deno.serve(withCors(async (req: Request) => {
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: systemPrompt }] },
         contents: [{ role: 'user', parts: [{ text }] }],
-        generationConfig: { temperature: 0, maxOutputTokens: 300, responseMimeType: 'application/json' },
+        generationConfig: buildGenerationConfig(512, { temperature: 0, responseMimeType: 'application/json' }),
       }),
     })
 
@@ -94,7 +94,7 @@ Deno.serve(withCors(async (req: Request) => {
       // El detalle del proveedor queda solo en el log del servidor: no se le
       // devuelve al cliente (puede incluir datos de la solicitud o la cuenta).
       console.error('Gemini error', response.status, await response.text())
-      return json({ ok: false, error: `El servicio de IA no respondió bien (código ${response.status})` }, 502)
+      return geminiErrorResponse(response.status)
     }
 
     const data = await response.json()

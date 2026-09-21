@@ -126,7 +126,10 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch, onOpenMoneyAsk 
   // como una foto, así que la vista previa cae a mostrar el nombre del
   // archivo en vez de una miniatura.
   const [receiptPreviewName, setReceiptPreviewName] = useState(null)
-  const [receiptResult, setReceiptResult] = useState(null) // { amount, categoryName, purpose } | null
+  // Compras que devolvió receipt-parse: un recibo trae una; un pantallazo de
+  // notificaciones de pago puede traer varias. `selected` = va a guardarse
+  // cuando son varias. null = todavía no hay resultado.
+  const [receiptPurchases, setReceiptPurchases] = useState(null) // [{ id, amount, purpose, categoryName, accountName, selected }] | null
   // true = el "+" está desplegado: muestra la burbuja satélite de cámara
   // arriba en vez de abrir la hoja directo — referencia del usuario
   // (other recursos/referencia boton.mp4): un primer toque en "+" agrupa la
@@ -188,7 +191,7 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch, onOpenMoneyAsk 
     reset('gasto')
     setReceiptMode(true)
     setReceiptPreviewUrl(null)
-    setReceiptResult(null)
+    setReceiptPurchases(null)
     setReceiptError(null)
     setOpen(true)
   }
@@ -274,7 +277,7 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch, onOpenMoneyAsk 
     setReceiptMode(false)
     setReceiptPreviewUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return null })
     setReceiptPreviewName(null)
-    setReceiptResult(null)
+    setReceiptPurchases(null)
     setVoiceResult(null)
     setVoiceMode(false)
   }
@@ -295,25 +298,85 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch, onOpenMoneyAsk 
   function handleRetakeReceipt() {
     setReceiptPreviewUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return null })
     setReceiptPreviewName(null)
-    setReceiptResult(null)
+    setReceiptPurchases(null)
     setReceiptError(null)
   }
 
-  // "Confirmar y continuar" no guarda directo — mismo principio que voz y
-  // que el resto de la app ("nunca adivinar y guardar solo"): precarga el
-  // formulario normal de gasto y lo muestra para que el usuario revise
-  // monto/categoría/cuenta antes de tocar "Guardar" de verdad.
+  // Una notificación bancaria trae pesos, así que receipt-parse solo recibe (y
+  // solo puede proponer) cuentas COP -- proponer una cuenta en divisa dejaría
+  // el monto en la moneda equivocada (ver la regla de moneda por cuenta).
+  const copAccounts = accounts.filter((a) => (a.currency || 'COP') === 'COP')
+
+  function findByName(list, name) {
+    if (!name) return null
+    return list.find((item) => normalizeName(item.name) === normalizeName(name)) || null
+  }
+
+  // Un recibo trae una sola compra: "Confirmar y continuar" no guarda directo
+  // — mismo principio que voz y que el resto de la app ("nunca adivinar y
+  // guardar solo"): precarga el formulario normal de gasto y lo muestra para
+  // que el usuario revise monto/categoría/cuenta antes de tocar "Guardar".
   function handleConfirmReceipt() {
-    if (!receiptResult) return
-    const category = categories.find((c) => normalizeName(c.name) === normalizeName(receiptResult.categoryName))
+    const purchase = receiptPurchases?.[0]
+    if (!purchase) return
+    const category = findByName(categories, purchase.categoryName)
+    const account = findByName(copAccounts, purchase.accountName)
     setForm((prev) => ({
       ...prev,
       mode: 'gasto',
-      amount: String(receiptResult.amount),
+      amount: String(purchase.amount),
       categoryId: category?.id || prev.categoryId,
-      purpose: receiptResult.purpose || prev.purpose,
+      accountId: account?.id || prev.accountId,
+      purpose: purchase.purpose || prev.purpose,
     }))
     setReceiptMode(false)
+  }
+
+  function toggleReceiptPurchase(id) {
+    setReceiptPurchases((prev) => prev.map((p) => (p.id === id ? { ...p, selected: !p.selected } : p)))
+  }
+
+  // Excepción deliberada a "solo precargar": un pantallazo con varias compras
+  // se guarda en bloque (el usuario pidió poder agregarlas todas de una vez).
+  // La revisión es la propia lista -- monto, comercio, categoría y cuenta
+  // detectadas son visibles y cada fila se puede desmarcar antes de guardar.
+  // Sin cuenta reconocida la compra queda en "Pendientes de banco"; sin
+  // categoría se guarda sin ella y se corrige tocándola en Diario/Gastos.
+  async function handleSaveReceiptPurchases() {
+    const chosen = (receiptPurchases || []).filter((p) => p.selected)
+    if (chosen.length === 0 || saving) return
+    setSaving(true)
+    setReceiptError(null)
+    const occurredAt = new Date().toISOString()
+    const savedIds = new Set()
+    for (const p of chosen) {
+      try {
+        await createManualTransaction({
+          purpose: p.purpose || 'Compra',
+          amount: -Math.abs(p.amount),
+          occurredAt,
+          categoryId: findByName(categories, p.categoryName)?.id || null,
+          accountId: findByName(copAccounts, p.accountName)?.id || null,
+          currency: 'COP',
+          tags: [],
+        })
+        savedIds.add(p.id)
+      } catch {
+        // Se sigue con las demás: al final se avisa cuántas no se pudieron guardar.
+      }
+    }
+    setSaving(false)
+    if (savedIds.size > 0) onSaved?.()
+    if (savedIds.size === chosen.length) {
+      // receiptMode = false deja ver el "Guardado ✓" de la hoja; close() lo limpia todo.
+      setReceiptMode(false)
+      setSuccess(true)
+      setTimeout(close, 900)
+      return
+    }
+    // Las ya guardadas salen de la lista para que un reintento no las duplique.
+    setReceiptPurchases((prev) => prev.filter((p) => !savedIds.has(p.id)))
+    setReceiptError(`Se guardaron ${savedIds.size} de ${chosen.length} compras. Las demás no se pudieron guardar, intenta de nuevo.`)
   }
 
   // Sugiere categoría+tag aprendidos de purpose_category_stats al salir del
@@ -504,17 +567,24 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch, onOpenMoneyAsk 
       setReceiptPreviewUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return URL.createObjectURL(file) })
       setReceiptPreviewName(null)
     }
-    setReceiptResult(null)
+    setReceiptPurchases(null)
     setReceiptStatus('processing')
     setReceiptError(null)
     try {
       const { base64, mediaType } = isPdf ? await fileToBase64(file) : await resizeImageFileToBase64(file)
       const { data, error: invokeError } = await supabase.functions.invoke('receipt-parse', {
-        body: { mediaType, imageBase64: base64, categories: categories.map((c) => c.name) },
+        body: {
+          mediaType,
+          imageBase64: base64,
+          categories: categories.map((c) => c.name),
+          accounts: copAccounts.map((a) => a.name),
+        },
       })
       if (invokeError) throw new Error(await edgeFunctionErrorMessage(invokeError))
       if (!data?.ok) throw new Error(data?.error || 'no se pudo leer el recibo')
-      setReceiptResult(data.result)
+      const purchases = data.purchases ?? (data.result ? [data.result] : [])
+      if (purchases.length === 0) throw new Error('no se encontró ninguna compra en la imagen')
+      setReceiptPurchases(purchases.map((p, i) => ({ ...p, id: i, selected: true })))
     } catch (err) {
       setReceiptError(err.message)
     } finally {
@@ -777,7 +847,7 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch, onOpenMoneyAsk 
 
                 {receiptError && <p className={styles.error}>{receiptError}</p>}
 
-                {!receiptResult && (
+                {!receiptPurchases && (
                   <div className={styles.receiptSourceRow}>
                     <button
                       type="button" className={styles.receiptSourceButton}
@@ -804,19 +874,45 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch, onOpenMoneyAsk 
                   </div>
                 )}
 
-                {receiptResult && (
+                {receiptPurchases && (
                   <div className={styles.receiptResultCard}>
-                    <div className={styles.receiptResultHeader}>Datos detectados por IA</div>
-                    <div className={styles.receiptResultAmountRow}>
-                      <div>
-                        <span className={styles.receiptResultLabel}>Monto reconocido</span>
-                        <div className={styles.receiptResultAmount}>{formatCOP(receiptResult.amount)}</div>
-                      </div>
-                      {receiptResult.categoryName && (
-                        <span className={styles.receiptResultCategory}>{receiptResult.categoryName}</span>
-                      )}
+                    <div className={styles.receiptResultHeader}>
+                      {receiptPurchases.length > 1
+                        ? `${receiptPurchases.length} compras detectadas por IA`
+                        : 'Datos detectados por IA'}
                     </div>
-                    {receiptResult.purpose && <p className={styles.receiptResultPurpose}>{receiptResult.purpose}</p>}
+                    {receiptPurchases.map((p) => {
+                      const categoryName = findByName(categories, p.categoryName)?.name
+                      const accountName = findByName(copAccounts, p.accountName)?.name
+                      const content = (
+                        <>
+                          <div className={styles.receiptPurchaseMain}>
+                            <div className={styles.receiptPurchaseAmount}>{formatCOP(p.amount)}</div>
+                            {p.purpose && <p className={styles.receiptResultPurpose}>{p.purpose}</p>}
+                          </div>
+                          <div className={styles.receiptPurchasePills}>
+                            {categoryName && <span className={styles.receiptResultCategory}>{categoryName}</span>}
+                            {accountName && <span className={styles.receiptResultAccount}>{accountName}</span>}
+                          </div>
+                        </>
+                      )
+                      return receiptPurchases.length > 1 ? (
+                        <label key={p.id} className={styles.receiptPurchaseRow}>
+                          <input
+                            type="checkbox" className={styles.receiptPurchaseCheck}
+                            checked={p.selected} onChange={() => toggleReceiptPurchase(p.id)}
+                          />
+                          {content}
+                        </label>
+                      ) : (
+                        <div key={p.id} className={styles.receiptPurchaseRow}>{content}</div>
+                      )
+                    })}
+                    {receiptPurchases.length > 1 && (
+                      <p className={styles.receiptResultHint}>
+                        Se guardan como gastos de hoy. Las que no tengan cuenta reconocida quedan en “Pendientes de banco”.
+                      </p>
+                    )}
                   </div>
                 )}
 
@@ -836,12 +932,25 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch, onOpenMoneyAsk 
                   >
                     Reintentar
                   </button>
-                  <button
-                    type="button" className={styles.receiptConfirm}
-                    onClick={handleConfirmReceipt} disabled={!receiptResult}
-                  >
-                    Confirmar y continuar
-                  </button>
+                  {receiptPurchases && receiptPurchases.length > 1 ? (
+                    <button
+                      type="button" className={styles.receiptConfirm}
+                      onClick={handleSaveReceiptPurchases}
+                      disabled={saving || !receiptPurchases.some((p) => p.selected)}
+                    >
+                      {saving ? 'Guardando…' : (() => {
+                        const n = receiptPurchases.filter((p) => p.selected).length
+                        return `Guardar ${n} ${n === 1 ? 'compra' : 'compras'}`
+                      })()}
+                    </button>
+                  ) : (
+                    <button
+                      type="button" className={styles.receiptConfirm}
+                      onClick={handleConfirmReceipt} disabled={!receiptPurchases}
+                    >
+                      Confirmar y continuar
+                    </button>
+                  )}
                 </div>
               </div>
             ) : voiceMode ? (

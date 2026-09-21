@@ -1,5 +1,5 @@
 // "Preguntale a tu dinero": responde preguntas en lenguaje natural sobre las
-// finanzas del usuario vía Gemini 2.5 Flash. Nunca escribe en la base de
+// finanzas del usuario vía Gemini (modelo en _shared/gemini.ts). Nunca escribe en la base de
 // datos ni usa la service role key -- mismo patrón que voice-parse/
 // receipt-parse: la invoca el navegador con el JWT real del usuario
 // logueado, así que se despliega con verify_jwt = true (default) y no
@@ -13,9 +13,9 @@
 // convertAmount en el resto de la app).
 import { json, requireUser, withCors } from '../_shared/auth.ts'
 import { consumeAiQuota } from '../_shared/quota.ts'
+import { GEMINI_MODEL, buildGenerationConfig, geminiErrorResponse } from '../_shared/gemini.ts'
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')
-const GEMINI_MODEL = 'gemini-2.5-flash'
 const MAX_QUESTION_LENGTH = 500
 const MAX_CONTEXT_LENGTH = 60_000 // caracteres del JSON ya serializado
 
@@ -77,14 +77,14 @@ Deno.serve(withCors(async (req: Request) => {
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
         contents: [{ role: 'user', parts: [{ text: userMessage }] }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 400 },
+        generationConfig: buildGenerationConfig(600, { temperature: 0.2 }),
       }),
     })
 
     if (!response.ok) {
       // El detalle del proveedor queda solo en el log del servidor.
       console.error('Gemini error', response.status, await response.text())
-      return json({ ok: false, error: `El servicio de IA no respondió bien (código ${response.status})` }, 502)
+      return geminiErrorResponse(response.status)
     }
 
     const data = await response.json()
