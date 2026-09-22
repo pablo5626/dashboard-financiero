@@ -4,7 +4,7 @@ import ColorSwatchPicker from './ui/ColorSwatchPicker.jsx'
 import ConfirmDialog from './ui/ConfirmDialog.jsx'
 import { Field, InfoCard, ChipPicker, Segmented } from './ui/FormKit.jsx'
 import { listCategories, createCategory, updateCategory, archiveCategory } from '../lib/categoriesApi.js'
-import { backfillPurposeCategoryStats, markLoanTransactionReviewed, isReservedTag } from '../lib/transactionsApi.js'
+import { markLoanTransactionReviewed, isReservedTag } from '../lib/transactionsApi.js'
 import { listTags, createTag, deleteTag } from '../lib/tagsApi.js'
 import { listAccounts, createAccount, saveMonthlyInitialBalances } from '../lib/accountsApi.js'
 import { createDebt } from '../lib/debtsApi.js'
@@ -101,9 +101,6 @@ export default function SettingsPanel() {
   const [newTagName, setNewTagName] = useState('')
   const [creatingTag, setCreatingTag] = useState(false)
   const [confirmDeleteTag, setConfirmDeleteTag] = useState(null) // { id, name } | null
-
-  const [backfilling, setBackfilling] = useState(false)
-  const [backfillResult, setBackfillResult] = useState(null)
 
   const [accounts, setAccounts] = useState([])
   const [accountsLoaded, setAccountsLoaded] = useState(false)
@@ -302,18 +299,6 @@ export default function SettingsPanel() {
       setTags((prev) => prev.filter((t) => t.id !== target.id))
     } catch (err) {
       setError(err.message)
-    }
-  }
-
-  async function handleBackfill() {
-    setBackfilling(true)
-    setBackfillResult(null)
-    try {
-      setBackfillResult(await backfillPurposeCategoryStats())
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setBackfilling(false)
     }
   }
 
@@ -800,15 +785,6 @@ export default function SettingsPanel() {
                 Crear
               </button>
             </form>
-
-            <button type="button" onClick={handleBackfill} disabled={backfilling} className={styles.learnButton}>
-              {backfilling ? 'Aprendiendo…' : 'Aprender categoría/tag de tu historial'}
-            </button>
-            {backfillResult != null && (
-              <p className={styles.hint}>
-                Se analizaron {backfillResult} movimientos con categoría — las sugerencias en "Agregar movimiento manual" y el "+" ya lo reflejan.
-              </p>
-            )}
             </>
             )}
 

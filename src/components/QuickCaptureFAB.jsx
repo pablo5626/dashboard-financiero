@@ -379,7 +379,7 @@ export default function QuickCaptureFAB({ onSaved, onOpenSearch, onOpenMoneyAsk 
     setReceiptError(`Se guardaron ${savedIds.size} de ${chosen.length} compras. Las demás no se pudieron guardar, intenta de nuevo.`)
   }
 
-  // Sugiere categoría+tag aprendidos de purpose_category_stats al salir del
+  // Sugiere categoría+tag aprendidos del historial (suggestCategoryForPurpose) al salir del
   // campo Descripción — nunca pisa una elección que el usuario ya hizo, y no
   // compite con el prefill de voz (handleVoiceResult tiene su propio flujo).
   async function handlePurposeBlur() {

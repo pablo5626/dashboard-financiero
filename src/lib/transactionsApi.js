@@ -51,7 +51,7 @@ export function isReservedTag(tag, accounts) {
 
 // Misma idea que normalizeTag pero para el texto de descripción (purpose),
 // usada para matchear una descripción repetida contra sí misma en
-// purpose_category_stats y en detectRecurringCandidates.
+// suggestCategoryForPurpose y en detectRecurringCandidates.
 export function normalizePurpose(purpose) {
   return purpose.trim().toLowerCase()
 }
@@ -274,13 +274,7 @@ export async function importTransactions(rows, year, month) {
     .select('id, monia_id')
   if (error) throw error
 
-  // Solo aprender de las filas realmente nuevas — reimportar el mismo CSV no
-  // debe inflar los contadores de purpose_category_stats.
   const newMoniaIds = new Set(data.map((r) => r.monia_id))
-  const newRowsWithCategory = payload.filter((r) => newMoniaIds.has(r.monia_id) && r.category_id)
-  await recordPurposeCategoryStats(
-    newRowsWithCategory.map((r) => ({ purposeKey: normalizePurpose(r.purpose), categoryId: r.category_id, tag: r.tags?.[0] ?? null }))
-  )
 
   // Alimenta el catálogo de Ajustes → Tags con los tags descriptivos reales
   // del CSV (una sola llamada en lote, no una por fila) — excluye los que
@@ -309,97 +303,55 @@ function generateLocalId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
 }
 
-// `currency` sale de la moneda de la cuenta elegida en el formulario, no de un
-// selector aparte: es la única forma de cargar un gasto en EUR/USD contra las
-// cuentas de arq, y evita que un monto en euros quede marcado como pesos (en
-// cuyo caso fetchBalancesForMonth lo descartaría en silencio por no coincidir
-// con la moneda de la cuenta).
-// Aprendizaje incremental "descripción -> categoría + tag" (purpose_category_stats),
-// alimentado tanto por movimientos manuales como por la importación de CSV.
-// Agrupa duplicados dentro del mismo llamado y hace un solo select + un solo
-// upsert bulk, para no disparar una query por fila al importar un CSV grande.
-async function recordPurposeCategoryStats(observations) {
-  const withCategory = observations.filter((o) => o.categoryId)
-  if (withCategory.length === 0) return
-
-  const statKey = (purposeKey, categoryId, tag) => [purposeKey, categoryId, tag ?? ''].join('::')
-
-  const grouped = {}
-  for (const o of withCategory) {
-    const key = statKey(o.purposeKey, o.categoryId, o.tag)
-    if (!grouped[key]) grouped[key] = { purposeKey: o.purposeKey, categoryId: o.categoryId, tag: o.tag ?? null, count: 0 }
-    grouped[key].count++
-  }
-  const groups = Object.values(grouped)
-  const purposeKeys = [...new Set(groups.map((g) => g.purposeKey))]
-
-  const { data: existing, error: fetchError } = await supabase
-    .from('purpose_category_stats')
-    .select('purpose_key, category_id, tag, confirm_count')
-    .in('purpose_key', purposeKeys)
-  if (fetchError) throw fetchError
-
-  const existingCounts = {}
-  for (const row of existing) existingCounts[statKey(row.purpose_key, row.category_id, row.tag)] = row.confirm_count
-
-  const upsertRows = groups.map((g) => ({
-    purpose_key: g.purposeKey,
-    category_id: g.categoryId,
-    tag: g.tag,
-    confirm_count: (existingCounts[statKey(g.purposeKey, g.categoryId, g.tag)] ?? 0) + g.count,
-    last_confirmed_at: new Date().toISOString(),
-  }))
-  const { error: upsertError } = await supabase
-    .from('purpose_category_stats')
-    .upsert(upsertRows, { onConflict: 'user_id,purpose_key,category_id,tag' })
-  if (upsertError) throw upsertError
-}
-
-// Sugerencia de categoría+tag para una descripción, según lo aprendido en
-// purpose_category_stats — nunca autoasigna, solo se usa para precargar un
-// formulario de carga manual que el usuario revisa antes de guardar.
+// Sugerencia de categoría+tag para una descripción, calculada al vuelo desde el
+// propio historial de `transactions` -- nunca autoasigna, solo se usa para
+// precargar un formulario de carga manual que el usuario revisa antes de
+// guardar. No hay tabla de contadores que mantener: como la fuente es la
+// misma transacción, el aprendizaje incluye solo el historial anterior, las
+// ediciones de categoría, los borrados y cualquier inserción hecha por
+// otra vía (importación, recibo, un bot), sin botón ni proceso de "aprender".
+// Coincidencia por texto exacto normalizado (sin fuzzy, decisión ya tomada),
+// y descarta las filas que no cuentan como gasto/ingreso (isIgnoredRow).
+// Devuelve el par categoría+tag más frecuente; a igualdad, el más reciente.
 export async function suggestCategoryForPurpose(purpose) {
   const key = normalizePurpose(purpose)
   if (!key) return null
-  const { data, error } = await supabase
-    .from('purpose_category_stats')
-    .select('category_id, tag, confirm_count')
-    .eq('purpose_key', key)
-    .order('confirm_count', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  if (error) throw error
-  return data ? { categoryId: data.category_id, tag: data.tag } : null
-}
-
-// Aprendizaje retroactivo, para correr una sola vez (o cuando se quiera
-// reforzar): recorre todas las transacciones ya guardadas con categoría
-// resuelta — de antes de que existiera este mecanismo — y las usa para
-// poblar purpose_category_stats. Sin esto, una descripción repetida muchas
-// veces en el historial (ej. "Cívica" -> Transporte/metro) no sugiere nada
-// hasta que se vuelva a guardar manualmente o se reimporte su CSV.
-export async function backfillPurposeCategoryStats() {
+  const escaped = key.replace(/[\\%_]/g, (c) => `\\${c}`) // ilike trata % _ \ como comodines/escape
   const { data, error } = await supabase
     .from('transactions')
     .select('purpose, category_id, tags')
     .not('category_id', 'is', null)
+    .ilike('purpose', escaped)
+    .order('occurred_at', { ascending: false })
+    .limit(200)
   if (error) throw error
 
-  const observations = data
-    .filter((r) => !isIgnoredRow(r.tags))
-    .map((r) => ({ purposeKey: normalizePurpose(r.purpose), categoryId: r.category_id, tag: r.tags?.[0] ?? null }))
-  await recordPurposeCategoryStats(observations)
-  return observations.length
+  const groups = new Map()
+  for (const row of data) {
+    if (normalizePurpose(row.purpose) !== key || isIgnoredRow(row.tags)) continue
+    const tag = row.tags?.[0] ?? null
+    const groupKey = `${row.category_id}::${tag ?? ''}`
+    const group = groups.get(groupKey)
+    if (group) group.count++
+    else groups.set(groupKey, { categoryId: row.category_id, tag, count: 1 })
+  }
+
+  // Las filas vienen de la más reciente a la más antigua, así que con `>`
+  // estricto un empate lo gana el primero en aparecer (el más reciente).
+  let best = null
+  for (const group of groups.values()) {
+    if (!best || group.count > best.count) best = group
+  }
+  return best ? { categoryId: best.categoryId, tag: best.tag } : null
 }
 
 // Descripciones recientes para mostrar como chips tocables en la carga
 // rápida del día (Diario.jsx) — a diferencia de suggestCategoryForPurpose
 // (que sugiere en silencio al perder el foco), esto es una lista visible
 // para elegir de un toque. Trae las últimas 200 filas y deduplica client-side
-// por descripción normalizada, conservando la ocurrencia más reciente (con
-// mayúsculas reales, ya que purpose_category_stats solo guarda la versión en
-// minúscula). Una sola consulta al montar la página, sin re-consultar por
-// cada tecla que el usuario escriba.
+// por descripción normalizada, conservando la ocurrencia más reciente (con sus
+// mayúsculas reales). Una sola consulta al montar la página, sin re-consultar
+// por cada tecla que el usuario escriba.
 export async function listRecentPurposes(limit = 40) {
   const { data, error } = await supabase
     .from('transactions')
@@ -441,6 +393,11 @@ export async function listCategoryUsageCounts(daysBack = 90) {
   return counts
 }
 
+// `currency` sale de la moneda de la cuenta elegida en el formulario, no de un
+// selector aparte: es la única forma de cargar un gasto en EUR/USD contra las
+// cuentas de arq, y evita que un monto en euros quede marcado como pesos (en
+// cuyo caso fetchBalancesForMonth lo descartaría en silencio por no coincidir
+// con la moneda de la cuenta).
 export async function createManualTransaction({ purpose, amount, occurredAt, categoryId, accountId, tags, currency }) {
   const { data, error } = await supabase.from('transactions').insert({
     monia_id: `manual-${generateLocalId()}`,
@@ -456,9 +413,6 @@ export async function createManualTransaction({ purpose, amount, occurredAt, cat
     origin: 'manual',
   }).select().single()
   if (error) throw error
-  if (categoryId) {
-    await recordPurposeCategoryStats([{ purposeKey: normalizePurpose(purpose), categoryId, tag: tags?.[0] ?? null }])
-  }
   if (tags?.length) {
     try { await ensureTags(tags) } catch { /* catálogo secundario: un tag nuevo no debe bloquear el guardado real */ }
   }

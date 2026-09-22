@@ -518,19 +518,6 @@
   border-top: 1px solid var(--border-hairline);
 }
 
-.learnButton {
-  margin-top: var(--space-2);
-  min-height: var(--touch-target);
-  padding: 0 var(--space-2);
-  border-radius: 10px;
-  border: 1px solid var(--border-hairline);
-  color: var(--text-secondary);
-}
-
-.learnButton:disabled {
-  opacity: 0.6;
-}
-
 /* Secciones de alta (Cuentas, Deudas, Metas, Gastos fijos) y Tasas —
    comparten el lenguaje de Categorías (`.categoryEditCard`, `.categoryLabel`,
    `.categoryInfoCard`, switch iOS) y agregan solo lo que allá no existía. */

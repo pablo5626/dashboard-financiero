@@ -219,10 +219,11 @@ create table category_account_stats (
   unique (user_id, category_id, tag, account_id)
 );
 
--- Aprendizaje incremental: descripción (purpose) -> categoría + tag,
--- alimentada cada vez que se guarda un movimiento (manual o importado) con
--- categoría resuelta. Nunca autoasigna: solo se usa para sugerir un prefill
--- editable en los formularios de carga manual.
+-- EN DESUSO: ya nada lee ni escribe esta tabla. La sugerencia descripción ->
+-- categoría + tag ahora se calcula al vuelo desde `transactions`
+-- (suggestCategoryForPurpose en src/lib/transactionsApi.js), lo que evita
+-- mantener contadores que no veían ediciones ni borrados. Se deja creada para
+-- no tocar la base viva; se puede borrar (drop table) como limpieza aparte.
 create table purpose_category_stats (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) default auth.uid(),
