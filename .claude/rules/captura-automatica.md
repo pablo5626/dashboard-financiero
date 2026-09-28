@@ -96,6 +96,15 @@ teléfono real no le afecta porque no manda preflight.
 
 ## Configuración en el teléfono
 
+**`cuenta` no es fijo**: cada persona tiene sus propias cuentas, y `nubank` en
+los ejemplos es solo eso, un ejemplo. En Ajustes → Captura automática se elige
+la cuenta con píldoras (las cuentas reales del usuario) y cada cuerpo JSON de
+ejemplo se arma con ese nombre, con botón "Copiar". Se hace una automatización
+por banco o tarjeta, cada una con su `cuenta`. Si el nombre no coincide con
+ninguna cuenta activa (la comparación es sin mayúsculas y con `_` como
+espacio), la compra igual se guarda, pero sin cuenta, y cae en "Pendientes de
+banco" para asignarla a mano.
+
 **iPhone** (Atajos → Automatización → Nueva → **Transacción**/Wallet):
 1. Elegir la tarjeta. Crear **una automatización por tarjeta**, porque cada una
    manda su propia `cuenta`. Activar "Ejecutar inmediatamente".

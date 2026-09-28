@@ -1,17 +1,21 @@
 import { useEffect, useState } from 'react'
 import ConfirmDialog from './ui/ConfirmDialog.jsx'
-import { Field, InfoCard } from './ui/FormKit.jsx'
+import { Field, InfoCard, ChipPicker } from './ui/FormKit.jsx'
+import { listAccounts } from '../lib/accountsApi.js'
 import { listCaptureTokens, createCaptureToken, deleteCaptureToken, autoCaptureEndpoint } from '../lib/autoCaptureApi.js'
 import styles from './SettingsPanel.module.css'
 import guide from './AutoCaptureSettings.module.css'
 
 // Cuerpos JSON por plataforma (ver .claude/rules/captura-automatica.md). Los
 // [corchetes] son variables de MacroDroid; los <ángulos>, variables de Atajos.
+// `cuenta` sale de la cuenta que el usuario elige arriba: cada persona tiene
+// sus propias cuentas, no hay un nombre fijo. El servidor compara sin
+// mayúsculas y con "_" como espacio, así que el nombre tal cual sirve.
 const GUIDE_EXAMPLES = [
-  { label: 'Android · notificación del banco (MacroDroid)', body: '{"source": "android_notification", "text": "[notification_title] [notification]", "app": "[app_package]", "cuenta": "nubank"}' },
-  { label: 'iPhone · pago con Apple Pay (Atajos → Transacción)', body: '{"source": "apple_pay", "amount": <Cantidad>, "merchant": <Comercio>, "cuenta": "nubank"}' },
-  { label: 'iPhone · SMS del banco (Atajos → Mensaje)', body: '{"source": "sms", "text": <Contenido del mensaje>, "cuenta": "bancolombia"}' },
-  { label: 'iPhone · correo del banco (Atajos → Correo)', body: '{"source": "email", "text": <Asunto> <Contenido>, "cuenta": "nubank"}' },
+  { label: 'Android · notificación del banco (MacroDroid)', body: (c) => `{"source": "android_notification", "text": "[notification_title] [notification]", "app": "[app_package]", "cuenta": ${JSON.stringify(c)}}` },
+  { label: 'iPhone · pago con Apple Pay (Atajos → Transacción)', body: (c) => `{"source": "apple_pay", "amount": <Cantidad>, "merchant": <Comercio>, "cuenta": ${JSON.stringify(c)}}` },
+  { label: 'iPhone · SMS del banco (Atajos → Mensaje)', body: (c) => `{"source": "sms", "text": <Contenido del mensaje>, "cuenta": ${JSON.stringify(c)}}` },
+  { label: 'iPhone · correo del banco (Atajos → Correo)', body: (c) => `{"source": "email", "text": <Asunto> <Contenido>, "cuenta": ${JSON.stringify(c)}}` },
 ]
 
 function formatDate(iso) {
@@ -30,6 +34,9 @@ export default function AutoCaptureSettings() {
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState(null)
   const [confirmDelete, setConfirmDelete] = useState(null)
+  const [accounts, setAccounts] = useState([])
+  const [guideAccount, setGuideAccount] = useState('')
+  const [copiedLabel, setCopiedLabel] = useState(null)
 
   async function reload() {
     try {
@@ -37,6 +44,25 @@ export default function AutoCaptureSettings() {
     } catch (err) {
       setError(err.message)
       setTokens([])
+    }
+  }
+
+  useEffect(() => {
+    listAccounts()
+      .then((rows) => {
+        setAccounts(rows)
+        setGuideAccount((prev) => prev || rows.find((a) => a.kind === 'hija')?.name || rows[0]?.name || '')
+      })
+      .catch(() => {})
+  }, [])
+
+  async function copyText(label, text) {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedLabel(label)
+      setTimeout(() => setCopiedLabel(null), 2000)
+    } catch {
+      // Sin portapapeles (http:// en LAN): el bloque es seleccionable a mano.
     }
   }
 
@@ -134,16 +160,35 @@ export default function AutoCaptureSettings() {
         <code className={guide.code}>{autoCaptureEndpoint()}</code>
         <code className={guide.code}>Authorization: Bearer &lt;tu token&gt;</code>
         <p className={guide.text}>
-          <strong>"cuenta"</strong> es el nombre de la cuenta a la que va la compra (como la llamaste en la app).
-          Haz una automatización por tarjeta o banco.
+          Haz <strong>una automatización por banco o tarjeta</strong>. Elige a qué cuenta tuya van sus compras y
+          copia el cuerpo ya armado:
+        </p>
+        {accounts.length > 0 ? (
+          <ChipPicker
+            options={accounts.map((a) => ({ value: a.name, label: a.name }))}
+            value={guideAccount}
+            onChange={setGuideAccount}
+          />
+        ) : (
+          <p className={guide.text}>Todavía no tienes cuentas: créalas en Ajustes → Cuentas.</p>
+        )}
+        <p className={guide.text}>
+          Si el nombre de "cuenta" no coincide con ninguna, la compra igual se guarda, pero sin cuenta: te la
+          pregunta en Gastos → "Pendientes de banco".
         </p>
 
-        {GUIDE_EXAMPLES.map(({ label, body }) => (
-          <details key={label} className={guide.example}>
-            <summary>{label}</summary>
-            <code className={guide.code}>{body}</code>
-          </details>
-        ))}
+        {GUIDE_EXAMPLES.map(({ label, body }) => {
+          const text = body(guideAccount || 'NOMBRE_DE_TU_CUENTA')
+          return (
+            <details key={label} className={guide.example}>
+              <summary>{label}</summary>
+              <code className={guide.code}>{text}</code>
+              <button type="button" className={guide.copy} onClick={() => copyText(label, text)}>
+                {copiedLabel === label ? 'Copiado' : 'Copiar'}
+              </button>
+            </details>
+          )
+        })}
 
         <p className={guide.text}>
           La respuesta trae <strong>notification.title</strong> y <strong>notification.body</strong>: muéstralos con
