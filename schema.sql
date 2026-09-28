@@ -444,7 +444,9 @@ create policy "delete_own" on capture_tokens for delete using (user_id = auth.ui
 create table auto_captures (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) default auth.uid(),
-  source text not null check (source in ('apple_pay', 'android_notification')),
+  -- sms / email: en iPhone, Atajos se dispara con el SMS o correo del banco
+  -- (iOS no deja leer notificaciones de otras apps).
+  source text not null check (source in ('apple_pay', 'android_notification', 'sms', 'email')),
   source_app text,                       -- paquete Android que publicó la notificación
   raw_text text,                         -- texto original, para completar a mano si no se pudo parsear
   merchant text,

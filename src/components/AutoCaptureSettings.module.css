@@ -1,0 +1,56 @@
+.guide {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin-top: var(--space-2);
+  padding: 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--series-1) 8%, var(--surface-1));
+  border: 1px solid color-mix(in srgb, var(--series-1) 25%, transparent);
+}
+
+.title {
+  margin: 0;
+  font: var(--font-subheadline);
+  font-weight: 700;
+}
+
+.text {
+  margin: 0;
+  font: var(--font-caption);
+  color: var(--text-secondary);
+}
+
+/* Las URLs y los JSON son cadenas largas sin espacios: sin esto se salen del
+   cuadro en un teléfono. */
+.code {
+  display: block;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--text-primary);
+  background: var(--surface-raised);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  user-select: all;
+}
+
+.example {
+  min-width: 0;
+  font: var(--font-caption);
+}
+
+.example > summary {
+  cursor: pointer;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.example > .code {
+  margin-top: 4px;
+}

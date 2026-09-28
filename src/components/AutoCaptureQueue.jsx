@@ -11,7 +11,7 @@ import {
 import { suggestCategoryForPurpose, normalizeTag } from '../lib/transactionsApi.js'
 import styles from './AutoCaptureQueue.module.css'
 
-const SOURCE_LABEL = { apple_pay: 'Apple Pay', android_notification: 'Notificación' }
+const SOURCE_LABEL = { apple_pay: 'Apple Pay', android_notification: 'Notificación', sms: 'SMS', email: 'Correo' }
 
 function formatWhen(iso) {
   return new Date(iso).toLocaleString('es-CO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })

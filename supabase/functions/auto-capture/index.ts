@@ -50,9 +50,14 @@ Deno.serve(withCors(async (req: Request) => {
     return json({ ok: false, error: 'invalid json' }, 400)
   }
 
+  // apple_pay trae monto y comercio ya separados; el resto trae un texto que
+  // se parsea acá: la notificación del banco en Android, o en iPhone el SMS
+  // / correo del banco (iOS no deja leer notificaciones de otras apps, pero
+  // Atajos sí se dispara al recibir un mensaje o un correo).
   const source = body.source
-  if (source !== 'apple_pay' && source !== 'android_notification') {
-    return json({ ok: false, error: 'source invalido (usa "apple_pay" o "android_notification")' }, 400)
+  const TEXT_SOURCES = ['android_notification', 'sms', 'email']
+  if (source !== 'apple_pay' && !TEXT_SOURCES.includes(source as string)) {
+    return json({ ok: false, error: 'source invalido (usa "apple_pay", "android_notification", "sms" o "email")' }, 400)
   }
 
   const cuenta = str(body.cuenta, 100)

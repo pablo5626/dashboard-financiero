@@ -3,6 +3,16 @@ import ConfirmDialog from './ui/ConfirmDialog.jsx'
 import { Field, InfoCard } from './ui/FormKit.jsx'
 import { listCaptureTokens, createCaptureToken, deleteCaptureToken, autoCaptureEndpoint } from '../lib/autoCaptureApi.js'
 import styles from './SettingsPanel.module.css'
+import guide from './AutoCaptureSettings.module.css'
+
+// Cuerpos JSON por plataforma (ver .claude/rules/captura-automatica.md). Los
+// [corchetes] son variables de MacroDroid; los <ángulos>, variables de Atajos.
+const GUIDE_EXAMPLES = [
+  { label: 'Android · notificación del banco (MacroDroid)', body: '{"source": "android_notification", "text": "[notification_title] [notification]", "app": "[app_package]", "cuenta": "nubank"}' },
+  { label: 'iPhone · pago con Apple Pay (Atajos → Transacción)', body: '{"source": "apple_pay", "amount": <Cantidad>, "merchant": <Comercio>, "cuenta": "nubank"}' },
+  { label: 'iPhone · SMS del banco (Atajos → Mensaje)', body: '{"source": "sms", "text": <Contenido del mensaje>, "cuenta": "bancolombia"}' },
+  { label: 'iPhone · correo del banco (Atajos → Correo)', body: '{"source": "email", "text": <Asunto> <Contenido>, "cuenta": "nubank"}' },
+]
 
 function formatDate(iso) {
   return iso ? new Date(iso).toLocaleString('es-CO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'nunca'
@@ -118,15 +128,28 @@ export default function AutoCaptureSettings() {
         </button>
       </form>
 
-      <InfoCard>
-        <strong>Cómo configurarlo.</strong> POST a <code style={{ overflowWrap: 'anywhere' }}>{autoCaptureEndpoint()}</code> con el
-        header <code>Authorization: Bearer &lt;token&gt;</code> y un JSON:
-        <br />• iPhone (Atajos → Automatización → Transacción):{' '}
-        <code>{'{"source":"apple_pay","amount":…,"merchant":…,"cuenta":"nubank"}'}</code>
-        <br />• Android (MacroDroid → Notificación recibida):{' '}
-        <code>{'{"source":"android_notification","text":"[notification_title] [notification]","app":"[app_package]","cuenta":"nubank"}'}</code>
-        <br />"cuenta" es el nombre de la cuenta a la que va la compra; crea una automatización por tarjeta o banco.
-      </InfoCard>
+      <div className={guide.guide}>
+        <h4 className={guide.title}>Cómo configurarlo</h4>
+        <p className={guide.text}>Todas las opciones hacen un POST a esta dirección, con el header de abajo:</p>
+        <code className={guide.code}>{autoCaptureEndpoint()}</code>
+        <code className={guide.code}>Authorization: Bearer &lt;tu token&gt;</code>
+        <p className={guide.text}>
+          <strong>"cuenta"</strong> es el nombre de la cuenta a la que va la compra (como la llamaste en la app).
+          Haz una automatización por tarjeta o banco.
+        </p>
+
+        {GUIDE_EXAMPLES.map(({ label, body }) => (
+          <details key={label} className={guide.example}>
+            <summary>{label}</summary>
+            <code className={guide.code}>{body}</code>
+          </details>
+        ))}
+
+        <p className={guide.text}>
+          La respuesta trae <strong>notification.title</strong> y <strong>notification.body</strong>: muéstralos con
+          "Mostrar notificación" para saber que la compra se registró.
+        </p>
+      </div>
 
       <ConfirmDialog
         open={!!confirmDelete}

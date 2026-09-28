@@ -109,6 +109,26 @@ teléfono real no le afecta porque no manda preflight.
 4. Si llegan vacíos (`Amount = 0`), activar los datos móviles de Wallet
    (Ajustes → Apps → Wallet).
 
+**iPhone: movimientos que no son con Apple Pay.** iOS **no deja leer las
+notificaciones de otras apps**. Es una restricción de Apple, sin excepción ni
+permiso posible, así que la notificación push de Nu, por ejemplo, no se puede
+leer. Lo que Atajos sí puede disparar al llegar es un **SMS** o un **correo**
+del banco:
+
+- Atajos → Automatización → **Mensaje**: "El mensaje contiene" `compra` (o
+  filtrar por remitente), activar "Ejecutar inmediatamente", y POST con
+  `{"source":"sms","text":<Contenido del mensaje>,"cuenta":"..."}`.
+- Atajos → Automatización → **Correo**: filtrar por remitente (el correo de
+  notificaciones del banco), activar "Ejecutar inmediatamente", y POST con
+  `{"source":"email","text":"<Asunto> <Contenido>","cuenta":"..."}`. En la app
+  del banco hay que activar los avisos por correo o por SMS si todavía no están.
+- Si un banco solo avisa con notificación push, queda el camino manual del "+"
+  → cámara: una captura del centro de notificaciones y `receipt-parse` lee
+  varias compras a la vez.
+
+Los SMS y correos pasan por los mismos parsers que Android; ajustarlos con los
+textos reales de cada banco.
+
 **Android** (MacroDroid):
 1. Disparador **Notificación recibida**, filtrado por la app del banco (hay que
    confirmar el paquete exacto de Nu Colombia).
