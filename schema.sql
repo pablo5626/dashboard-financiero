@@ -186,7 +186,10 @@ create table transactions (
   account_id uuid references accounts(id),    -- null = pendiente de banco
   assignment_level smallint,                  -- 1 = tag banco, 2 = categoría inequívoca, 3 = manual
   assignment_confirmed boolean not null default false,
-  origin text not null default 'csv_import' check (origin in ('csv_import', 'manual')),
+  -- 'auto_capture' = confirmada desde la bandeja de capturas automáticas
+  -- (Apple Pay / notificación del banco, ver auto_captures más abajo); la
+  -- conciliación con el CSV de MonIA busca justamente estas filas.
+  origin text not null default 'csv_import' check (origin in ('csv_import', 'manual', 'auto_capture')),
   loan_reviewed boolean not null default false, -- true una vez que una fila de categoría "Préstamo" (dinero prestado saliente) fue vinculada a un registro en `debts` o descartada explícitamente — evita volver a sugerirla en cada importación
   -- Compras en divisa exportadas en COP: MonIA deja cargar el monto en su
   -- moneda original pero al guardar lo convierte, así que el CSV llega en COP
@@ -412,6 +415,183 @@ $$;
 revoke execute on function consume_ai_quota(integer) from public, anon;
 grant execute on function consume_ai_quota(integer) to authenticated;
 
+-- ----------------------------------------------------------------------------
+-- CAPTURA AUTOMÁTICA (Apple Pay vía Atajos / notificaciones del banco vía
+-- MacroDroid) — ver .claude/rules/captura-automatica.md
+-- ----------------------------------------------------------------------------
+-- Token personal que el teléfono manda a la Edge Function auto-capture en vez
+-- de la contraseña. Solo se guarda su sha256: el valor en claro se muestra una
+-- única vez al crearlo. Sin política de insert/update: el alta pasa por
+-- create_capture_token (security definer) y "revocar" es borrar la fila.
+create table capture_tokens (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) default auth.uid(),
+  label text not null,
+  token_hash text not null unique,
+  created_at timestamptz not null default now(),
+  last_used_at timestamptz
+);
+
+alter table capture_tokens enable row level security;
+create policy "select_own" on capture_tokens for select using (user_id = auth.uid());
+create policy "delete_own" on capture_tokens for delete using (user_id = auth.uid());
+
+-- Registro de cada captura y recordatorio de revisión ("Capturas automáticas
+-- por revisar" en Gastos). Lo que suma a saldos es siempre la transacción que
+-- crea ingest_auto_capture (origin 'auto_capture', transaction_id apunta a
+-- ella), nunca esta fila. status 'pending' con transaction_id = guardada sin
+-- revisar; sin transaction_id = falta completarla (sin monto, u otra moneda).
+create table auto_captures (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) default auth.uid(),
+  source text not null check (source in ('apple_pay', 'android_notification')),
+  source_app text,                       -- paquete Android que publicó la notificación
+  raw_text text,                         -- texto original, para completar a mano si no se pudo parsear
+  merchant text,
+  amount numeric,                        -- positivo; null = no se pudo leer el monto
+  currency text not null default 'COP',
+  occurred_at timestamptz not null default now(),
+  account_id uuid references accounts(id), -- resuelta desde la pista `cuenta` del teléfono
+  status text not null default 'pending' check (status in ('pending', 'confirmed', 'discarded', 'merged')),
+  transaction_id uuid references transactions(id) on delete set null,
+  dedup_key text not null,               -- absorbe notificaciones repetidas y reintentos de red
+  received_at timestamptz not null default now(),
+  unique (user_id, dedup_key)
+);
+
+create index idx_auto_captures_pending on auto_captures (user_id) where status = 'pending';
+
+create or replace function create_capture_token(p_label text)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_token text;
+begin
+  if auth.uid() is null then
+    raise exception 'no autenticado';
+  end if;
+  v_token := 'cap_' || encode(extensions.gen_random_bytes(32), 'hex');
+  insert into capture_tokens (user_id, label, token_hash)
+  values (auth.uid(), left(coalesce(nullif(trim(p_label), ''), 'Teléfono'), 60),
+          encode(extensions.digest(v_token, 'sha256'), 'hex'));
+  return v_token;
+end;
+$$;
+
+revoke execute on function create_capture_token(text) from public, anon;
+grant execute on function create_capture_token(text) to authenticated;
+
+-- Llamada por la Edge Function auto-capture con la anon key (el teléfono no
+-- tiene sesión): el token de captura ES la autenticación. Resuelve el usuario
+-- por el hash del token y solo escribe filas de ese usuario.
+--
+-- Guardado automático (pedido del usuario): si se leyó el monto, además de la
+-- fila en auto_captures crea YA la transacción (origin 'auto_capture',
+-- monia_id 'auto-<id>'), con la categoría + tag aprendidos del historial por
+-- texto exacto del comercio — misma regla que suggestCategoryForPurpose en
+-- transactionsApi.js. La captura queda 'pending' con transaction_id: "pending"
+-- significa "guardada pero sin revisar", y la bandeja de Gastos le recuerda al
+-- usuario rectificarla. Sin monto, o con una cuenta en otra moneda (el gasto
+-- se descartaría en silencio del saldo), no se crea transacción y la captura
+-- espera a que el usuario la complete. Devuelve 'saved', 'inserted' (solo en
+-- la bandeja), 'duplicate', 'invalid_token' o 'rate_limited'.
+create or replace function ingest_auto_capture(
+  p_token text,
+  p_source text,
+  p_source_app text,
+  p_raw_text text,
+  p_merchant text,
+  p_amount numeric,
+  p_currency text,
+  p_occurred_at timestamptz,
+  p_account_hint text,
+  p_dedup_key text
+)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid;
+  v_account uuid;
+  v_account_currency text;
+  v_currency text := coalesce(nullif(p_currency, ''), 'COP');
+  v_occurred timestamptz := coalesce(p_occurred_at, now());
+  v_hint text;
+  v_id uuid;
+  v_category uuid;
+  v_tag text;
+  v_tx uuid;
+begin
+  select user_id into v_uid from capture_tokens
+  where token_hash = encode(extensions.digest(coalesce(p_token, ''), 'sha256'), 'hex');
+  if v_uid is null then
+    return 'invalid_token';
+  end if;
+
+  update capture_tokens set last_used_at = now()
+  where token_hash = encode(extensions.digest(p_token, 'sha256'), 'hex');
+
+  if (select count(*) from auto_captures
+      where user_id = v_uid and received_at > now() - interval '1 day') >= 200 then
+    return 'rate_limited';
+  end if;
+
+  v_hint := lower(trim(replace(coalesce(p_account_hint, ''), '_', ' ')));
+  if v_hint <> '' then
+    select id, coalesce(currency, 'COP') into v_account, v_account_currency from accounts
+    where user_id = v_uid and is_active and lower(trim(replace(name, '_', ' '))) = v_hint
+    limit 1;
+  end if;
+
+  insert into auto_captures (user_id, source, source_app, raw_text, merchant, amount, currency,
+                             occurred_at, account_id, dedup_key)
+  values (v_uid, p_source, left(p_source_app, 200), left(p_raw_text, 1000), left(p_merchant, 200),
+          p_amount, v_currency, v_occurred, v_account, left(p_dedup_key, 128))
+  on conflict (user_id, dedup_key) do nothing
+  returning id into v_id;
+
+  if v_id is null then
+    return 'duplicate';
+  end if;
+
+  if p_amount is null or p_amount <= 0 or (v_account is not null and v_account_currency <> v_currency) then
+    return 'inserted';
+  end if;
+
+  -- Categoría + tag más frecuentes para ese comercio en el historial (texto
+  -- exacto normalizado, sin filas ignoradas); a igualdad, el más reciente.
+  if nullif(trim(coalesce(p_merchant, '')), '') is not null then
+    select category_id, tags[1] into v_category, v_tag from transactions
+    where user_id = v_uid and category_id is not null
+      and lower(trim(purpose)) = lower(trim(p_merchant))
+      and not (tags && array['traslado', 'moneda', 'ignorar'])
+    group by category_id, tags[1]
+    order by count(*) desc, max(occurred_at) desc
+    limit 1;
+  end if;
+
+  insert into transactions (user_id, monia_id, occurred_at, purpose, amount, currency, category_id,
+                            account_id, tags, assignment_level, assignment_confirmed, origin)
+  values (v_uid, 'auto-' || v_id, v_occurred, coalesce(nullif(trim(p_merchant), ''), 'Compra'),
+          -abs(p_amount), v_currency, v_category, v_account,
+          case when v_tag is null then '{}'::text[] else array[v_tag] end,
+          case when v_account is null then 3 else 1 end, v_account is not null, 'auto_capture')
+  on conflict (user_id, monia_id) do nothing
+  returning id into v_tx;
+
+  update auto_captures set transaction_id = v_tx where id = v_id;
+  return 'saved';
+end;
+$$;
+
+revoke execute on function ingest_auto_capture(text, text, text, text, text, numeric, text, timestamptz, text, text) from public;
+grant execute on function ingest_auto_capture(text, text, text, text, text, numeric, text, timestamptz, text, text) to anon;
+
 -- ============================================================================
 -- ROW LEVEL SECURITY: cada tabla solo expone las filas del usuario dueño
 -- ============================================================================
@@ -424,7 +604,7 @@ begin
     'account_transfers', 'categories', 'transactions', 'category_account_stats',
     'purpose_category_stats',
     'fixed_expenses', 'fixed_expense_month_status', 'debts', 'debt_installments',
-    'savings_goals', 'savings_contributions', 'tags', 'user_settings'
+    'savings_goals', 'savings_contributions', 'tags', 'user_settings', 'auto_captures'
   ])
   loop
     execute format('alter table %I enable row level security;', t);

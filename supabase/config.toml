@@ -2,3 +2,8 @@ project_id = "qxiqqozogggfynkanevt"
 
 [functions.rates-auto-update]
 verify_jwt = false
+
+# La llama el teléfono (Atajos / MacroDroid) con un token de captura propio,
+# no con un JWT de Supabase: la autenticación la hace ingest_auto_capture.
+[functions.auto-capture]
+verify_jwt = false

@@ -16,6 +16,12 @@ multiusuario está en `esquema-datos.md`, el detalle de seguridad en
   el proveedor `email`). No desactivar la confirmación aunque simplifique el APK.
 - Edge Functions desplegadas con el código nuevo: `voice-parse`, `receipt-parse`,
   `money-ask`, `rates-auto-update`.
+- **Captura automática** (`auto-capture`, ver `captura-automatica.md`): el código
+  está en el repo, pero hay que correr en vivo el SQL de `capture_tokens`,
+  `auto_captures`, las dos RPCs y el `check` ampliado de `transactions.origin`, y
+  luego desplegar la función (`npx supabase functions deploy auto-capture
+  --project-ref qxiqqozogggfynkanevt`; `verify_jwt = false` sale de
+  `config.toml`).
 - **`quick-capture` sigue desplegada en su versión anterior** (secreto compartido
   `x-quick-capture-secret` y dueño fijo `QUICK_CAPTURE_USER_ID`). El código del
   repo ya es el nuevo (JWT del propio usuario, ver `shortcuts-ios.md`), pero no
@@ -99,6 +105,8 @@ begin
   delete from debts where user_id = v_uid;
   delete from fixed_expense_month_status where user_id = v_uid;
   delete from fixed_expenses where user_id = v_uid;
+  delete from auto_captures where user_id = v_uid;
+  delete from capture_tokens where user_id = v_uid;
   delete from category_account_stats where user_id = v_uid;
   delete from purpose_category_stats where user_id = v_uid;
   delete from transactions where user_id = v_uid;

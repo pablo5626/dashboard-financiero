@@ -3,6 +3,7 @@ import { NavLink, useLocation } from 'react-router-dom'
 import { IconPanel, IconAccounts, IconExpenses, IconDebts, IconGoals, IconDiary } from '../icons.jsx'
 import { useAuth } from '../../lib/AuthContext.jsx'
 import { countPendingTransactions, countPendingCurrencyTransactions } from '../../lib/transactionsApi.js'
+import { countPendingCaptures } from '../../lib/autoCaptureApi.js'
 import QuickCaptureFAB from '../QuickCaptureFAB.jsx'
 import SettingsPanel from '../SettingsPanel.jsx'
 import SearchPanel from '../SearchPanel.jsx'
@@ -37,8 +38,10 @@ export default function AppShell({ children }) {
   // esto le avisa a cualquier página montada que escuche que algo cambió,
   // sin introducir un store global (ver Diario.jsx's "Movimientos de hoy").
   const refreshPendingCount = useCallback(() => {
-    Promise.all([countPendingTransactions(), countPendingCurrencyTransactions()])
-      .then(([bank, currency]) => setPendingCount(bank + currency))
+    // Las capturas automáticas fallan en silencio (0) para que el badge siga
+    // funcionando si la tabla auto_captures todavía no existe en la base viva.
+    Promise.all([countPendingTransactions(), countPendingCurrencyTransactions(), countPendingCaptures().catch(() => 0)])
+      .then(([bank, currency, captures]) => setPendingCount(bank + currency + captures))
       .catch(() => {})
     window.dispatchEvent(new Event('dashboard:transactions-changed'))
   }, [])

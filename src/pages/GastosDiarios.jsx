@@ -7,6 +7,7 @@ import ConfirmDialog from '../components/ui/ConfirmDialog.jsx'
 import MonthYearPicker, { MONTH_NAMES } from '../components/ui/MonthYearPicker.jsx'
 import CategoryEmojiGrid, { seriesForName } from '../components/CategoryEmojiGrid.jsx'
 import AccountAutocomplete from '../components/AccountAutocomplete.jsx'
+import AutoCaptureQueue from '../components/AutoCaptureQueue.jsx'
 import { IconFilter } from '../components/icons.jsx'
 import { formatCOP, formatByCurrency } from '../lib/format.js'
 import { listAccounts } from '../lib/accountsApi.js'
@@ -93,6 +94,7 @@ export default function GastosDiarios() {
   const [csvFileName, setCsvFileName] = useState('')
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState(null)
+  const [captureQueueKey, setCaptureQueueKey] = useState(0)
   const [confirmingId, setConfirmingId] = useState(null)
   const [selectedAccountByTx, setSelectedAccountByTx] = useState({})
   const [amountByTx, setAmountByTx] = useState({})
@@ -179,6 +181,8 @@ export default function GastosDiarios() {
     try {
       const result = await importTransactions(csvRows, year, month)
       setImportResult(result)
+      // La conciliación puede haber sacado capturas de la bandeja ('merged').
+      if (result.reconciled > 0) setCaptureQueueKey((k) => k + 1)
       await reload()
     } catch (err) {
       setError(err.message)
@@ -387,6 +391,8 @@ export default function GastosDiarios() {
       <h1 className="page-title">Gastos diarios</h1>
 
       <div className="grid-auto">
+        <AutoCaptureQueue key={captureQueueKey} accounts={accounts} categories={categories} onConfirmed={reload} />
+
         {pending === null ? (
           <Card title="Pendientes de banco" className="span-3"><p style={{ color: 'var(--text-muted)' }}>Cargando…</p></Card>
         ) : pending.length > 0 && (
@@ -844,6 +850,7 @@ export default function GastosDiarios() {
           {importResult && (
             <p style={{ font: 'var(--font-subheadline)', color: 'var(--status-good)', marginTop: 'var(--space-1)' }}>
               {importResult.imported} movimiento(s) nuevo(s) importado(s), {importResult.skipped} ya existían y se omitieron.
+              {importResult.reconciled > 0 && ` ${importResult.reconciled} ya estaban capturadas automáticamente y no se duplicaron.`}
             </p>
           )}
         </Card>

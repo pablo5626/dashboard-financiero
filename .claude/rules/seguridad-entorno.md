@@ -33,6 +33,15 @@
   permitidos (`withCors`; `ALLOWED_ORIGINS` para agregar más). Los errores
   internos y del proveedor de IA se registran en el servidor y al cliente le
   llega un mensaje genérico. `receipt-parse` valida la firma real del archivo.
+- **`auto-capture`** (captura automática desde el teléfono, ver
+  `captura-automatica.md`) es la excepción: `verify_jwt = false`, porque el
+  teléfono no tiene sesión. La autenticación es un token personal (`cap_` + 256
+  bits), del que se guarda solo el sha256 y que se revoca borrándolo desde
+  Ajustes. Lo valida la RPC `ingest_auto_capture` (`security definer`,
+  ejecutable solo por `anon`), que escribe únicamente en el usuario dueño del
+  token y tiene un tope de 200 capturas por día. No usa la service role.
+- **Nunca versionar** `Finanzas - Google Play package.zip` ni ningún
+  `signing.keystore`: es la llave de firma del APK.
 - **Frontend**: CSP inyectada en el build (`vite.config.js`); la sesión de
   Supabase vive en `localStorage`, por eso no debe existir
   `dangerouslySetInnerHTML`/`innerHTML` ni cargarse scripts de terceros. Al

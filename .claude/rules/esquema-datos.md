@@ -29,6 +29,19 @@ directamente en el panel de Supabase sin reflejarlo en el archivo.
   `search_path` fijo, que solo toca la fila de `auth.uid()`, exige sesión y
   solo puede ejecutarla el rol `authenticated`; devuelve `false` al pasar el
   límite (60 por día, definido en `supabase/functions/_shared/quota.ts`).
+- **`capture_tokens` y `auto_captures`** (captura automática, ver
+  `captura-automatica.md`). `capture_tokens` solo tiene las políticas `select` y
+  `delete`: el alta pasa por `create_capture_token` (`security definer`,
+  ejecutable por `authenticated`) y se guarda únicamente el sha256 del token.
+  `auto_captures` entra en el bucle genérico de RLS, pero lo escribe
+  `ingest_auto_capture` (`security definer`, ejecutable **solo por `anon`**, que
+  autentica por el hash del token). No es un libro contable. Cuando se leyó el
+  monto, esa misma RPC crea la fila de `transactions` (`origin =
+  'auto_capture'`) y la captura queda `pending` con `transaction_id` como
+  recordatorio de revisarla. Lo que suma a saldos y gastos es siempre la
+  transacción, nunca la captura. Ambas RPCs usan
+  `extensions.gen_random_bytes`/`extensions.digest` (pgcrypto vive en el schema
+  `extensions` en Supabase).
 - **`transactions.account_id` es nullable a propósito**: representa el estado
   "pendiente de banco" del motor de asignación (ver `motor-asignacion.md`). No
   se reemplaza por una cuenta ficticia tipo "Sin asignar".

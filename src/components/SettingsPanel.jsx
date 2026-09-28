@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { IconSettings, IconClose, IconChevronRight, IconTag, IconHash, IconAccounts, IconDebts, IconGoals, IconExchange, IconExpenses, IconBudget } from './icons.jsx'
+import { IconSettings, IconClose, IconChevronRight, IconTag, IconHash, IconAccounts, IconDebts, IconGoals, IconExchange, IconExpenses, IconBudget, IconAutoCapture } from './icons.jsx'
+import AutoCaptureSettings from './AutoCaptureSettings.jsx'
 import ColorSwatchPicker from './ui/ColorSwatchPicker.jsx'
 import ConfirmDialog from './ui/ConfirmDialog.jsx'
 import { Field, InfoCard, ChipPicker, Segmented } from './ui/FormKit.jsx'
@@ -67,6 +68,7 @@ const SETTINGS_SECTIONS = [
   { key: 'metas', label: 'Metas de ahorro', subtitle: 'Agregar una meta puntual o con propósito', Icon: IconGoals },
   { key: 'gastos-fijos', label: 'Gastos fijos', subtitle: 'Agregar un gasto fijo recurrente', Icon: IconExpenses },
   { key: 'tasas', label: 'Tasas de cambio', subtitle: 'COP/USD/EUR, a mano o buscadas automáticamente', Icon: IconExchange },
+  { key: 'captura', label: 'Captura automática', subtitle: 'Apple Pay y notificaciones del banco', Icon: IconAutoCapture },
 ]
 
 // Botón + panel de ajustes, montado una sola vez en AppShell y siempre
@@ -1331,6 +1333,8 @@ export default function SettingsPanel() {
             )}
             </>
             )}
+
+            {activeSection?.key === 'captura' && <AutoCaptureSettings />}
 
             {activeSection?.key === 'tasas' && (
             <>

@@ -39,7 +39,8 @@
 - **Edge Functions** (`supabase/functions/`, Deno): cada función en su carpeta y
   el código común en `_shared/` (`auth.ts`: `requireUser`, `withCors`,
   `timingSafeEqual`; `quota.ts`: tope diario de IA; `input.ts`: saneo de listas de
-  nombres). Sin Docker ni Deno local: se despliegan con `npx supabase functions
+  nombres; `notificationParsers.ts`: parseo de notificaciones bancarias y montos
+  para `auto-capture`, ver `captura-automatica.md`). Sin Docker ni Deno local: se despliegan con `npx supabase functions
   deploy`, así que no hay chequeo de tipos antes de desplegar — probar con `curl`
   después (ver `multiusuario-despliegue.md`).
 - **`vite.config.js`** inyecta una Content-Security-Policy (`<meta>`) solo en el

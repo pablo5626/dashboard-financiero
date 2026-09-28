@@ -49,6 +49,10 @@ function alertText(a) {
       return a.count === 1
         ? '1 movimiento sin cuenta asignada — confírmalo en Gastos diarios'
         : `${a.count} movimientos sin cuenta asignada — confírmalos en Gastos diarios`
+    case 'capturas_pendientes':
+      return a.count === 1
+        ? '1 compra guardada automáticamente — revisa su categoría en Gastos diarios'
+        : `${a.count} compras guardadas automáticamente — revisa sus categorías en Gastos diarios`
     case 'divisa_pendiente':
       return a.count === 1
         ? '1 compra en divisa con monto estimado — confírmalo en Gastos diarios'

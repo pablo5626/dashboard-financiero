@@ -268,11 +268,25 @@ export async function importTransactions(rows, year, month) {
     }
   })
 
-  const { data, error } = await supabase
-    .from('transactions')
-    .upsert(payload, { onConflict: 'user_id,monia_id', ignoreDuplicates: true })
-    .select('id, monia_id')
+  const { toInsert, capturesToMerge, reconciled } = await reconcileWithAutoCaptures(payload, year, month)
+
+  const { data, error } = toInsert.length
+    ? await supabase
+      .from('transactions')
+      .upsert(toInsert, { onConflict: 'user_id,monia_id', ignoreDuplicates: true })
+      .select('id, monia_id')
+    : { data: [], error: null }
   if (error) throw error
+
+  const idByMoniaId = Object.fromEntries(data.map((r) => [r.monia_id, r.id]))
+  for (const { captureId, moniaId } of capturesToMerge) {
+    if (!idByMoniaId[moniaId]) continue
+    const { error: mergeError } = await supabase
+      .from('auto_captures')
+      .update({ status: 'merged', transaction_id: idByMoniaId[moniaId] })
+      .eq('id', captureId)
+    if (mergeError) throw mergeError
+  }
 
   const newMoniaIds = new Set(data.map((r) => r.monia_id))
 
@@ -289,7 +303,113 @@ export async function importTransactions(rows, year, month) {
     try { await ensureTags(newDescriptiveTags) } catch { /* catálogo secundario, ver createManualTransaction */ }
   }
 
-  return { imported: data.length, skipped: payload.length - data.length, totalInMonth: monthRows.length }
+  return {
+    imported: data.length,
+    skipped: toInsert.length - data.length,
+    reconciled,
+    totalInMonth: monthRows.length,
+  }
+}
+
+const DAY_MS = 86400000
+const dayIndex = (iso) => Math.floor(Date.parse(iso) / DAY_MS)
+
+// Conciliación con la captura automática (ver .claude/rules/captura-automatica.md):
+// una compra capturada por Apple Pay / notificación del banco vuelve a llegar
+// en el CSV de MonIA con otro id, y sin esto se contaría dos veces.
+//
+// Candidato = mismo monto absoluto y moneda, fecha a ±1 día y misma cuenta (o
+// alguna de las dos sin cuenta). Solo se concilia un emparejamiento 1 a 1 (la
+// fila tiene un único candidato y ese candidato una única fila); ante cualquier
+// ambigüedad se importa normal — nunca especular.
+//   - Candidato ya confirmado (transactions origin 'auto_capture'): la fila del
+//     CSV no se inserta y la transacción adopta su monia_id, así un reimport la
+//     salta sola por el ignoreDuplicates y se conserva lo que el usuario
+//     confirmó.
+//   - Captura todavía pendiente: la fila del CSV entra normal y la captura pasa
+//     a 'merged' apuntando a ella (sale de la bandeja).
+async function reconcileWithAutoCaptures(payload, year, month) {
+  const from = new Date(Date.UTC(year, month - 1, 1) - DAY_MS).toISOString()
+  const to = new Date(Date.UTC(year, month, 1) + DAY_MS).toISOString()
+
+  const [txRes, capRes] = await Promise.all([
+    supabase
+      .from('transactions')
+      .select('id, amount, currency, account_id, occurred_at')
+      .eq('origin', 'auto_capture')
+      .like('monia_id', 'auto-%')
+      .gte('occurred_at', from)
+      .lt('occurred_at', to),
+    supabase
+      .from('auto_captures')
+      .select('id, amount, currency, account_id, occurred_at')
+      .eq('status', 'pending')
+      .is('transaction_id', null) // las ya guardadas entran como candidato vía su transacción
+      .not('amount', 'is', null)
+      .gte('occurred_at', from)
+      .lt('occurred_at', to),
+  ])
+  if (txRes.error) throw txRes.error
+  // Sin la tabla auto_captures en la base viva la importación sigue igual que antes.
+  const pendingCaptures = capRes.error ? [] : capRes.data
+
+  const candidates = [
+    ...txRes.data.map((t) => ({ kind: 'tx', id: t.id, amount: Math.abs(t.amount), currency: t.currency, accountId: t.account_id, day: dayIndex(t.occurred_at) })),
+    ...pendingCaptures.map((c) => ({ kind: 'capture', id: c.id, amount: Math.abs(c.amount), currency: c.currency, accountId: c.account_id, day: dayIndex(c.occurred_at) })),
+  ]
+  if (candidates.length === 0) return { toInsert: payload, capturesToMerge: [], reconciled: 0 }
+
+  const matchesByRow = new Map()
+  const rowsByCandidate = new Map()
+  for (const row of payload) {
+    if (row.amount >= 0 || isIgnoredRow(row.tags)) continue
+    const rowDay = dayIndex(row.occurred_at)
+    const matches = candidates.filter((c) =>
+      c.amount === Math.abs(row.amount) &&
+      c.currency === row.currency &&
+      Math.abs(c.day - rowDay) <= 1 &&
+      (!row.account_id || !c.accountId || row.account_id === c.accountId)
+    )
+    if (matches.length === 0) continue
+    matchesByRow.set(row.monia_id, matches)
+    for (const c of matches) rowsByCandidate.set(c.id, (rowsByCandidate.get(c.id) ?? 0) + 1)
+  }
+
+  let pairs = [...matchesByRow.entries()]
+    .filter(([, matches]) => matches.length === 1 && rowsByCandidate.get(matches[0].id) === 1)
+    .map(([moniaId, [candidate]]) => ({ moniaId, candidate }))
+  if (pairs.length === 0) return { toInsert: payload, capturesToMerge: [], reconciled: 0 }
+
+  // Una fila del CSV ya importada antes no se re-concilia: su monia_id ya
+  // existe, y adoptarlo en otra transacción violaría el unique.
+  const { data: existing, error } = await supabase
+    .from('transactions')
+    .select('monia_id')
+    .in('monia_id', pairs.map((p) => p.moniaId))
+  if (error) throw error
+  const alreadyImported = new Set(existing.map((r) => r.monia_id))
+  pairs = pairs.filter((p) => !alreadyImported.has(p.moniaId))
+
+  const skipMoniaIds = new Set()
+  const capturesToMerge = []
+  for (const { moniaId, candidate } of pairs) {
+    if (candidate.kind === 'tx') {
+      const { error: adoptError } = await supabase
+        .from('transactions')
+        .update({ monia_id: moniaId })
+        .eq('id', candidate.id)
+      if (adoptError) throw adoptError
+      skipMoniaIds.add(moniaId)
+    } else {
+      capturesToMerge.push({ captureId: candidate.id, moniaId })
+    }
+  }
+
+  return {
+    toInsert: payload.filter((r) => !skipMoniaIds.has(r.monia_id)),
+    capturesToMerge,
+    reconciled: pairs.length,
+  }
 }
 
 // Alta manual de un gasto (Fase 3 del prompt original, adelantada para

@@ -107,6 +107,16 @@ export function IconCamera(props) {
   )
 }
 
+// Teléfono con rayo: captura automática de pagos (Ajustes → Captura automática).
+export function IconAutoCapture(props) {
+  return (
+    <svg {...base} {...props}>
+      <rect x="6" y="2.5" width="12" height="19" rx="2.5" />
+      <path d="M12.8 7.5l-2.6 4.2h3.6l-2.6 4.3" />
+    </svg>
+  )
+}
+
 export function IconChevronRight(props) {
   return (
     <svg {...base} {...props}>

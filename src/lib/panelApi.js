@@ -4,6 +4,7 @@ import { getRates, toCOP } from './exchangeRatesApi.js'
 import { buildPocketIndex, resolvePocketKey } from './currencyPockets.js'
 import { fetchAllInitialBalanceRows, resolveAnchorsFromRows, earliestAnchorMonth, monthStartStr } from './balanceAnchors.js'
 import { getUserSettings } from './userSettingsApi.js'
+import { countPendingCaptures } from './autoCaptureApi.js'
 
 // Devuelve los últimos n meses (incluyendo year/month) ordenados de más
 // antiguo a más reciente, como [{ year, month }, ...].
@@ -213,7 +214,7 @@ export async function fetchAlerts() {
   const [
     { data: fixedExpenses, error: e1 }, { data: debtInstallments, error: e2 }, { data: savingsGoals, error: e3 },
     pendingCount, { data: allCategories, error: e5 }, { data: expenseRows, error: e6 },
-    pendingCurrencyCount, budgetSettings,
+    pendingCurrencyCount, budgetSettings, pendingCapturesCount,
   ] = await Promise.all([
     supabase.from('fixed_expenses').select('id, name, amount, due_day, currency').eq('is_active', true),
     supabase.from('debt_installments').select('id, due_date, amount, debts(creditor_name, is_active, direction, currency)').eq('paid', false).lte('due_date', dueSoonCutoff),
@@ -223,6 +224,8 @@ export async function fetchAlerts() {
     supabase.from('transactions').select('category_id, amount, occurred_at, tags').gte('occurred_at', historyStart).lt('occurred_at', nextMonthStart).lt('amount', 0),
     countPendingCurrencyTransactions(),
     getUserSettings(),
+    // Tolerante a que auto_captures todavía no exista en la base viva.
+    countPendingCaptures().catch(() => 0),
   ])
   if (e1) throw e1
   if (e2) throw e2
@@ -326,6 +329,22 @@ export async function fetchAlerts() {
       amount: null,
       daysUntil: null,
       count: pendingCurrencyCount,
+      href: '/gastos',
+    })
+  }
+
+  // Compras capturadas solas desde el teléfono (Apple Pay / notificación del
+  // banco): se guardan solas con la categoría aprendida, esto recuerda
+  // revisarlas en Gastos.
+  if (pendingCapturesCount > 0) {
+    alerts.push({
+      id: 'pending-captures',
+      kind: 'capturas_pendientes',
+      level: 'warning',
+      name: null,
+      amount: null,
+      daysUntil: null,
+      count: pendingCapturesCount,
       href: '/gastos',
     })
   }

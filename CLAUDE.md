@@ -220,6 +220,26 @@ a fixed owner: the Shortcut logs in first (see `.claude/rules/shortcuts-ios.md`)
 and sends `Authorization: Bearer <access_token>`; the expense currency now
 comes from the chosen account.
 
+**Automatic payment capture (Apple Pay / bank notifications)**: full design in
+`.claude/rules/captura-automatica.md`. The phone (an iOS Shortcuts "Transaction"
+automation, or MacroDroid reading the bank's notification on Android) POSTs each
+purchase to the `auto-capture` Edge Function with a personal capture token
+created in Ajustes → Captura automática. The token replaces the password, and
+only its sha256 is stored in `capture_tokens`. Parsing happens server-side
+(`_shared/notificationParsers.ts`). When the amount was read, the RPC **saves
+the expense right away** (an `origin = 'auto_capture'` transaction with the
+category learned from history by exact merchant text, no AI), and the
+`auto_captures` row stays `pending` as a reminder to review it in Gastos →
+"Capturas automáticas por revisar" (`AutoCaptureQueue.jsx`). This is a
+deliberate, user-requested exception to "never guess and save". A capture with
+no readable amount, or whose account has a different currency, is not saved
+and waits to be completed by hand. `importTransactions`
+reconciles those against the MonIA CSV (1-to-1 match on amount, currency, ±1
+day and account only) so the same purchase isn't counted twice. The
+`auto-capture` function has `verify_jwt = false`: auth is the token, checked
+inside the `security definer` RPC `ingest_auto_capture`, and no service role is
+used.
+
 **Expenses can be booked on the madre too**: the "+" sheet, the "Pendientes de
 banco" queue in Gastos, the account picker for paying a debt installment
 (Deudas) and the account picker for a `'puntual'` savings contribution
