@@ -31,8 +31,8 @@ contra el JWT, no contra la anon key (ver `.claude/rules/seguridad-entorno.md`).
 **Prompts** (2, en este orden):
 1. *Ask for Input* — "¿Cuánto?" (tipo número).
 2. *Choose from Menu* — "¿Desde qué cuenta?", con una opción por cada cuenta
-   hija activa (mismos nombres que en la app: Dale, Nequi, Rappi, Nubank,
-   Efectivo, Pibank, arq, arq eur...). Cada opción del menú lleva
+   activa, la madre incluida (mismos nombres que en la app; ejemplo del dueño:
+   Dale, Nequi, Rappi, Nubank, Efectivo, Pibank, arq, arq eur...). Cada opción del menú lleva
    *hardcodeado* el UUID de esa cuenta (columna `id` en `accounts` — se
    consulta una vez en Supabase y se pega en el Shortcut; si se renombra o
    agrega una cuenta hay que actualizar este menú a mano, mismo costo de
@@ -189,6 +189,12 @@ Notas:
   recarga con estado viejo, o dos pestañas confirmando el mismo mes.
 
 ## Alternativa: endpoint `quick-capture` (una sola llamada tras el login)
+
+> **Estado**: este contrato es el del código del repo, pero la función
+> **desplegada** en Supabase sigue siendo la versión anterior (secreto
+> compartido `x-quick-capture-secret` y dueño fijo) hasta que el dueño migre sus
+> Shortcuts; desplegar antes los rompe. Los Shortcuts son solo de iOS: quien use
+> el APK de Android no los tiene y registra desde el botón "+" de la app.
 
 La Edge Function `supabase/functions/quick-capture` resuelve nombres de cuenta
 y arma el insert por vos. **Es multiusuario**: ya no usa un secreto compartido

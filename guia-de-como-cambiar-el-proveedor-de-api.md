@@ -26,7 +26,33 @@ front-end no necesita ningún cambio.**
 > Nota: `exchangeRatesApi.fetchLiveRate` (tasa de cambio en vivo) llama a
 > `open-er-api.com`, no es un modelo de IA — no forma parte de esta guía.
 
-## 2. Qué cambia en cada archivo al cambiar de proveedor
+## 2. Si solo querés cambiar el modelo (sin cambiar de proveedor)
+
+Esto es un caso mucho más simple que todo lo demás de esta guía, y no requiere tocar ningún
+archivo ni redesplegar nada. El modelo de Gemini **no está hardcodeado** en el código — vive en el
+secret `GEMINI_MODEL` de Supabase, leído por `supabase/functions/_shared/gemini.ts` (compartido
+por `voice-parse`, `receipt-parse` y `money-ask`), con `gemini-3.6-flash` como valor por defecto si
+el secret no está seteado.
+
+```
+npx supabase secrets set GEMINI_MODEL=gemini-x.x-flash --project-ref qxiqqozogggfynkanevt
+```
+
+Con eso alcanza — no hace falta editar `index.ts` ni volver a correr `supabase functions deploy`.
+Este mecanismo existe justamente porque ya pasó una vez: `gemini-2.5-flash` empezó a devolver 404
+a las API keys nuevas antes de su fecha oficial de baja (ver "Known deferred scope" en
+`CLAUDE.md`), y hubo que cambiar de modelo sin código nuevo ni redeploy.
+
+Si además el modelo nuevo es de la familia `gemini-3*`, revisar `buildGenerationConfig` en
+`_shared/gemini.ts`: esos modelos piensan por defecto y los tokens de "thinking" cuentan contra
+`maxOutputTokens`, por eso se fija `thinkingConfig.thinkingLevel = 'minimal'` solo para esa
+familia (la 2.5 usa otro parámetro). Si el modelo nuevo no es `gemini-3*`, ese bloque puede
+necesitar ajuste.
+
+Esta sección **no aplica** si además querés cambiar de proveedor (Gemini → Anthropic, OpenAI,
+etc.) — para eso seguí con la sección 3 de abajo, que sí requiere editar código y redesplegar.
+
+## 3. Qué cambia en cada archivo al cambiar de proveedor
 
 Ambos archivos siguen el mismo patrón: una constante con la API key leída
 de `Deno.env`, una constante con el nombre del modelo, y un único
@@ -45,21 +71,26 @@ cambiar de proveedor hay que tocar, en **cada uno de los 2 archivos**:
 7. **El mensaje de error "no configurada"** (línea ~65/61) — menciona el
    nombre de la env var por su nombre literal, hay que actualizarlo.
 
-El resto de cada archivo (CORS, validación del body de entrada, parseo del
-JSON de salida a `{ok, result}`, límites como `MAX_BASE64_LENGTH`, las
-listas `CATEGORIES`/`ACCOUNTS`) es genérico y **no depende del proveedor**
-— no tocar.
+El resto de cada archivo (CORS y autenticación, que ahora salen de
+`supabase/functions/_shared/auth.ts` y `quota.ts`; la validación del body de
+entrada; el parseo del JSON de salida a `{ok, result}`; límites como
+`MAX_BASE64_LENGTH`) es genérico y **no depende del proveedor** — no tocar. Las
+listas de categorías y cuentas ya no están en el código: las manda el cliente en
+cada llamada (son las del propio usuario) y se inyectan en el prompt. Los errores
+del proveedor se registran en el servidor y al cliente le llega un mensaje
+genérico; al cambiar de proveedor mantener eso, no devolver el texto del error
+del proveedor.
 
-## 3. Ejemplo concreto: pasar de Gemini a Anthropic (Claude)
+## 4. Ejemplo concreto: pasar de Gemini a Anthropic (Claude)
 
 Este proyecto ya usó Anthropic antes de migrar a Gemini (ver el comentario
 al principio de `voice-parse/index.ts`), así que volver es el ejemplo más
-directo. Los cambios de la tabla del punto 2, aplicados a Anthropic:
+directo. Los cambios de la tabla de la sección 3, aplicados a Anthropic:
 
 | Punto | Gemini (actual) | Anthropic |
 |---|---|---|
 | Env var | `GEMINI_API_KEY` | `ANTHROPIC_API_KEY` |
-| Modelo | `gemini-2.5-flash` | `claude-sonnet-5` (o `claude-haiku-4-5-20251001` para algo más barato/rápido, ver la skill `claude-api` para ids vigentes) |
+| Modelo | `gemini-3.6-flash` (secret `GEMINI_MODEL`, en `_shared/gemini.ts`; `gemini-2.5-flash` da 404 a keys nuevas) | `claude-sonnet-5` (o `claude-haiku-4-5-20251001` para algo más barato/rápido, ver la skill `claude-api` para ids vigentes) |
 | URL | `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent` | `https://api.anthropic.com/v1/messages` |
 | Headers | `x-goog-api-key: <key>` | `x-api-key: <key>` + `anthropic-version: 2023-06-01` |
 | Body (system) | `systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] }` | `system: SYSTEM_PROMPT` (campo aparte, no dentro de `messages`) |
@@ -114,7 +145,7 @@ messages: [{
 }],
 ```
 
-## 4. Pasos para aplicar el cambio (en cualquier proveedor nuevo)
+## 5. Pasos para aplicar el cambio (en cualquier proveedor nuevo)
 
 1. Conseguir la API key del proveedor nuevo (en el caso de Anthropic,
    desde console.anthropic.com — es una key distinta a cualquier
@@ -126,12 +157,13 @@ messages: [{
    npx supabase secrets set ANTHROPIC_API_KEY=xxxxx --project-ref qxiqqozogggfynkanevt
    ```
 3. Editar `voice-parse/index.ts` y `receipt-parse/index.ts` con los 7
-   puntos de la tabla de la sección 2.
+   puntos de la tabla de la sección 3.
 4. Redesplegar **ambas** funciones (un cambio de secret solo no requiere
-   redeploy, pero un cambio de código sí):
+   redeploy, pero un cambio de código sí). `money-ask` también usa Gemini y
+   comparte la misma key: si el cambio de proveedor es permanente, hay que
+   editarla igual y redesplegarla:
    ```
-   npx supabase functions deploy voice-parse --project-ref qxiqqozogggfynkanevt
-   npx supabase functions deploy receipt-parse --project-ref qxiqqozogggfynkanevt
+   npx supabase functions deploy voice-parse receipt-parse money-ask --project-ref qxiqqozogggfynkanevt
    ```
 5. Probar de punta a punta en `npm run dev` (`localhost`, no
    `http://<ip-lan>`, porque `SpeechRecognition` necesita contexto
@@ -143,14 +175,16 @@ messages: [{
    actual ("Known deferred scope" y "Quick capture (FAB) + voice input"),
    para que la próxima sesión no vea una referencia a Gemini desactualizada.
 
-## 5. Qué NO hace falta tocar
+## 6. Qué NO hace falta tocar
 
 - `QuickCaptureFAB.jsx`, `Diario.jsx`, ni ningún componente de React — solo
   consumen `{ ok, result }` vía `fetch` a la Edge Function, sin saber nada
   del proveedor.
-- `supabase/config.toml` — ninguna de las dos funciones aparece ahí (se
-  despliegan con `verify_jwt = true` por default, ver el comentario al
-  principio de cada `index.ts`).
+- `supabase/config.toml` — ninguna de estas funciones aparece ahí (se
+  despliegan con `verify_jwt = true` por default y además validan al usuario con
+  `requireUser`, ver el comentario al principio de cada `index.ts`).
+- `_shared/quota.ts`: el tope diario de 60 usos de IA por usuario es por llamada,
+  no por proveedor; no cambia.
 - La key vieja del proveedor anterior no hace falta borrarla del secret
   store de Supabase (no rompe nada tenerla sin uso), pero sí conviene
   borrar del código cualquier referencia a su nombre de variable para no

@@ -19,8 +19,10 @@ MonIA CSV import — see its entry under "Current state" for why.
 
 Detailed, already-decided project rules live in `.claude/rules/*.md` — one
 topic per file (nomenclature, data-model conventions, the bank-assignment
-engine, tech stack choices, UI/dataviz rules, env/security handling). Read
-the relevant one before touching that area; they capture decisions that
+engine, tech stack choices, UI/dataviz rules, env/security handling, and
+`multiusuario-despliegue.md` — the operational runbook: deploy order, Auth/SMTP
+setup and its gotchas, test-account cleanup script, and the Android APK).
+Read the relevant one before touching that area; they capture decisions that
 aren't otherwise obvious from the code.
 
 ## Commands
@@ -52,7 +54,8 @@ gotchas before writing one.
 **GitHub Pages deploy**: `.github/workflows/deploy.yml` builds with
 `npm ci && npm run build` (injecting `VITE_SUPABASE_URL`/
 `VITE_SUPABASE_ANON_KEY` from repo Actions secrets, since `.env.local`
-is never committed) and publishes `dist/` via `actions/deploy-pages` on
+is never committed — the build-only CSP plugin in `vite.config.js` reads
+`VITE_SUPABASE_URL` to whitelist the Supabase origin in `connect-src`) and publishes `dist/` via `actions/deploy-pages` on
 every push to `master` — the repo's Pages source must be set to "GitHub
 Actions" (Settings → Pages) for this to take effect, not "Deploy from a
 branch". `vite.config.js` sets `base: '/dashboard-financiero/'` to match
@@ -179,7 +182,23 @@ every time it opens for the same reason.
 and Site URL / Redirect URLs must include the GitHub Pages URL
 (`.../dashboard-financiero/`) or confirmation/recovery links land on the wrong
 page. The default Supabase SMTP allows very few emails per hour, so with email
-confirmation on, set up custom SMTP (or turn confirmation off).
+confirmation on (keep it on), set up custom SMTP — see
+`.claude/rules/multiusuario-despliegue.md` for the setup, the "Error sending
+confirmation email" gotcha (SMTP *Username* must be the full Gmail address, not
+the sender name) and how to diagnose it from Logs → Auth.
+
+**Android APK** (in progress — package not generated yet, see status in the
+runbook): the app is being packaged as a Trusted Web Activity built with
+PWABuilder from the published site (voice, camera and receipts keep working
+because it runs in Chrome; every `git push` reaches installed copies without a
+new APK). `public/manifest.webmanifest` carries `id`/`scope`
+`/dashboard-financiero/`, maskable icons, `theme_color` `#f9f9f7` (status bar,
+matches `--page-plane`) and `background_color` `#0d366b` (splash). Full-screen
+mode needs `https://pablo5626.github.io/.well-known/assetlinks.json`, served by
+the separate user-site repo `pablo5626/pablo5626.github.io` (a project page
+can't serve a root-level file); it holds `[]` until the APK's signing
+fingerprint is added. Steps, keystore care and current status:
+`.claude/rules/multiusuario-despliegue.md`.
 
 **Edge Functions are multi-user** (`supabase/functions/_shared/`): `auth.ts`
 (`requireUser` builds a client from the anon key + the caller's JWT, so RLS
@@ -907,8 +926,8 @@ FAB's copy survives today since the Gastos manual form no longer exists
 (see below).
 
 This FAB also calls `transactionsApi.suggestCategoryForPurpose` on blur of
-the description field — see `purpose_category_stats` under "Current state
-of the 6 sections" → `GastosDiarios.jsx`.
+the description field — see "Learned category/tag suggestions" under "Current
+state of the 6 sections" → `GastosDiarios.jsx`.
 
 **The gasto/ingreso sheet layout was also reworked** (transferencia mode is
 untouched — different fields, not part of this pass) to match the same
@@ -1213,8 +1232,9 @@ single form; adding a new setting later means adding one entry to
 existing ones. The first section is `'categorias'`: the full
 category CRUD (create with emoji/color/`is_ambiguous`, inline edit of
 name/emoji/color/`is_ambiguous`/`monthly_budget`, archive via
-`ConfirmDialog`) and the relocated "Aprender categoría/tag de tu historial"
-backfill button. It deliberately does **not** show a "gastado este mes" figure
+`ConfirmDialog`). (A "Aprender categoría/tag de tu historial" button used to
+live here; it was removed once the suggestion started being computed from
+`transactions` itself, see "Learned category/tag suggestions".) It deliberately does **not** show a "gastado este mes" figure
 per category (unlike the old card) — a global settings panel has no month/
 page context to compute that against, and re-fetching it just for this
 panel wasn't worth the complexity. Every page that reads categories
@@ -2096,16 +2116,27 @@ Supabase, no sample data left anywhere:
   scroll-and-focus the old inline card) was built and then replaced within
   the same session once the user asked for a real popup instead of a
   redirect — don't resurrect that query-param approach.
-  **Learned category/tag suggestions**: `purpose_category_stats` (schema.sql)
-  incrementally learns "descripción (purpose, normalizada) → categoría + tag"
-  every time `createManualTransaction` (from `QuickCaptureFAB.jsx` now,
-  since this page has none) or `importTransactions` saves a row with a
-  resolved category — same incremental-learning shape as
-  `category_account_stats`, one level earlier. Because this only learns
-  going forward, `transactionsApi.backfillPurposeCategoryStats` (a button in
-  `SettingsPanel.jsx`, "Aprender categoría/tag de tu historial") does a
-  one-time pass over every already-saved transaction with a category, so
-  history from before this feature existed also starts suggesting.
+  **Learned category/tag suggestions**: `suggestCategoryForPurpose`
+  (`transactionsApi.js`, called by `QuickCaptureFAB.jsx` on blur of the
+  description field) computes "descripción (purpose, normalizada) → categoría
+  + tag" **on the fly from `transactions`** — an exact-text `ilike` query
+  (up to 200 newest rows, then an exact `normalizePurpose` match and
+  `isIgnoredRow` filter on the client), grouped by category + first tag, most
+  frequent wins (a tie goes to the most recent). There is no counter table to
+  keep in sync and no "learn" button: the suggestion therefore already covers
+  history from before the feature, category edits, deletions and any insert
+  made by another path (CSV import, receipt scan, a future bot) with nothing
+  to run. **This replaced `purpose_category_stats`**, an incremental counter
+  table fed by `createManualTransaction`/`importTransactions` plus a
+  Settings button (`backfillPurposeCategoryStats`) — its counts were *added*
+  to on every run (pressing the button twice doubled them) and it never saw
+  `updateTransaction`/`deleteTransaction`, so corrections taught nothing and
+  deleted rows kept influencing suggestions. The table is **left in the
+  database and in `schema.sql` on purpose, unused** (no live-DB change was
+  needed; the test-account cleanup script still deletes its rows because of
+  its FK to `categories`) — dropping it is an optional later cleanup. If a
+  description ever has more than 200 rows the older ones are ignored, and if
+  the `ilike` scan gets slow an index on the description is the next step.
 - **`Deudas.jsx`**: debt CRUD (creditor, total/restante, tasa mensual
   opcional, plazo opcional, per-debt `currency` via a `CURRENCIES` picker set
   **only at creation** — the edit form shows it as a read-only label, never a
@@ -2190,8 +2221,22 @@ schema or UI.
 
 These were explicitly discussed and left out — don't "fix" them
 unprompted, they're deliberate cuts, not oversights:
+- **`quick-capture` (iOS Shortcuts) is not deployed in its new form on
+  purpose.** The repo has the multi-user version (caller's JWT, no service
+  role), but the deployed function is still the old shared-secret one until the
+  owner updates their Shortcuts — deploying it earlier would break them. iOS
+  Shortcuts were explicitly deprioritized: Android users of the APK don't have
+  them and use the "+" sheet. Don't delete `QUICK_CAPTURE_SECRET` /
+  `QUICK_CAPTURE_USER_ID` until that migration is done.
+- **CAPTCHA on sign-up was deferred**: enabling it in Supabase without a widget
+  in the app would break registration (the token has to be sent in
+  `signUp`/`signIn`/reset). Email confirmation plus the per-user daily AI quota
+  cover the risk for now.
+- **Major dependency upgrades were deferred** (vite 5→8, react-router-dom 6→7,
+  which `npm audit` flags — dev-server-only / not exploitable here). Do them as
+  a separate change with a real browser pass over every page.
 - **AI-powered fallback for the purpose→category/tag suggestion
-  (`purpose_category_stats`) was evaluated and explicitly declined.** The
+  (`suggestCategoryForPurpose`) was evaluated and explicitly declined.** The
   user asked whether the system generalizes semantically (e.g. typing
   "comida" suggesting "Salida a comer", or "cívica" suggesting
   "Transporte") the way a human would, instead of only matching
@@ -2199,7 +2244,9 @@ unprompted, they're deliberate cuts, not oversights:
   not: `normalizePurpose`/`suggestCategoryForPurpose` in
   `transactionsApi.js` only do an exact-text match (`trim + lowercase`, no
   stemming/fuzzy matching/AI), by explicit prior design (see
-  `.claude/rules/esquema-datos.md`'s note on `purpose_category_stats`).
+  `.claude/rules/esquema-datos.md`'s note on `purpose_category_stats`, now
+  superseded by the on-the-fly computation described under "Learned
+  category/tag suggestions" — the exact-match decision itself still holds).
   Three options were considered: (1) local fuzzy text matching
   (substring/Levenshtein) — free but doesn't solve true synonyms like
   "comida"/"almuerzo"; (2) a real AI call (Gemini 2.5 Flash, same pattern
@@ -2211,8 +2258,8 @@ unprompted, they're deliberate cuts, not oversights:
   text-based, not semantic. **Decision: don't implement any of the three
   for now** — the user's reasoning was that the existing exact-match system
   already keeps improving on its own as more of the user's real, repeated
-  vocabulary gets saved over time (`backfillPurposeCategoryStats` already
-  seeds it from history), so the added complexity/latency of an AI
+  vocabulary gets saved over time (the suggestion is computed straight from
+  the saved history), so the added complexity/latency of an AI
   fallback wasn't worth it yet. If this is revisited later, option 2
   (exact match first, Gemini fallback only on a miss) was the recommended
   approach precisely because it keeps repeated descriptions instant and
@@ -2331,12 +2378,48 @@ unprompted, they're deliberate cuts, not oversights:
   (`SpeechRecognition` needs a secure context, so it won't fire over
   `http://<lan-ip>:5173`; testing from a phone needs the deployed GitHub
   Pages HTTPS URL instead).
-- **Receipt scanning is now deployed too** (`receipt-parse`, same Gemini 2.5
-  Flash swap as `voice-parse`) — `GEMINI_API_KEY` is already set on the
-  project (same secret both functions share), so "Escanear recibo" should
-  work end-to-end. Like voice capture, the full round trip (foto → Edge
-  Function → prefilled form) hasn't been exercised in a real browser session
-  yet — worth a manual test on `npm run dev`.
+- **Receipt scanning is now deployed too** (`receipt-parse`, same Gemini
+  swap as `voice-parse`) — `GEMINI_API_KEY` is already set on the
+  project (same secret both functions share). Like voice capture, the full
+  round trip (foto → Edge Function → form) hasn't been exercised in a real
+  browser session yet — worth a manual test on `npm run dev`.
+- **The Gemini model is no longer hardcoded, because `gemini-2.5-flash`
+  broke (Sep 2026).** The first real run of "Escanear recibo" failed with
+  "El servicio de IA no respondió bien (código 404)": that code is Gemini's
+  own status (the Edge Function relays `response.status`), and Google answers
+  404 "This model models/gemini-2.5-flash is no longer available to new
+  users" for **newly created API keys**, well before the model's official
+  shutdown (Oct 16, 2026). It broke voice-parse, receipt-parse and money-ask
+  alike — content-independent. `supabase/functions/_shared/gemini.ts` now
+  owns the model (`GEMINI_MODEL` secret, default `gemini-3.6-flash`), the
+  generation config and the error mapping (a 404 tells the user to update
+  the secret). 3.x models think by default and thinking tokens count against
+  `maxOutputTokens`, so `buildGenerationConfig` sets
+  `thinkingConfig.thinkingLevel = 'minimal'` (only for `gemini-3*` — the 2.5
+  family uses a different parameter) and the token caps were raised.
+  Changing the model later is `npx supabase secrets set GEMINI_MODEL=...`,
+  no redeploy. Redeploy all three functions whenever `_shared/gemini.ts`
+  changes.
+- **"Escanear recibo" also reads payment-notification screenshots with
+  several purchases.** `receipt-parse` now returns `purchases: [{ purpose,
+  amount, categoryName, accountName }]` (plus `result` = the first one, kept
+  for an older client) and receives the user's category names and **COP-only**
+  account names (a bank notification is in pesos; proposing arq would store
+  the amount in the wrong currency). `accountName` is only proposed when the
+  image names the bank/app. In `QuickCaptureFAB.jsx` (`receiptPurchases`
+  state): **one** purchase keeps the old "prefill the form, review, then
+  Guardar" flow (now also filling the account); **two or more** show a
+  checkbox list and "Guardar N compras" saves the selected ones directly with
+  `createManualTransaction` (today's timestamp, no tags) — a deliberate
+  exception to "prefill only" because the user asked to add them all at once,
+  with the list itself as the review step. Rows without a recognised account
+  land in "Pendientes de banco"; rows without a category are saved
+  uncategorised and fixed by tapping them in Diario/Gastos. A partial failure
+  removes the saved rows from the list so a retry can't duplicate them.
+  Known limits: the same screenshot uploaded twice creates duplicates, and a
+  purchase entered from a notification and later imported from MonIA is
+  counted twice (manual `monia_id`s differ) — the pre-existing hybrid-mode
+  risk of any manual expense.
 
 ## Importable external-agent config detected
 

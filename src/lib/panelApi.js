@@ -379,3 +379,71 @@ export async function fetchAlerts() {
 
   return alerts
 }
+
+// Insights narrativos del mes (Panel General → "Resumen del mes"): a
+// diferencia de las alertas de arriba, no requieren atención del usuario —
+// son un resumen legible armado con plantillas de texto sobre números
+// reales, sin IA. Reutiliza el mismo criterio de "promedio histórico por
+// categoría" que la anomalía (mismas constantes ANOMALY_*), pero con dos
+// diferencias: es navegable por mes (recibe year/month en vez de asumir
+// "hoy real") y convierte cada monto a COP con `toCOP` antes de sumarlo —
+// fetchAlerts no lo hace (asume todo en COP), pero esto es una vista
+// consolidada que cruza cuentas de distinta moneda (arq en USD/EUR
+// incluido), y la regla de "Money math" en CLAUDE.md exige convertir ahí.
+const INSIGHT_CHANGE_THRESHOLD = 0.2 // 20% — más sensible que el 1.5x de la alerta: acá es informativo, no una advertencia
+
+export async function fetchCategoryInsights(year, month) {
+  const currentMonthKey = `${year}-${String(month).padStart(2, '0')}`
+  const nextMonthStart = month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, '0')}-01`
+  const historyMonths = lastNMonths(year, month, ANOMALY_MONTHS_BACK + 1) // incluye el mes pedido
+  const historyStart = `${historyMonths[0].year}-${String(historyMonths[0].month).padStart(2, '0')}-01`
+
+  const [{ data: expenseRows, error: e1 }, { data: allCategories, error: e2 }, rates] = await Promise.all([
+    supabase.from('transactions').select('category_id, amount, currency, occurred_at, tags')
+      .gte('occurred_at', historyStart).lt('occurred_at', nextMonthStart).lt('amount', 0),
+    supabase.from('categories').select('id, name').eq('is_active', true),
+    getRates(),
+  ])
+  if (e1) throw e1
+  if (e2) throw e2
+
+  const spentByCategory = {}
+  const historyByCategory = {}
+  for (const row of expenseRows) {
+    if (isIgnoredRow(row.tags)) continue
+    const amount = toCOP(-Number(row.amount), row.currency, rates)
+    const rowMonthKey = row.occurred_at.slice(0, 7)
+    if (rowMonthKey === currentMonthKey) {
+      spentByCategory[row.category_id] = (spentByCategory[row.category_id] ?? 0) + amount
+    } else {
+      const byMonth = (historyByCategory[row.category_id] ??= {})
+      byMonth[rowMonthKey] = (byMonth[rowMonthKey] ?? 0) + amount
+    }
+  }
+
+  const nameById = Object.fromEntries(allCategories.map((c) => [c.id, c.name]))
+  let topCategory = null
+  for (const [categoryId, amount] of Object.entries(spentByCategory)) {
+    if (!topCategory || amount > topCategory.amount) {
+      topCategory = { name: nameById[categoryId] ?? 'Sin categoría', amount }
+    }
+  }
+
+  let biggestChange = null
+  for (const c of allCategories) {
+    const monthTotals = historyByCategory[c.id]
+    if (!monthTotals) continue
+    const monthsWithData = Object.keys(monthTotals)
+    if (monthsWithData.length < ANOMALY_MIN_HISTORY_MONTHS) continue
+    const average = monthsWithData.reduce((sum, k) => sum + monthTotals[k], 0) / monthsWithData.length
+    if (average < ANOMALY_MIN_AVERAGE) continue
+    const current = spentByCategory[c.id] ?? 0
+    const pctChange = (current - average) / average
+    if (Math.abs(pctChange) < INSIGHT_CHANGE_THRESHOLD) continue
+    if (!biggestChange || Math.abs(pctChange) > Math.abs(biggestChange.pctChange)) {
+      biggestChange = { name: c.name, amount: current, average, pctChange }
+    }
+  }
+
+  return { topCategory, biggestChange }
+}

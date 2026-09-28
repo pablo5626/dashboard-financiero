@@ -15,6 +15,11 @@ directamente en el panel de Supabase sin reflejarlo en el archivo.
   con `user_id = auth.uid()`. La app es multiusuario con registro abierto:
   cada persona que se registra empieza con cero filas (no hay triggers ni
   seeds sobre `auth.users`), y el aislamiento entre personas es solo RLS.
+- **`exchange_rates` se actualiza sola para todos los usuarios**: el cron diario
+  (`rates-auto-update`, service role) hace upsert de los pares para cada
+  `user_id` que ya tiene al menos una cuenta, sobrescribiendo lo que el usuario
+  haya escrito a mano; quien aún no tiene cuentas no recibe filas hasta el
+  siguiente cron (o usa "Buscar tasa de hoy" en Ajustes → Tasas de cambio).
 - **`ai_usage` + `consume_ai_quota(p_limit)`**: contador diario por usuario
   (`user_id`, `day`, `count`) de llamadas a las Edge Functions de IA, que
   comparten una sola `GEMINI_API_KEY`. **Excepción a la regla de las cuatro
@@ -87,17 +92,22 @@ directamente en el panel de Supabase sin reflejarlo en el archivo.
   **y por tag** (columna `tag` nullable): una fila agrega por categoría sola,
   otra fila específica por categoría+tag, para que el orden de sugerencias
   use el tag cuando exista.
-- **`purpose_category_stats`** es el mismo tipo de aprendizaje incremental un
-  nivel antes: descripción (`purpose`, normalizada con `normalizePurpose`) →
-  categoría + tag, alimentada tanto por `createManualTransaction` como por
-  `importTransactions` (`src/lib/transactionsApi.js`) cada vez que una fila
-  guarda una categoría resuelta. Solo se usa para precargar (nunca
+- **`purpose_category_stats` está en desuso** (la tabla sigue en `schema.sql` y
+  en la base viva, pero nada la lee ni la escribe). Era un aprendizaje
+  incremental descripción → categoría + tag alimentado al crear movimientos y
+  por un botón de Ajustes; sumaba en vez de recalcular (correrlo dos veces
+  duplicaba los conteos) y no veía ediciones ni borrados. Hoy
+  `suggestCategoryForPurpose` (`src/lib/transactionsApi.js`) calcula la
+  sugerencia al vuelo desde `transactions` — categoría + primer tag más
+  frecuentes para esa descripción normalizada con `normalizePurpose`, sin
+  filas ignoradas (`isIgnoredRow`). Solo se usa para precargar (nunca
   autoguardar) categoría/tag en el formulario de carga manual
-  (`QuickCaptureFAB.jsx`, único formulario manual que queda — ver
-  "GastosDiarios.jsx" en `CLAUDE.md`) cuando el usuario repite una
-  descripción ya vista — matching por texto exacto normalizado, sin fuzzy
-  matching por ahora (evaluado y explícitamente diferido, ver "Known
-  deferred scope" en `CLAUDE.md`).
+  (`QuickCaptureFAB.jsx`) cuando el usuario repite una descripción ya vista —
+  matching por texto exacto normalizado, sin fuzzy matching por ahora
+  (evaluado y explícitamente diferido, ver "Known deferred scope" en
+  `CLAUDE.md`). Borrar la tabla es una limpieza opcional posterior; mientras
+  exista, el script de limpieza de cuentas de prueba sigue borrando sus filas
+  (tiene FK a `categories`).
 - Los bloques de `insert` de valores iniciales (cuentas, categorías) están
   comentados en `schema.sql` a propósito — se ejecutan una vez, ya
   autenticado, para que `auth.uid()` resuelva al usuario real.

@@ -91,3 +91,26 @@
   en Ajustes — así una misma categoría se ve del mismo color en todas las
   vistas de la app. Un `Cell` por *tag* (que no tiene color propio) sigue
   rotando la paleta genérica (`CHART_COLORS`).
+
+## Estados vacíos y primer uso (usuario nuevo)
+
+- Una app recién registrada no tiene ningún dato: **cada pantalla debe tener un
+  estado vacío que diga qué falta y a dónde ir**, no ceros ni un gráfico vacío.
+  Si el aviso remite a una sección de Ajustes, que sea un botón que dispare
+  `dashboard:open-settings` con `{ section }` (evento que ya escucha
+  `SettingsPanel.jsx`), no solo texto que diga "andá a Ajustes".
+- **No mostrar períodos sin datos como si fueran datos**: Panel no calcula
+  ningún mes hasta que exista el primer saldo, movimiento o transferencia
+  (`findFirstDataMonth()`), y sus tarjetas de evolución muestran un aviso en vez de
+  filas en $0.
+- La guía de primer uso es `OnboardingCard.jsx` (madre → una hija → categorías),
+  se deduce de los datos (sin bandera ni tabla) y se oculta sola.
+- Pantalla de acceso (`Login.jsx`): cuatro modos en la misma pantalla (Entrar,
+  Crear cuenta, Olvidé mi contraseña y Nueva contraseña cuando el enlace de
+  recuperación abre la app). Los errores de Supabase se traducen al español. Con
+  la confirmación de correo activa Supabase no revela si un correo ya existe: no
+  agregar mensajes propios que sí lo hagan.
+- Colores de la app instalada (PWA/APK): la barra de estado usa
+  `theme_color` = `#f9f9f7` (el `--page-plane` claro) y la pantalla de carga
+  `background_color` = `#0d366b`; si cambia el fondo de la app, actualizar el
+  manifest y volver a generar el paquete.

@@ -139,7 +139,7 @@ En ambos casos se debe poder ver: % completado, próximo aporte sugerido (si hay
 ## 🔐 Autenticación
 - Uso individual por cuenta: cada persona se registra con su propio correo y ve solo sus datos (RLS). Una persona nueva empieza vacía: sin cuentas, categorías, tags, deudas ni ahorros. Las cuentas y categorías de este documento son las del dueño original, no un catálogo que se precargue a nadie más.
 - Login simple vía Supabase Auth (email/password) para proteger los datos y que sean accesibles desde cualquier dispositivo de forma segura.
-- El usuario **aún no tiene proyecto de Supabase creado** — se necesita una guía paso a paso para crearlo antes de construir la app.
+- *(Histórico)* al escribirse este documento el usuario aún no tenía proyecto de Supabase; hoy ya existe y la app está en producción. Cada persona se registra desde la app (Crear cuenta) y confirma su correo.
 
 ## 🎨 Estilo visual
 Mixto: debe mostrar toda la información importante de un vistazo, pero organizada con jerarquía visual clara (tarjetas, espaciado, colores por estado) para que no se sienta saturado ni "ostigante".
@@ -172,3 +172,12 @@ Mixto: debe mostrar toda la información importante de un vistazo, pero organiza
 2. Guía paso a paso para crear el proyecto de Supabase (URL + anon key + tablas).
 3. Diseñar el esquema de tablas en Supabase (accounts, transactions, category_mappings, debts, savings_goals, exchange_rate).
 4. Construir el dashboard (React) conectado a Supabase.
+
+## 📍 Estado actual (septiembre de 2026)
+
+Este documento es el registro de la **intención original**; el estado real está en `CLAUDE.md` y en `.claude/rules/`. Lo que cambió respecto a lo planeado:
+
+- **Multiusuario**: la app dejó de ser de un solo usuario. Registro abierto con correo y contraseña (confirmación por correo activada), y cada persona empieza **100% vacía**: sin cuentas, categorías, tags, deudas ni ahorros. Panel muestra una guía "Empieza aquí" (crear cuenta madre, una hija y categorías). Las cuentas y categorías de este documento son solo las del dueño original.
+- **Gastos desde la cuenta madre**: la madre también puede pagar gastos, no solo repartir a las hijas.
+- **Distribución**: sitio en GitHub Pages y **APK para Android** (Trusted Web Activity) para compartirla; los Shortcuts de iOS quedaron como algo solo del dueño. Ver `.claude/rules/multiusuario-despliegue.md`.
+- **IA con tope**: voz, recibos y "Pregúntale a tu dinero" usan una sola clave de Gemini; cada usuario tiene un máximo diario de usos.

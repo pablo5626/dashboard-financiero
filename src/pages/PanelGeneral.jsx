@@ -11,7 +11,7 @@ import OnboardingCard from '../components/OnboardingCard.jsx'
 import { formatCOP, formatCompact, formatByCurrency } from '../lib/format.js'
 import { estimateCategoryAxisWidth } from '../lib/chartUtils.js'
 import { listAccounts, fetchBalancesForMonth, totalBalanceInCOP } from '../lib/accountsApi.js'
-import { lastNMonths, fetchMonthlyTrend, fetchTotalDebt, fetchAlerts, findFirstDataMonth } from '../lib/panelApi.js'
+import { lastNMonths, fetchMonthlyTrend, fetchTotalDebt, fetchAlerts, fetchCategoryInsights, findFirstDataMonth } from '../lib/panelApi.js'
 import { listUpcomingFixedExpenses, setPaidStatus } from '../lib/fixedExpensesApi.js'
 import { getRates, toCOP } from '../lib/exchangeRatesApi.js'
 
@@ -64,6 +64,47 @@ function alertText(a) {
   }
 }
 
+// Resumen narrativo del mes ("Resumen del mes"): plantillas de texto sobre
+// números ya calculados, sin IA — mismo principio de "nunca inventar" que
+// sigue el resto de la app. lastMonth/prevMonth vienen de `trend` (ya
+// consolidado en COP); categoryInsights viene de fetchCategoryInsights.
+function buildMonthlyInsights({ lastMonth, prevMonth, categoryInsights }) {
+  const sentences = []
+
+  if (prevMonth) {
+    const prevMonthLabel = MONTH_LABELS[prevMonth.month - 1]
+    const gastoDeltaPct = prevMonth.gastos > 0
+      ? Math.round(((lastMonth.gastos - prevMonth.gastos) / prevMonth.gastos) * 100)
+      : null
+    if (gastoDeltaPct != null) {
+      sentences.push(
+        `Gastaste ${formatCOP(lastMonth.gastos)} este mes, ${gastoDeltaPct > 0 ? `${gastoDeltaPct}% más` : `${-gastoDeltaPct}% menos`} que en ${prevMonthLabel}.`
+      )
+    }
+    sentences.push(
+      lastMonth.ahorro >= 0
+        ? `Ahorraste ${formatCOP(lastMonth.ahorro)} este mes (ingresos − gastos).`
+        : `Gastaste ${formatCOP(-lastMonth.ahorro)} más de lo que ingresó este mes.`
+    )
+  }
+
+  if (categoryInsights?.topCategory) {
+    sentences.push(`Tu categoría con mayor gasto fue "${categoryInsights.topCategory.name}": ${formatCOP(categoryInsights.topCategory.amount)}.`)
+  }
+
+  if (categoryInsights?.biggestChange) {
+    const { name, pctChange } = categoryInsights.biggestChange
+    const pct = Math.round(Math.abs(pctChange) * 100)
+    sentences.push(
+      pctChange > 0
+        ? `"${name}" subió ${pct}% respecto a tu promedio de los últimos 6 meses.`
+        : `"${name}" bajó ${pct}% respecto a tu promedio de los últimos 6 meses.`
+    )
+  }
+
+  return sentences
+}
+
 export default function PanelGeneral() {
   const [year, setYear] = useState(REAL_YEAR)
   const [month, setMonth] = useState(REAL_MONTH)
@@ -73,6 +114,7 @@ export default function PanelGeneral() {
   const [trend, setTrend] = useState(null)
   const [totalDebt, setTotalDebt] = useState(0)
   const [alerts, setAlerts] = useState([])
+  const [categoryInsights, setCategoryInsights] = useState(null)
   const [yoyCurrent, setYoyCurrent] = useState(null)
   const [yoyPrevious, setYoyPrevious] = useState(null)
   const [yoyStartMonth, setYoyStartMonth] = useState(1)
@@ -116,12 +158,16 @@ export default function PanelGeneral() {
         // REAL_MONTH), sin importar qué mes esté navegando el resto del
         // Panel con el selector — "qué necesita mi atención ahora" no
         // depende de qué período estás mirando en los gráficos.
-        const [{ balances: b }, currentRates, trendRows, debt, alertRows, yoyCurrentRows, yoyPreviousRows, upcomingFixed] = await Promise.all([
+        // "Resumen del mes" (fetchCategoryInsights), en cambio, SÍ sigue el
+        // mes navegado (year/month) — es un resumen de ese período, no del
+        // día de hoy.
+        const [{ balances: b }, currentRates, trendRows, debt, alertRows, categoryInsightsResult, yoyCurrentRows, yoyPreviousRows, upcomingFixed] = await Promise.all([
           fetchBalancesForMonth(accs, year, month),
           getRates(),
           fetchMonthlyTrend(accs, trendMonths),
           fetchTotalDebt(),
           fetchAlerts(),
+          fetchCategoryInsights(year, month),
           fetchMonthlyTrend(accs, currentYearMonths),
           fetchMonthlyTrend(accs, previousYearMonths),
           listUpcomingFixedExpenses(REAL_YEAR, REAL_MONTH, FIXED_EXPENSE_DUE_SOON_DAYS),
@@ -131,6 +177,7 @@ export default function PanelGeneral() {
         setTrend(trendRows)
         setTotalDebt(debt)
         setAlerts(alertRows)
+        setCategoryInsights(categoryInsightsResult)
         setYoyCurrent(yoyCurrentRows)
         setYoyPrevious(yoyPreviousRows)
         setUpcomingFixedExpenses(upcomingFixed)
@@ -181,6 +228,7 @@ export default function PanelGeneral() {
   const lastMonth = trend[trend.length - 1] ?? { ingresos: 0, gastos: 0 }
   const prevMonth = trend[trend.length - 2]
   const gastoDelta = prevMonth ? lastMonth.gastos - prevMonth.gastos : 0
+  const monthlyInsights = buildMonthlyInsights({ lastMonth, prevMonth, categoryInsights })
 
   // fetchMonthlyTrend solo devuelve desde el ancla de saldo más antigua, así
   // que se busca por número de mes en vez de por posición.
@@ -254,6 +302,20 @@ export default function PanelGeneral() {
                     alertText(a)
                   )}
                 </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        <Card title="Resumen del mes">
+          {monthlyInsights.length === 0 ? (
+            <p style={{ font: 'var(--font-subheadline)', color: 'var(--text-muted)', margin: 0 }}>
+              Aún no hay suficiente historial para un resumen de este mes.
+            </p>
+          ) : (
+            <ul style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)', margin: 0, padding: 0, listStyle: 'none' }}>
+              {monthlyInsights.map((text, i) => (
+                <li key={i} style={{ font: 'var(--font-subheadline)' }}>{text}</li>
               ))}
             </ul>
           )}
