@@ -8,6 +8,7 @@ import Deudas from './pages/Deudas.jsx'
 import MetasAhorro from './pages/MetasAhorro.jsx'
 import Login from './pages/Login.jsx'
 import { useAuth } from './lib/AuthContext.jsx'
+import { PeriodProvider } from './lib/PeriodContext.jsx'
 
 export default function App() {
   const { user, loading, recovering } = useAuth()
@@ -25,15 +26,17 @@ export default function App() {
   if (!user || recovering) return <Login />
 
   return (
-    <AppShell>
-      <Routes>
-        <Route path="/" element={<PanelGeneral />} />
-        <Route path="/diario" element={<Diario />} />
-        <Route path="/cuentas" element={<Cuentas />} />
-        <Route path="/gastos" element={<GastosDiarios />} />
-        <Route path="/deudas" element={<Deudas />} />
-        <Route path="/metas" element={<MetasAhorro />} />
-      </Routes>
-    </AppShell>
+    <PeriodProvider>
+      <AppShell>
+        <Routes>
+          <Route path="/" element={<PanelGeneral />} />
+          <Route path="/diario" element={<Diario />} />
+          <Route path="/cuentas" element={<Cuentas />} />
+          <Route path="/gastos" element={<GastosDiarios />} />
+          <Route path="/deudas" element={<Deudas />} />
+          <Route path="/metas" element={<MetasAhorro />} />
+        </Routes>
+      </AppShell>
+    </PeriodProvider>
   )
 }

@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="es"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>Buscar Movimientos - Finanzas</title>
+<!-- Tailwind CSS CDN with forms and container-queries -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Tailwind Configuration -->
+<script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            appDark: '#0A0D14',
+            sheetBg: '#121620',
+            cardSurface: '#19202E',
+            inputBg: '#151C28',
+            brandBlue: '#2563eb',
+            brandLightBlue: '#38bdf8',
+            accentViolet: '#818cf8',
+            borderSubtle: 'rgba(255, 255, 255, 0.08)',
+            borderFocus: 'rgba(56, 189, 248, 0.4)',
+          },
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Display"', '"SF Pro Text"', 'Inter', 'system-ui', 'sans-serif'],
+          },
+          boxShadow: {
+            'glow-blue': '0 0 24px -4px rgba(37, 99, 235, 0.45)',
+            'sheet': '0 -20px 40px -10px rgba(0, 0, 0, 0.7)',
+          }
+        }
+      }
+    }
+  </script>
+<!-- Custom CSS for iOS Glassmorphism & Micro-animations -->
+<style data-purpose="custom-layout">
+    /* Hide scrollbar for clean horizontal tag scrolling */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    
+    /* Smooth backdrop blur simulation */
+    .ios-blur {
+      backdrop-filter: blur(28px) saturate(180%);
+      -webkit-backdrop-filter: blur(28px) saturate(180%);
+    }
+
+    /* iOS home bar indicator styling */
+    .home-indicator {
+      width: 134px;
+      height: 5px;
+      border-radius: 100px;
+      background-color: rgba(255, 255, 255, 0.28);
+    }
+  </style>
+</head>
+<body class="bg-appDark text-slate-100 font-sans antialiased min-h-screen flex justify-center items-center overflow-hidden selection:bg-blue-500 selection:text-white">
+<!-- BEGIN: PhoneFrameContainer -->
+<!-- iPhone 15/16 Pro Dimensions Container (Simulating high fidelity mobile device) -->
+<div class="relative w-full max-w-[430px] h-[932px] max-h-screen bg-appDark shadow-2xl flex flex-col overflow-hidden sm:rounded-[52px] sm:border-[9px] sm:border-slate-800/80">
+<!-- BEGIN: iOSStatusBar -->
+<header class="w-full pt-3 px-7 flex justify-between items-center z-30 select-none text-white text-xs font-semibold tracking-tight">
+<time class="text-sm font-medium" datetime="09:25">9:25</time>
+<div class="flex items-center space-x-2">
+<!-- Cellular Signal -->
+<svg class="w-4 h-3 fill-current" viewbox="0 0 17 12">
+<rect height="4" rx="0.5" width="2.5" x="0" y="8"></rect>
+<rect height="6.5" rx="0.5" width="2.5" x="4" y="5.5"></rect>
+<rect height="9" rx="0.5" width="2.5" x="8" y="3"></rect>
+<rect height="12" rx="0.5" width="2.5" x="12" y="0"></rect>
+</svg>
+<!-- Wifi -->
+<svg class="w-4 h-3 fill-current" viewbox="0 0 16 12">
+<path d="M8 2.8C5.2 2.8 2.6 3.9.7 5.7c-.3.3-.3.8 0 1.1l1 .9c.3.3.7.3 1 0 1.4-1.3 3.3-2 5.3-2 2 0 3.9.7 5.3 2 .3.3.7.3 1 0l1-.9c.3-.3.3-.8 0-1.1-1.9-1.8-4.5-2.9-7.3-2.9zM8 6.4c-1.8 0-3.5.7-4.8 2-.3.3-.3.8 0 1.1l1 .9c.3.3.7.3 1 0 .8-.8 1.8-1.2 2.8-1.2s2 .4 2.8 1.2c.3.3.7.3 1 0l1-.9c.3-.3.3-.8 0-1.1-1.3-1.3-3-2-4.8-2zM8 10c-.9 0-1.6.7-1.6 1.6S7.1 13.2 8 13.2 9.6 12.5 9.6 11.6 8.9 10 8 10z"></path>
+</svg>
+<!-- Battery Icon -->
+<div class="flex items-center">
+<div class="w-6 h-3 border border-white/60 rounded-[4px] p-0.5 flex items-center">
+<div class="h-full bg-white rounded-xs w-3/4"></div>
+</div>
+<div class="w-0.5 h-1.5 bg-white/60 rounded-r-xs ml-0.5"></div>
+</div>
+</div>
+</header>
+<!-- END: iOSStatusBar -->
+<!-- BEGIN: BackgroundDashboardContext -->
+<!-- Contextual view of dashboard (as seen in IMG_8595 and background of IMG_8598) -->
+<div class="absolute inset-0 px-4 pt-12 opacity-35 pointer-events-none select-none z-0 filter blur-[2px]">
+<!-- Top Actions -->
+<div class="flex justify-between items-center mb-4">
+<div class="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center text-slate-300">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</div>
+<span class="text-xs text-slate-400">Cerrar sesión</span>
+</div>
+<h1 class="text-2xl font-bold text-white mb-4 tracking-tight">Panel general</h1>
+<!-- Summary Metric Cards -->
+<div class="grid grid-cols-2 gap-3 mb-3">
+<div class="bg-cardSurface/90 border border-borderSubtle rounded-2xl p-3.5">
+<div class="text-[11px] text-slate-400 font-medium mb-1">Balance total</div>
+<div class="text-lg font-bold text-white tracking-tight">$ 8.646.552</div>
+</div>
+<div class="bg-cardSurface/90 border border-borderSubtle rounded-2xl p-3.5">
+<div class="text-[11px] text-slate-400 font-medium mb-1">Patrimonio neto</div>
+<div class="text-lg font-bold text-white tracking-tight">$ 5.646.552</div>
+</div>
+</div>
+<!-- Chart Simulation Section (Patrimonio Neto) -->
+<div class="bg-cardSurface/90 border border-borderSubtle rounded-2xl p-4 mb-4">
+<div class="text-xs font-semibold text-slate-300 mb-2">Patrimonio neto</div>
+<div class="relative h-28 w-full flex flex-col justify-between pt-1">
+<div class="flex items-center text-[10px] text-slate-500 border-b border-white/5 pb-1"><span>9.0M</span></div>
+<div class="flex items-center text-[10px] text-slate-500 border-b border-white/5 pb-1"><span>6.0M</span></div>
+<div class="flex items-center text-[10px] text-slate-500"><span>3.0M</span></div>
+<!-- Curve graph svg -->
+<svg class="absolute inset-0 w-full h-full" preserveaspectratio="none" viewbox="0 0 100 50">
+<path d="M0,45 Q50,42 75,30 T100,8" fill="none" stroke="#3b82f6" stroke-width="2.5"></path>
+<circle class="fill-sky-400 stroke-brandBlue stroke-2" cx="100" cy="8" r="3"></circle>
+</svg>
+</div>
+</div>
+<!-- Horizontal Bar Distribution Mockup -->
+<div class="bg-cardSurface/90 border border-borderSubtle rounded-2xl p-4">
+<div class="text-xs font-semibold text-slate-300 mb-3">Distribución por cuenta</div>
+<div class="space-y-2">
+<div class="flex items-center gap-2">
+<span class="w-12 text-[10px] text-slate-400 text-right">Nubank</span>
+<div class="h-4 w-32 bg-sky-500 rounded-md"></div>
+</div>
+<div class="flex items-center gap-2">
+<span class="w-12 text-[10px] text-slate-400 text-right">Rappi</span>
+<div class="h-4 w-20 bg-orange-600 rounded-md"></div>
+</div>
+</div>
+</div>
+</div>
+<!-- END: BackgroundDashboardContext -->
+<!-- Dimming Overlay -->
+<div class="absolute inset-0 bg-black/65 ios-blur z-10"></div>
+<!-- BEGIN: SearchBottomSheet -->
+<!-- Redesigned Modern, Glassy Modal Sheet -->
+<section aria-labelledby="modal-title" aria-modal="true" class="absolute bottom-0 inset-x-0 bg-sheetBg/95 border-t border-white/10 rounded-t-[36px] shadow-sheet z-20 flex flex-col pt-3 pb-6 px-6 ios-blur max-h-[88%]" data-purpose="search-bottom-sheet" role="dialog">
+<!-- Drag Handle -->
+<div class="w-full flex justify-center pb-3">
+<div class="w-11 h-1.5 rounded-full bg-slate-600/60 transition-colors"></div>
+</div>
+<!-- Header with Icon, Title, and Close Button -->
+<div class="flex items-center justify-between pt-1 pb-2">
+<div class="flex items-center gap-2.5">
+<div class="w-8 h-8 rounded-xl bg-blue-500/15 border border-blue-500/25 flex items-center justify-center text-sky-400 shadow-glow-blue/20">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewbox="0 0 24 24">
+<path d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.3"></path>
+</svg>
+</div>
+<h2 class="text-xl font-bold text-white tracking-tight" id="modal-title">Buscar movimientos</h2>
+</div>
+<!-- Styled Close Button (X) -->
+<button aria-label="Cerrar modal" class="w-8 h-8 rounded-full bg-white/[0.07] hover:bg-white/[0.14] active:scale-95 border border-white/5 flex items-center justify-center text-slate-400 hover:text-white transition-all" type="button">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewbox="0 0 24 24">
+<path d="M6 18L18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</button>
+</div>
+<!-- Informative Subtitle -->
+<p class="text-xs leading-relaxed text-slate-400 font-normal mb-5">
+        Busca en todo el histórico, no solo en el mes activo de Gastos — <span class="text-slate-300 italic font-medium">ej. "todos los Rappi de este año"</span>.
+      </p>
+<!-- Scrollable Form Body -->
+<form class="space-y-4 overflow-y-auto pr-0.5 no-scrollbar pb-2" onsubmit="event.preventDefault();">
+<!-- Main Search Input -->
+<div class="relative group">
+<label class="sr-only" for="search-description">Descripción contiene</label>
+<div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 group-focus-within:text-sky-400 transition-colors">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewbox="0 0 24 24">
+<path d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</div>
+<input class="w-full h-12 bg-inputBg border border-borderSubtle focus:border-sky-500/70 focus:ring-2 focus:ring-sky-500/20 text-sm rounded-2xl pl-11 pr-10 text-white placeholder:text-slate-500 transition-all outline-none" id="search-description" placeholder="Descripción contiene..." type="search"/>
+<button aria-label="Búsqueda por voz" class="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-sky-400 transition-colors" type="button">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewbox="0 0 24 24">
+<path d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m-4 0h8m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</button>
+</div>
+<!-- Filter 1: Categorías -->
+<div class="space-y-1.5">
+<div class="relative">
+<button class="w-full h-12 px-3.5 bg-inputBg border border-borderSubtle hover:border-white/20 active:bg-inputBg/80 rounded-2xl flex items-center justify-between text-left transition-all group" type="button">
+<div class="flex items-center gap-2.5">
+<span class="w-6 h-6 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h7" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</span>
+<span class="text-sm font-medium text-slate-200">Todas las categorías</span>
+</div>
+<div class="flex items-center gap-1.5">
+<span class="text-[11px] px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-slate-400">Todas</span>
+<svg class="w-4 h-4 text-slate-400 group-hover:text-white transition-colors" fill="none" stroke="currentColor" viewbox="0 0 24 24">
+<path d="M8 9l4 4 4-4" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</div>
+</button>
+</div>
+</div>
+<!-- Filter 2: Cuentas Bancarias con Identificadores Visuales -->
+<div class="space-y-1.5">
+<div class="relative">
+<button class="w-full h-12 px-3.5 bg-inputBg border border-borderSubtle hover:border-white/20 active:bg-inputBg/80 rounded-2xl flex items-center justify-between text-left transition-all group" type="button">
+<div class="flex items-center gap-2.5">
+<span class="w-6 h-6 rounded-lg bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</span>
+<span class="text-sm font-medium text-slate-200">Todas las cuentas</span>
+</div>
+<!-- Multi-account color dots indicator -->
+<div class="flex items-center gap-2">
+<div class="flex -space-x-1.5">
+<span class="w-3.5 h-3.5 rounded-full bg-purple-600 ring-2 ring-sheetBg" title="Nubank"></span>
+<span class="w-3.5 h-3.5 rounded-full bg-orange-500 ring-2 ring-sheetBg" title="RappiPay"></span>
+<span class="w-3.5 h-3.5 rounded-full bg-teal-500 ring-2 ring-sheetBg" title="Nequi"></span>
+<span class="w-3.5 h-3.5 rounded-full bg-blue-500 ring-2 ring-sheetBg" title="Pibank"></span>
+</div>
+<svg class="w-4 h-4 text-slate-400 group-hover:text-white transition-colors" fill="none" stroke="currentColor" viewbox="0 0 24 24">
+<path d="M8 9l4 4 4-4" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</div>
+</button>
+</div>
+</div>
+<!-- Filter 3: Tag / Etiquetas con Pills Rápidas -->
+<div class="space-y-2">
+<div class="relative group">
+<span class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400 font-mono text-base font-medium">#</span>
+<input class="w-full h-12 bg-inputBg border border-borderSubtle focus:border-sky-500/70 focus:ring-2 focus:ring-sky-500/20 text-sm rounded-2xl pl-9 pr-4 text-white placeholder:text-slate-500 transition-all outline-none" placeholder="Tag (ej. rappi, viaje, suscripción)" type="text" value=""/>
+</div>
+<!-- Chips / Pills de sugerencia rápida -->
+<div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-0.5 pb-1">
+<button class="shrink-0 px-2.5 py-1 rounded-full text-xs font-medium bg-blue-500/10 text-sky-300 border border-blue-500/25 hover:bg-blue-500/20 transition-all" type="button">
+              #rappi
+            </button>
+<button class="shrink-0 px-2.5 py-1 rounded-full text-xs font-medium bg-white/[0.04] text-slate-300 border border-white/10 hover:bg-white/[0.08] transition-all" type="button">
+              #supermercado
+            </button>
+<button class="shrink-0 px-2.5 py-1 rounded-full text-xs font-medium bg-white/[0.04] text-slate-300 border border-white/10 hover:bg-white/[0.08] transition-all" type="button">
+              #servicios
+            </button>
+<button class="shrink-0 px-2.5 py-1 rounded-full text-xs font-medium bg-white/[0.04] text-slate-300 border border-white/10 hover:bg-white/[0.08] transition-all" type="button">
+              #salud
+            </button>
+</div>
+</div>
+<!-- Filter 4: Rango de Fechas / Montos (Rediseño de los 2 campos vacíos) -->
+<div class="grid grid-cols-2 gap-2.5 pt-0.5">
+<!-- Input Desde -->
+<div class="relative">
+<label class="block text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-1 pl-1">Fecha Desde</label>
+<div class="relative">
+<input class="w-full h-11 bg-inputBg border border-borderSubtle focus:border-sky-500/70 focus:ring-1 focus:ring-sky-500/20 text-xs rounded-xl pl-3 pr-8 text-white placeholder:text-slate-500 outline-none" placeholder="dd/mm/aaaa" type="text"/>
+<div class="absolute inset-y-0 right-0 pr-2.5 flex items-center pointer-events-none text-slate-500">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</div>
+</div>
+</div>
+<!-- Input Hasta -->
+<div class="relative">
+<label class="block text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-1 pl-1">Fecha Hasta</label>
+<div class="relative">
+<input class="w-full h-11 bg-inputBg border border-borderSubtle focus:border-sky-500/70 focus:ring-1 focus:ring-sky-500/20 text-xs rounded-xl pl-3 pr-8 text-white placeholder:text-slate-500 outline-none" placeholder="Hoy" type="text"/>
+<div class="absolute inset-y-0 right-0 pr-2.5 flex items-center pointer-events-none text-slate-500">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</div>
+</div>
+</div>
+</div>
+<!-- Action Buttons -->
+<div class="pt-3 pb-1 space-y-2">
+<!-- Primary CTA with vibrant iOS Blue Gradient -->
+<button class="w-full h-13 py-3.5 px-6 rounded-2xl bg-gradient-to-r from-blue-600 via-blue-500 to-sky-500 text-white font-semibold text-base shadow-lg shadow-blue-600/30 hover:shadow-blue-600/45 active:scale-[0.985] flex items-center justify-center gap-2 transition-all" type="submit">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewbox="0 0 24 24">
+<path d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.3"></path>
+</svg>
+<span>Buscar movimientos</span>
+</button>
+<!-- Secondary Reset Action -->
+<button class="w-full py-2 text-center text-xs font-medium text-slate-400 hover:text-slate-200 transition-colors" type="button">
+            Restablecer todos los filtros
+          </button>
+</div>
+</form>
+<!-- BEGIN: BottomHomeIndicator -->
+<!-- Standard iOS Home Indicator bar at the bottom -->
+<div class="w-full flex justify-center pt-2">
+<div class="home-indicator"></div>
+</div>
+<!-- END: BottomHomeIndicator -->
+</section>
+<!-- END: SearchBottomSheet -->
+</div>
+<!-- END: PhoneFrameContainer -->
+</body></html>

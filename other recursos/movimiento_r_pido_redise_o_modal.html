@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+
+<html class="dark h-full bg-[#0a0c10]" lang="es"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>Movimiento Rápido - Finanzas</title>
+<!-- Tailwind CSS v3 with Plugins -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Google Fonts: Inter & Plus Jakarta Sans -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@500;600&amp;display=swap" rel="stylesheet"/>
+<script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          },
+          colors: {
+            surface: {
+              950: '#080a0f',
+              900: '#0e1117',
+              850: '#131720',
+              800: '#1a202c',
+              700: '#262e3d',
+            },
+            fintech: {
+              blue: '#2563eb',
+              sky: '#38bdf8',
+              emerald: '#10b981',
+              crimson: '#ef4444',
+              violet: '#8b5cf6',
+              amber: '#f59e0b',
+              nubank: '#820ad1',
+              rappi: '#ff441f',
+              nequi: '#da0081'
+            }
+          }
+        }
+      }
+    }
+  </script>
+<!-- Custom Styles for Scrollbars and Micro-glow -->
+<style data-purpose="custom-ui-effects">
+    /* Hide horizontal scrollbar for clean chip row */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    .sheet-glow {
+      box-shadow: 0 -12px 40px -10px rgba(37, 99, 235, 0.12), 0 0 0 1px rgba(255, 255, 255, 0.08);
+    }
+    .segmented-active-glow {
+      box-shadow: 0 4px 16px -2px rgba(37, 99, 235, 0.5);
+    }
+    @keyframes pulse-subtle {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .cursor-caret {
+      animation: pulse-subtle 1s infinite;
+    }
+  </style>
+</head>
+<body class="h-full bg-[#0a0c10] text-slate-100 font-sans antialiased overflow-hidden flex justify-center selection:bg-blue-600 selection:text-white">
+<!-- Mobile Frame Container (Simulating iPhone dimensions) -->
+<div class="relative w-full max-w-md h-full flex flex-col justify-end overflow-hidden bg-[#0a0c10] shadow-2xl">
+<!-- BEGIN: BackgroundDashboardMock -->
+<!-- Mimics the Panel General (IMG_8595) layered behind the modal sheet -->
+<div class="absolute inset-0 z-0 p-5 overflow-y-hidden opacity-35 filter blur-[2.5px] scale-[0.98] transition-all pointer-events-none select-none" data-purpose="dashboard-backdrop">
+<!-- iOS Status Bar Placeholder -->
+<div class="flex justify-between items-center text-xs font-semibold px-2 pt-2 pb-4 text-white">
+<span>9:05</span>
+<div class="flex items-center gap-2">
+<svg class="w-4 h-4 fill-current" viewbox="0 0 24 24"><path d="M12 3v2a7 7 0 0 1 7 7h2a9 9 0 0 0-9-9zm-7 9a7 7 0 0 1 7-7V3a9 9 0 0 0-9 9h2z"></path></svg>
+<div class="w-5 h-2.5 border border-white rounded-sm relative p-0.5"><div class="bg-white h-full w-3/4 rounded-2xs"></div></div>
+</div>
+</div>
+<!-- Top Header -->
+<div class="flex justify-between items-center mb-6">
+<div class="w-9 h-9 rounded-full bg-surface-800 flex items-center justify-center border border-white/10">
+<svg class="w-4 h-4 text-amber-300" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</div>
+<span class="text-xs text-neutral-400 font-medium">Cerrar sesión</span>
+</div>
+<h1 class="text-3xl font-extrabold text-white tracking-tight mb-5">Panel general</h1>
+<!-- Stats Grid -->
+<div class="grid grid-cols-2 gap-3 mb-4">
+<div class="bg-surface-850 p-4 rounded-2xl border border-white/5">
+<div class="text-xs text-neutral-400 mb-1">Balance total</div>
+<div class="text-lg font-bold text-white tracking-tight">$ 8.646.552</div>
+</div>
+<div class="bg-surface-850 p-4 rounded-2xl border border-white/5">
+<div class="text-xs text-neutral-400 mb-1">Patrimonio neto</div>
+<div class="text-lg font-bold text-white tracking-tight">$ 5.646.552</div>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-3 mb-4">
+<div class="bg-surface-850 p-4 rounded-2xl border border-white/5">
+<div class="text-xs text-neutral-400 mb-1">Ingresos del mes</div>
+<div class="text-lg font-bold text-white tracking-tight">$ 300.000</div>
+</div>
+<div class="bg-surface-850 p-4 rounded-2xl border border-white/5">
+<div class="text-xs text-neutral-400 mb-1">Gastos del mes</div>
+<div class="text-lg font-bold text-white tracking-tight">$ 613.530</div>
+<div class="text-[10px] text-rose-500 mt-1 font-semibold">+$ 613.530 vs mes anterior</div>
+</div>
+</div>
+<!-- Account Distribution Card -->
+<div class="bg-surface-850 p-4 rounded-2xl border border-white/5 h-44">
+<div class="text-sm font-semibold text-white mb-2">Distribución por cuenta</div>
+</div>
+</div>
+<!-- END: BackgroundDashboardMock -->
+<!-- Backdrop Overlay with Glassmorphism -->
+<div class="absolute inset-0 bg-[#08090d]/75 backdrop-blur-sm z-10"></div>
+<!-- BEGIN: QuickTransactionBottomSheet -->
+<section class="relative z-20 w-full bg-surface-900 border-t border-x border-white/10 rounded-t-[32px] pt-3 pb-8 px-5 flex flex-col sheet-glow max-h-[92vh] overflow-y-auto no-scrollbar" data-purpose="quick-transaction-modal">
+<!-- Top Drag Handle -->
+<div class="w-12 h-1.5 bg-slate-600/50 hover:bg-slate-500 rounded-full mx-auto mb-4 cursor-grab active:cursor-grabbing transition-colors"></div>
+<!-- Header: Title & Close Button -->
+<div class="flex items-center justify-between mb-5">
+<div>
+<div class="flex items-center gap-2">
+<span class="inline-block w-2 h-2 rounded-full bg-blue-500 ring-4 ring-blue-500/20"></span>
+<h2 class="text-xl font-bold tracking-tight text-white">Movimiento rápido</h2>
+</div>
+<p class="text-xs text-slate-400 mt-0.5 ml-4">Registra tus transacciones al instante</p>
+</div>
+<button aria-label="Cerrar modal" class="w-9 h-9 rounded-full bg-surface-800/80 hover:bg-surface-700 active:scale-95 text-slate-400 hover:text-white flex items-center justify-center transition-all border border-white/5" type="button">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</button>
+</div>
+<!-- Transaction Type Segmented Control -->
+<div class="grid grid-cols-3 p-1.5 bg-surface-950/80 border border-white/5 rounded-2xl mb-5 shadow-inner" data-purpose="type-segmented-control">
+<!-- Tab: Gasto (Active State) -->
+<button class="relative py-2.5 px-3 rounded-xl text-xs font-bold tracking-wide transition-all duration-200 flex items-center justify-center gap-1.5 bg-blue-600 text-white segmented-active-glow" type="button">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M19 14l-7 7m0 0l-7-7m7 7V3" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"></path></svg>
+<span>Gasto</span>
+</button>
+<!-- Tab: Ingreso -->
+<button class="relative py-2.5 px-3 rounded-xl text-xs font-semibold text-slate-400 hover:text-emerald-400 transition-all flex items-center justify-center gap-1.5 hover:bg-white/5" type="button">
+<svg class="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M5 10l7-7m0 0l7 7m-7-7v18" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"></path></svg>
+<span>Ingreso</span>
+</button>
+<!-- Tab: Traslado -->
+<button class="relative py-2.5 px-3 rounded-xl text-xs font-semibold text-slate-400 hover:text-purple-400 transition-all flex items-center justify-center gap-1.5 hover:bg-white/5" type="button">
+<svg class="w-3.5 h-3.5 text-purple-400" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"></path></svg>
+<span>Traslado</span>
+</button>
+</div>
+<!-- Hero Fintech Amount Input Area -->
+<div class="bg-gradient-to-b from-surface-850 to-surface-850/70 border border-white/10 rounded-2xl p-4 mb-4 relative overflow-hidden group focus-within:border-blue-500/60 focus-within:ring-2 focus-within:ring-blue-500/20 transition-all" data-purpose="amount-input-card">
+<div class="flex items-center justify-between mb-2">
+<span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Monto total</span>
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
+<span>COP</span>
+<svg class="w-3 h-3 text-blue-400" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M19 9l-7 7-7-7" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</span>
+</div>
+<div class="flex items-baseline gap-1">
+<span class="text-3xl font-bold text-slate-500 font-sans tracking-tight">$</span>
+<div class="flex items-baseline w-full">
+<input class="w-full bg-transparent border-0 p-0 text-3xl font-extrabold text-white tracking-tight focus:ring-0 focus:outline-none placeholder:text-slate-600 font-sans" inputmode="decimal" placeholder="0" type="text" value="45.000"/>
+<span class="w-0.5 h-7 bg-blue-500 cursor-caret inline-block ml-1 rounded-full"></span>
+</div>
+</div>
+</div>
+<!-- Description Input Field -->
+<div class="mb-4" data-purpose="description-field">
+<label class="block text-xs font-semibold text-slate-400 mb-1.5 ml-1" for="desc-input">Descripción</label>
+<div class="relative flex items-center">
+<div class="absolute left-3.5 pointer-events-none text-slate-400">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</div>
+<input class="w-full bg-surface-950/70 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-sm font-medium text-slate-100 placeholder:text-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all outline-none" id="desc-input" placeholder="Ej. Almuerzo de trabajo, Mercado D1..." type="text" value="Almuerzo restaurante"/>
+</div>
+</div>
+<!-- Account Selector (Nubank, Rappi, Nequi, etc.) -->
+<div class="mb-4" data-purpose="account-selector">
+<div class="flex items-center justify-between mb-1.5 ml-1">
+<label class="text-xs font-semibold text-slate-400">Cuenta de origen</label>
+<span class="text-[11px] font-medium text-blue-400">Ver todas</span>
+</div>
+<!-- Horizontal Account Chips -->
+<div class="flex gap-2 overflow-x-auto no-scrollbar pb-1 pt-0.5">
+<!-- Nubank (Active selected) -->
+<button class="flex-shrink-0 flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-surface-800 border-2 border-purple-500/80 shadow-md shadow-purple-950/30 text-left" type="button">
+<div class="w-6 h-6 rounded-full bg-[#820ad1] flex items-center justify-center text-white text-[11px] font-black tracking-tighter">Nu</div>
+<div>
+<div class="text-xs font-bold text-white flex items-center gap-1">
+                Nubank
+                <svg class="w-3 h-3 text-purple-400" fill="currentColor" viewbox="0 0 20 20"><path clip-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" fill-rule="evenodd"></path></svg>
+</div>
+<div class="text-[10px] text-slate-400">$ 4.250.000</div>
+</div>
+</button>
+<!-- Rappi -->
+<button class="flex-shrink-0 flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-surface-950/60 hover:bg-surface-850 border border-white/10 text-left transition-colors" type="button">
+<div class="w-6 h-6 rounded-full bg-[#ff441f] flex items-center justify-center text-white text-[11px] font-black italic">R</div>
+<div>
+<div class="text-xs font-medium text-slate-200">RappiPay</div>
+<div class="text-[10px] text-slate-400">$ 892.400</div>
+</div>
+</button>
+<!-- Nequi -->
+<button class="flex-shrink-0 flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-surface-950/60 hover:bg-surface-850 border border-white/10 text-left transition-colors" type="button">
+<div class="w-6 h-6 rounded-full bg-[#da0081] flex items-center justify-center text-white text-[11px] font-black">N</div>
+<div>
+<div class="text-xs font-medium text-slate-200">Nequi</div>
+<div class="text-[10px] text-slate-400">$ 340.500</div>
+</div>
+</button>
+<!-- Efectivo -->
+<button class="flex-shrink-0 flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-surface-950/60 hover:bg-surface-850 border border-white/10 text-left transition-colors" type="button">
+<div class="w-6 h-6 rounded-full bg-emerald-600 flex items-center justify-center text-white text-xs font-bold">$</div>
+<div>
+<div class="text-xs font-medium text-slate-200">Efectivo</div>
+<div class="text-[10px] text-slate-400">$ 120.000</div>
+</div>
+</button>
+</div>
+</div>
+<!-- Modern Categories Selector (Reinvented grid / pills) -->
+<div class="mb-5" data-purpose="category-section">
+<label class="block text-xs font-semibold text-slate-400 mb-2 ml-1">Categoría</label>
+<div class="grid grid-cols-5 gap-2">
+<!-- Item 1: Alimentación / Compras (Active) -->
+<button class="flex flex-col items-center gap-1.5 p-2 rounded-2xl bg-orange-500/15 border border-orange-500/40 text-orange-400 transition-transform active:scale-95" type="button">
+<div class="w-10 h-10 rounded-xl bg-orange-500/20 flex items-center justify-center text-orange-400 shadow-sm">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</div>
+<span class="text-[10px] font-bold tracking-tight text-white truncate max-w-full">Compras</span>
+</button>
+<!-- Item 2: Cuidado Personal -->
+<button class="flex flex-col items-center gap-1.5 p-2 rounded-2xl bg-surface-950/70 hover:bg-surface-800 border border-white/5 text-slate-400 hover:text-slate-200 transition-all active:scale-95" type="button">
+<div class="w-10 h-10 rounded-xl bg-pink-500/10 flex items-center justify-center text-pink-400">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</div>
+<span class="text-[10px] font-medium truncate max-w-full">Cuidado</span>
+</button>
+<!-- Item 3: Tarjeta / Servicios -->
+<button class="flex flex-col items-center gap-1.5 p-2 rounded-2xl bg-surface-950/70 hover:bg-surface-800 border border-white/5 text-slate-400 hover:text-slate-200 transition-all active:scale-95" type="button">
+<div class="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-400">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</div>
+<span class="text-[10px] font-medium truncate max-w-full">Tarjeta</span>
+</button>
+<!-- Item 4: Transporte -->
+<button class="flex flex-col items-center gap-1.5 p-2 rounded-2xl bg-surface-950/70 hover:bg-surface-800 border border-white/5 text-slate-400 hover:text-slate-200 transition-all active:scale-95" type="button">
+<div class="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-400">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M8 7h8m-8 5h8m-4 5v-2m-7 3h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</div>
+<span class="text-[10px] font-medium truncate max-w-full">Transp.</span>
+</button>
+<!-- Item 5: Hogar / Otros -->
+<button class="flex flex-col items-center gap-1.5 p-2 rounded-2xl bg-surface-950/70 hover:bg-surface-800 border border-white/5 text-slate-400 hover:text-slate-200 transition-all active:scale-95" type="button">
+<div class="w-10 h-10 rounded-xl bg-slate-700/40 flex items-center justify-center text-slate-300">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M12 6v6m0 0v6m0-6h6m-6 0H6" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</div>
+<span class="text-[10px] font-medium truncate max-w-full">Más</span>
+</button>
+</div>
+</div>
+<!-- Additional Quick Meta-data (Date & Tags) -->
+<div class="flex items-center gap-2 mb-6" data-purpose="quick-metadata-bar">
+<!-- Tag trigger button -->
+<button class="flex items-center justify-center w-11 h-11 rounded-xl bg-surface-950/80 border border-white/10 hover:border-white/20 text-slate-400 hover:text-white transition-colors" title="Agregar etiqueta" type="button">
+<span class="font-bold text-base font-mono">#</span>
+</button>
+<!-- Date Picker Pill Button -->
+<button class="flex-1 flex items-center justify-between px-3.5 h-11 rounded-xl bg-surface-950/80 border border-white/10 hover:border-white/20 text-slate-300 text-xs font-medium transition-colors" type="button">
+<div class="flex items-center gap-2">
+<svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+<span>Hoy, 17 sept</span>
+</div>
+<span class="text-[11px] text-slate-500 font-mono">2026</span>
+</button>
+<!-- Notes micro-badge -->
+<button class="flex items-center gap-1 px-3 h-11 rounded-xl bg-surface-950/80 border border-white/10 hover:border-white/20 text-slate-400 hover:text-white text-xs font-medium transition-colors" type="button">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+<span class="hidden sm:inline">Adjuntar</span>
+</button>
+</div>
+<!-- Action Footer: Save Button -->
+<div class="w-full" data-purpose="primary-action-area">
+<button class="w-full py-3.5 px-6 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-sm tracking-wide shadow-lg shadow-blue-600/30 active:scale-[0.99] transition-all flex items-center justify-center gap-2" type="button">
+<span>Guardar movimiento</span>
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M5 13l4 4L19 7" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"></path></svg>
+</button>
+</div>
+<!-- iOS Home Indicator bar -->
+<div class="w-32 h-1 bg-white/20 rounded-full mx-auto mt-4"></div>
+</section>
+<!-- END: QuickTransactionBottomSheet -->
+</div>
+</body></html>

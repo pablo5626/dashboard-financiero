@@ -14,17 +14,15 @@ import {
 import { getRates } from '../lib/exchangeRatesApi.js'
 import { getAccountFlowsForMonth } from '../lib/transactionsApi.js'
 import { flattenAccountPockets } from '../lib/currencyPockets.js'
+import { usePeriod } from '../lib/PeriodContext.jsx'
 import styles from './Cuentas.module.css'
-
-const now = new Date()
-const YEAR = now.getFullYear()
-const MONTH = now.getMonth() + 1
 
 const CURRENCY_OPTIONS = CURRENCIES.map((c) => ({ value: c, label: c }))
 
 const emptyEdit = { name: '', currency: 'COP', isMulti: false, extras: [], newExtraCurrency: '', newExtraTag: '' }
 
 export default function Cuentas() {
+  const { selectedYear: year, selectedMonth: month } = usePeriod()
   const [accounts, setAccounts] = useState(null)
   const [balances, setBalances] = useState({})
   const [allocated, setAllocated] = useState({})
@@ -43,9 +41,9 @@ export default function Cuentas() {
       const rows = await listAccounts()
       setAccounts(rows)
       const [{ balances: b, allocated: a, transferredOut: out }, currentRates, flows] = await Promise.all([
-        fetchBalancesForMonth(rows, YEAR, MONTH),
+        fetchBalancesForMonth(rows, year, month),
         getRates(),
-        getAccountFlowsForMonth(rows, YEAR, MONTH),
+        getAccountFlowsForMonth(rows, year, month),
       ])
       setBalances(b)
       setAllocated(a)
@@ -364,13 +362,13 @@ export default function Cuentas() {
           )
         })}
 
-        <MonthlyAllocationSection hijas={hijasCop} madre={madre} year={YEAR} month={MONTH} onSaved={reload} />
+        <MonthlyAllocationSection hijas={hijasCop} madre={madre} year={year} month={month} onSaved={reload} />
 
         <FixedExpensesSection accounts={accounts ?? []} />
 
-        <TransferHistorySection accounts={accounts} year={YEAR} month={MONTH} onSaved={reload} />
+        <TransferHistorySection accounts={accounts} year={year} month={month} onSaved={reload} />
 
-        <MonthlyInitialBalancesSection accounts={accounts} year={YEAR} month={MONTH} balances={balances} onSaved={reload} />
+        <MonthlyInitialBalancesSection accounts={accounts} year={year} month={month} balances={balances} onSaved={reload} />
       </div>
 
       <ConfirmDialog

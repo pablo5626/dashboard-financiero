@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+
+<html class="h-full bg-black" lang="es"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>Editar Categoría - Finanzas Personales</title>
+<!-- Tailwind CSS v3 with Forms & Container Plugins -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Google Fonts for iOS SF Pro style -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+          },
+          colors: {
+            ios: {
+              bg: '#000000',
+              card: '#161618',
+              surface: '#202024',
+              surfaceLight: '#2c2c30',
+              accent: '#0A84FF',
+              textPrimary: '#FFFFFF',
+              textSecondary: '#8E8E93',
+              textMuted: '#636366',
+              border: '#2c2c2e'
+            }
+          }
+        }
+      }
+    }
+  </script>
+<style data-purpose="custom-enhancements">
+    /* Custom styles for iOS bottom sheet smoothness & custom scrollbars */
+    body {
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    .sheet-scroll::-webkit-scrollbar {
+      display: none;
+    }
+    .sheet-scroll {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    .active-glow {
+      box-shadow: 0 0 16px -2px rgba(139, 92, 246, 0.5);
+    }
+  </style>
+</head>
+<body class="h-full font-sans text-white bg-black flex justify-center items-center overflow-x-hidden">
+<!-- BEGIN: MobileDeviceFrame -->
+<!-- Constrained container to mimic native iOS screen layout -->
+<div class="relative w-full max-w-md h-[100dvh] bg-black overflow-hidden flex flex-col justify-end shadow-2xl border-x border-neutral-900">
+<!-- BEGIN: BackgroundAppView -->
+<!-- Dimmed & blurred backdrop showing background category list -->
+<div class="absolute inset-0 z-0 bg-neutral-950 flex flex-col opacity-35 filter blur-[2px] pointer-events-none select-none">
+<!-- Simulated iOS Top Bar & App Header -->
+<div class="pt-12 px-5 pb-3 flex items-center justify-between border-b border-neutral-800/40">
+<div class="flex items-center gap-2">
+<span class="text-2xl font-bold tracking-tight text-neutral-300">Diario</span>
+</div>
+<div class="flex bg-neutral-800/80 p-0.5 rounded-xl text-xs font-semibold">
+<span class="bg-blue-600 text-white px-3 py-1 rounded-lg">Hoy</span>
+<span class="text-neutral-400 px-3 py-1">Semana</span>
+<span class="text-neutral-400 px-3 py-1">Mes</span>
+</div>
+</div>
+<!-- Dimmed Category List Items -->
+<div class="p-4 space-y-3 font-medium">
+<div class="text-xs font-semibold text-neutral-500 uppercase tracking-wider px-2">Total de hoy</div>
+<div class="flex items-center justify-between p-3 rounded-xl bg-neutral-900/60 border border-neutral-800">
+<div class="flex items-center gap-3">
+<span class="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center text-xs">M</span>
+<span class="text-neutral-200">Mekato</span>
+</div>
+<span class="text-rose-500 text-xs">Archivar</span>
+</div>
+<div class="flex items-center justify-between p-3 rounded-xl bg-neutral-900/60 border border-neutral-800">
+<div class="flex items-center gap-3">
+<span class="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center text-xs">M</span>
+<span class="text-neutral-200">Mercado</span>
+</div>
+<span class="text-rose-500 text-xs">Archivar</span>
+</div>
+<div class="flex items-center justify-between p-3 rounded-xl bg-neutral-900/60 border border-neutral-800">
+<div class="flex items-center gap-3">
+<span class="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center text-xs">P</span>
+<span class="text-neutral-200">Préstamo</span>
+</div>
+<span class="text-rose-500 text-xs">Archivar</span>
+</div>
+<div class="flex items-center justify-between p-3 rounded-xl bg-neutral-900/60 border border-neutral-800">
+<div class="flex items-center gap-3">
+<span class="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center text-xs">R</span>
+<span class="text-neutral-200">Regalo - festividades</span>
+</div>
+<span class="text-rose-500 text-xs">Archivar</span>
+</div>
+</div>
+</div>
+<!-- END: BackgroundAppView -->
+<!-- Modal Backdrop Tint Overlay -->
+<div class="absolute inset-0 z-10 bg-black/60 backdrop-blur-[3px]"></div>
+<!-- BEGIN: BottomSheetModal -->
+<!-- Upgraded iOS Modern Bottom Sheet Container -->
+<section class="relative z-20 w-full max-h-[92dvh] bg-[#161618] border-t border-neutral-700/60 rounded-t-[2.25rem] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom duration-300" data-purpose="category-editor-modal">
+<!-- iOS Drag Indicator / Pull Grabber -->
+<div class="pt-3 pb-1 flex justify-center items-center cursor-grab active:cursor-grabbing">
+<div class="w-10 h-1 rounded-full bg-neutral-600/80"></div>
+</div>
+<!-- BEGIN: ModalHeader -->
+<header class="px-6 py-3 flex items-center justify-between border-b border-neutral-800/80">
+<div>
+<div class="flex items-center gap-2">
+<h1 class="text-lg font-bold text-white tracking-tight">Editar Categoría</h1>
+<span class="px-2 py-0.5 text-[10px] font-semibold tracking-wide uppercase rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              Activa
+            </span>
+</div>
+<p class="text-xs text-neutral-400">Personaliza la apariencia y el presupuesto</p>
+</div>
+<!-- Close Button -->
+<button aria-label="Cerrar modal" class="w-8 h-8 rounded-full bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white flex items-center justify-center transition" type="button">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewbox="0 0 24 24">
+<path d="M6 18L18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</button>
+</header>
+<!-- END: ModalHeader -->
+<!-- BEGIN: ScrollableContent -->
+<div class="sheet-scroll overflow-y-auto px-6 py-5 space-y-6">
+<!-- Visual Identity Preview & Category Name -->
+<div class="flex items-center gap-4 p-4 rounded-2xl bg-[#202024]/90 border border-neutral-800 shadow-inner">
+<!-- Dynamic Live Avatar Indicator -->
+<div class="relative shrink-0">
+<div class="w-16 h-16 rounded-2xl bg-gradient-to-tr from-purple-700 to-indigo-500 flex items-center justify-center text-3xl shadow-lg active-glow ring-2 ring-purple-400/40 transition-transform active:scale-95" id="category-avatar-preview">
+              🎮
+            </div>
+<button class="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-neutral-900 border border-neutral-700 text-neutral-300 flex items-center justify-center text-xs shadow hover:scale-110 transition" type="button">
+              ✏️
+            </button>
+</div>
+<!-- Category Name Input -->
+<div class="flex-1 min-w-0">
+<label class="block text-[11px] font-semibold tracking-wider uppercase text-neutral-400 mb-1" for="category-name">
+              Nombre de la categoría
+            </label>
+<input class="w-full bg-[#161618] text-white font-semibold text-base px-3.5 py-2.5 rounded-xl border border-neutral-700/80 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition placeholder-neutral-500" id="category-name" placeholder="Ej. Ocio, Cine, Restaurantes" type="text" value="Ocio"/>
+</div>
+</div>
+<!-- Icon & Emoji Picker Section -->
+<div>
+<div class="flex items-center justify-between mb-2.5">
+<label class="text-xs font-semibold tracking-wider uppercase text-neutral-400">
+              Icono / Emoji
+            </label>
+<span class="text-xs text-blue-400 hover:text-blue-300 cursor-pointer font-medium">Ver biblioteca</span>
+</div>
+<!-- Quick Emoji Chips Row -->
+<div class="flex items-center gap-2 overflow-x-auto pb-1 sheet-scroll">
+<button class="px-3 py-2 rounded-xl bg-purple-600/20 border border-purple-500/50 text-white font-medium text-sm flex items-center gap-1.5 shrink-0" type="button">
+<span>🎮</span>
+<span class="text-xs font-semibold">Gamepad</span>
+</button>
+<button class="px-3 py-2 rounded-xl bg-[#202024] hover:bg-[#2c2c30] border border-neutral-800 text-neutral-300 text-sm flex items-center gap-1.5 shrink-0 transition" type="button">
+<span>🍿</span>
+<span class="text-xs">Cine</span>
+</button>
+<button class="px-3 py-2 rounded-xl bg-[#202024] hover:bg-[#2c2c30] border border-neutral-800 text-neutral-300 text-sm flex items-center gap-1.5 shrink-0 transition" type="button">
+<span>🎉</span>
+<span class="text-xs">Fiesta</span>
+</button>
+<button class="px-3 py-2 rounded-xl bg-[#202024] hover:bg-[#2c2c30] border border-neutral-800 text-neutral-300 text-sm flex items-center gap-1.5 shrink-0 transition" type="button">
+<span>☕</span>
+<span class="text-xs">Café</span>
+</button>
+<button class="px-3 py-2 rounded-xl bg-[#202024] hover:bg-[#2c2c30] border border-neutral-800 text-neutral-300 text-sm flex items-center gap-1.5 shrink-0 transition" type="button">
+<span>🎲</span>
+</button>
+</div>
+</div>
+<!-- Color Palette Picker Section -->
+<div>
+<div class="flex items-center justify-between mb-3">
+<label class="text-xs font-semibold tracking-wider uppercase text-neutral-400">
+              Color Distintivo
+            </label>
+<span class="text-xs font-medium text-neutral-400">Púrpura Neón</span>
+</div>
+<!-- Color Grid -->
+<div class="grid grid-cols-7 gap-2.5 p-3 rounded-2xl bg-[#202024]/70 border border-neutral-800/80">
+<!-- Row 1 -->
+<button aria-label="Color Azul" class="w-8 h-8 rounded-full bg-blue-500 hover:scale-110 transition" type="button"></button>
+<button aria-label="Color Naranja" class="w-8 h-8 rounded-full bg-amber-600 hover:scale-110 transition" type="button"></button>
+<button aria-label="Color Verde Esmeralda" class="w-8 h-8 rounded-full bg-emerald-500 hover:scale-110 transition" type="button"></button>
+<button aria-label="Color Amarillo Oro" class="w-8 h-8 rounded-full bg-amber-400 hover:scale-110 transition" type="button"></button>
+<button aria-label="Color Fucsia" class="w-8 h-8 rounded-full bg-pink-500 hover:scale-110 transition" type="button"></button>
+<button aria-label="Color Verde Vivo" class="w-8 h-8 rounded-full bg-green-500 hover:scale-110 transition" type="button"></button>
+<!-- Selected Color (Purple) -->
+<button aria-label="Color Púrpura seleccionado" class="relative w-8 h-8 rounded-full bg-purple-600 ring-2 ring-white ring-offset-2 ring-offset-neutral-900 scale-105 shadow-md flex items-center justify-center" type="button">
+<svg class="w-3.5 h-3.5 text-white" fill="currentColor" viewbox="0 0 20 20">
+<path clip-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" fill-rule="evenodd"></path>
+</svg>
+</button>
+<!-- Row 2 -->
+<button aria-label="Color Salmón" class="w-8 h-8 rounded-full bg-rose-400 hover:scale-110 transition" type="button"></button>
+<button aria-label="Color Azul Pastel" class="w-8 h-8 rounded-full bg-sky-400 hover:scale-110 transition" type="button"></button>
+<button aria-label="Color Terracota Pastel" class="w-8 h-8 rounded-full bg-orange-300 hover:scale-110 transition" type="button"></button>
+<button aria-label="Color Menta" class="w-8 h-8 rounded-full bg-teal-400 hover:scale-110 transition" type="button"></button>
+<button aria-label="Color Crema" class="w-8 h-8 rounded-full bg-amber-200 hover:scale-110 transition" type="button"></button>
+<button aria-label="Color Rosa Suave" class="w-8 h-8 rounded-full bg-pink-300 hover:scale-110 transition" type="button"></button>
+<button aria-label="Color Menta Claro" class="w-8 h-8 rounded-full bg-emerald-300 hover:scale-110 transition" type="button"></button>
+</div>
+</div>
+<!-- Monthly Budget Configuration Section -->
+<div class="space-y-3">
+<div class="flex items-center justify-between">
+<label class="text-xs font-semibold tracking-wider uppercase text-neutral-400" for="monthly-budget">
+              Presupuesto mensual (Opcional)
+            </label>
+<span class="text-[11px] font-medium text-neutral-500">En pesos (COP)</span>
+</div>
+<!-- Currency Input Field -->
+<div class="relative">
+<div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+<span class="text-neutral-400 text-base font-semibold">$</span>
+</div>
+<input class="w-full bg-[#202024] text-white font-bold text-lg pl-8 pr-16 py-3 rounded-xl border border-neutral-700/80 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition" id="monthly-budget" inputmode="numeric" placeholder="0" type="text" value="350.000"/>
+<div class="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none">
+<span class="text-xs font-semibold text-neutral-400 bg-neutral-800 px-2 py-1 rounded-md">COP</span>
+</div>
+</div>
+<!-- Quick Budget Presets -->
+<div class="flex items-center gap-2 pt-0.5">
+<button class="text-xs font-medium bg-neutral-800/80 hover:bg-neutral-700 text-neutral-300 px-2.5 py-1.5 rounded-lg border border-neutral-700/60 transition" type="button">
+              +$50.000
+            </button>
+<button class="text-xs font-medium bg-neutral-800/80 hover:bg-neutral-700 text-neutral-300 px-2.5 py-1.5 rounded-lg border border-neutral-700/60 transition" type="button">
+              +$100.000
+            </button>
+<button class="text-xs font-medium bg-neutral-800/80 hover:bg-neutral-700 text-neutral-300 px-2.5 py-1.5 rounded-lg border border-neutral-700/60 transition" type="button">
+              +$200.000
+            </button>
+<button class="text-xs font-medium text-rose-400/80 hover:text-rose-300 px-2 py-1 ml-auto" type="button">
+              Limpiar
+            </button>
+</div>
+<!-- Modern Explanatory Info Card -->
+<div class="flex items-start gap-2.5 p-3 rounded-xl bg-blue-950/20 border border-blue-800/30 text-blue-200/90 text-xs leading-relaxed">
+<svg class="w-4 h-4 text-blue-400 shrink-0 mt-0.5" fill="currentColor" viewbox="0 0 20 20">
+<path clip-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" fill-rule="evenodd"></path>
+</svg>
+<p>
+              Se compara contra el gasto real mensual en <strong class="text-blue-300">"Presupuesto por categoría"</strong> y chips de Diario. Recibirás una alerta en el Panel si superas este valor.
+            </p>
+</div>
+</div>
+<!-- Ambiguous Category iOS Switch Row -->
+<div class="p-3.5 rounded-2xl bg-[#202024] border border-neutral-800 flex items-center justify-between">
+<div class="pr-4">
+<div class="flex items-center gap-1.5">
+<span class="text-sm font-semibold text-white">Categoría ambigua</span>
+<span class="text-[10px] bg-neutral-700/60 text-neutral-300 px-1.5 py-0.5 rounded font-medium">Auto-tags</span>
+</div>
+<p class="text-xs text-neutral-400 mt-0.5">
+              Marcar si incluye gastos imprevistos o compras misceláneas difíciles de clasificar.
+            </p>
+</div>
+<!-- iOS Toggle Switch -->
+<label class="relative inline-flex items-center cursor-pointer shrink-0">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-12 h-7 bg-neutral-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[3px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-blue-600 shadow-inner"></div>
+</label>
+</div>
+</div>
+<!-- END: ScrollableContent -->
+<!-- BEGIN: ActionButtonsFooter -->
+<footer class="p-5 pb-8 bg-[#161618] border-t border-neutral-800/80 flex flex-col gap-2.5">
+<!-- Primary Action: Save -->
+<button class="w-full py-3.5 px-4 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 active:scale-[0.98] text-white font-bold text-base rounded-xl shadow-lg shadow-blue-600/25 transition duration-150 flex items-center justify-center gap-2" type="button">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5" viewbox="0 0 24 24">
+<path d="M5 13l4 4L19 7" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+          Guardar Cambios
+        </button>
+<!-- Secondary Action: Cancel -->
+<button class="w-full py-3 px-4 bg-transparent hover:bg-neutral-800/70 active:scale-[0.98] text-neutral-400 hover:text-white font-semibold text-sm rounded-xl transition duration-150" type="button">
+          Cancelar y Descartar
+        </button>
+</footer>
+<!-- END: ActionButtonsFooter -->
+</section>
+<!-- END: BottomSheetModal -->
+<!-- iOS Home Indicator -->
+<div class="absolute bottom-1.5 left-1/2 -translate-x-1/2 w-32 h-1 bg-white/40 rounded-full z-30 pointer-events-none"></div>
+</div>
+<!-- END: MobileDeviceFrame -->
+</body></html>

@@ -14,6 +14,7 @@ import { listAccounts, fetchBalancesForMonth, totalBalanceInCOP } from '../lib/a
 import { lastNMonths, fetchMonthlyTrend, fetchTotalDebt, fetchAlerts, fetchCategoryInsights, findFirstDataMonth } from '../lib/panelApi.js'
 import { listUpcomingFixedExpenses, setPaidStatus } from '../lib/fixedExpensesApi.js'
 import { getRates, toCOP } from '../lib/exchangeRatesApi.js'
+import { usePeriod } from '../lib/PeriodContext.jsx'
 
 const STATUS_DOT = {
   good: 'var(--status-good)',
@@ -110,8 +111,7 @@ function buildMonthlyInsights({ lastMonth, prevMonth, categoryInsights }) {
 }
 
 export default function PanelGeneral() {
-  const [year, setYear] = useState(REAL_YEAR)
-  const [month, setMonth] = useState(REAL_MONTH)
+  const { selectedYear: year, selectedMonth: month, setPeriod } = usePeriod()
   const [accounts, setAccounts] = useState(null)
   const [balances, setBalances] = useState({})
   const [rates, setRates] = useState([])
@@ -272,7 +272,7 @@ export default function PanelGeneral() {
           terminar tocando el kpi-row de abajo. */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-1)', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-3)' }}>
         <h1 className="page-title" style={{ margin: 0 }}>Panel general</h1>
-        <MonthYearPicker year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m) }} />
+        <MonthYearPicker year={year} month={month} onChange={(y, m) => { setPeriod(y, m) }} />
       </div>
 
       <OnboardingCard />

@@ -4,12 +4,12 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from 
 import { estimateCategoryAxisWidth } from '../lib/chartUtils.js'
 import Card from '../components/ui/Card.jsx'
 import ConfirmDialog from '../components/ui/ConfirmDialog.jsx'
-import MonthYearPicker, { MONTH_NAMES } from '../components/ui/MonthYearPicker.jsx'
 import CategoryEmojiGrid, { seriesForName } from '../components/CategoryEmojiGrid.jsx'
 import AccountAutocomplete from '../components/AccountAutocomplete.jsx'
 import AutoCaptureQueue from '../components/AutoCaptureQueue.jsx'
 import { IconFilter } from '../components/icons.jsx'
 import { formatCOP, formatByCurrency } from '../lib/format.js'
+import { MONTH_NAMES } from '../components/ui/MonthYearPicker.jsx'
 import { listAccounts } from '../lib/accountsApi.js'
 import { getRates, toCOP } from '../lib/exchangeRatesApi.js'
 import { listCategories } from '../lib/categoriesApi.js'
@@ -21,6 +21,7 @@ import {
   deleteTransaction, isIgnoredRow, updateTransaction,
   listPendingCurrencyTransactions, confirmCurrencyAmount,
 } from '../lib/transactionsApi.js'
+import { usePeriod } from '../lib/PeriodContext.jsx'
 import styles from './GastosDiarios.module.css'
 
 const now = new Date()
@@ -62,8 +63,7 @@ function formatDateHeader(dateStr) {
 
 export default function GastosDiarios() {
   const [searchParams] = useSearchParams()
-  const [year, setYear] = useState(now.getFullYear())
-  const [month, setMonth] = useState(now.getMonth() + 1)
+  const { selectedYear: year, selectedMonth: month } = usePeriod()
 
   // Filtro de la tabla "Movimientos — mes", client-side (monthTransactions
   // ya trae todo con joins) para no duplicar una consulta a Supabase — el
@@ -819,7 +819,9 @@ export default function GastosDiarios() {
           </p>
 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 'var(--space-2)' }}>
-            <MonthYearPicker year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m) }} />
+            <span style={{ font: 'var(--font-subheadline)', color: 'var(--text-secondary)', alignSelf: 'center' }}>
+              Importando para {MONTH_NAMES[month - 1]} {year}
+            </span>
             <label style={{
               minHeight: 'var(--touch-target)', display: 'inline-flex', alignItems: 'center', padding: '0 var(--space-2)',
               borderRadius: 10, background: 'var(--series-1)', color: '#fff', fontWeight: 600, cursor: 'pointer',
