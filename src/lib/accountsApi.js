@@ -164,6 +164,9 @@ export async function fetchBalancesForMonth(accounts, year, month) {
   if (accounts.length === 0) return { balances: {}, allocated: {}, transferredOut: {} }
 
   const accountIds = accounts.map((a) => a.id)
+  const madre = accounts.find((a) => a.kind === 'madre')
+  const madreId = madre ? madre.id : null
+
   const pocketIndex = buildPocketIndex(accounts)
   const pocketKeys = accounts.flatMap((a) => [a.id, ...(a.extraCurrencies ?? []).map((c) => pocketKeyFor(a.id, c.currency))])
   const keyFor = (accountId, currency) => resolvePocketKey(pocketIndex, accountId, currency)
@@ -212,7 +215,17 @@ export async function fetchBalancesForMonth(accounts, year, month) {
   }
   for (const row of allocations) {
     const key = keyFor(row.account_id, row.currency)
-    if (key) allocated[key] = Number(row.allocated_amount)
+    if (key) {
+      allocated[key] = Number(row.allocated_amount)
+      // Sumar allocated_amount al balance de la madre cuando existan allocations.
+      // Si la toggle "Restar de la cuenta madre" está activa, esto hará que el
+      // valor que el usuario pone en la distribución se refleje en el balance visible.
+      // Las transfers ya restan los amounts de las hijas, así que el balance final
+      // será: balance_original + allocations_madre - transfers_hijas.
+      if (row.account_id === madreId) {
+        balances[key] = (balances[key] ?? 0) + Number(row.allocated_amount)
+      }
+    }
   }
 
   // transferredOut alimenta el "% usado" del mes CONSULTADO específicamente
