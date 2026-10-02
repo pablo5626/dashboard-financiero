@@ -41,6 +41,39 @@ export default function MonthlyAllocationSection({ hijas, madre, year, month, on
     try { localStorage.setItem(STORAGE_KEY, String(checked)) } catch {}
   }
 
+  // Primer useEffect: Inicialización única al montar el componente.
+  // Esto evita que los inputs se "muevan" cuando el usuario guarda la distribución.
+  useEffect(() => {
+    // Solo ejecutar una vez
+    if (hasInitialized.current) {
+      return
+    }
+    hasInitialized.current = true
+    
+    async function initValues() {
+      try {
+        const ids = allAccounts.map((a) => a.id)
+        const current = await getAllocationsForMonth(ids, year, month)
+        const initialized = {}
+        allAccounts.forEach((a) => {
+          initialized[a.id] = current[a.id] !== undefined ? current[a.id] : 0
+        })
+        setValues(initialized)
+      } catch (err) {
+        // Si falla, establecer 0 para todas
+        const initialized = {}
+        allAccounts.forEach((a) => {
+          initialized[a.id] = 0
+        })
+        setValues(initialized)
+      }
+    }
+    initValues()
+  }, [])  // Vacío: solo se ejecuta una vez al montar
+
+  // Segundo useEffect: Cargar allocations y verificar estado de transfers.
+  // Nota: NO tiene reloadKey en dependencias para evitar re-renders innecesarios
+  // al guardar. Solo depende de las variables que realmente necesite.
   useEffect(() => {
     let cancelled = false
     async function load() {
@@ -61,48 +94,15 @@ export default function MonthlyAllocationSection({ hijas, madre, year, month, on
           if (!cancelled) { setValues(prevValues); setIsTemplate(Object.keys(prevValues).length > 0) }
         }
 
-        // Inicializar valores a 0 para cuentas sin allocation existente,
-        // de modo que la cuenta madre y hijas siempre tengan un valor definido.
-        // Solo inicializar en el primer montaje, no en cada re-render al guardar.
-        if (madre && !hasInitialized.current) {
+        // En re-renders subsiguientes, el valor ya fue inicializado arriba,
+        // así que no volvemos a setValues para evitar que los inputs se muevan.
+        if (!hasInitialized.current && madre) {
           hasInitialized.current = true
           const initialized = {}
           allAccounts.forEach((a) => {
             initialized[a.id] = loadedValues[a.id] !== undefined ? loadedValues[a.id] : 0
           })
           if (!cancelled) { setValues(initialized) }
-        } else if (madre) {
-          // En re-renders subsiguientes, mantener el valor actual de values
-          // para evitar que los inputs se "muevan" al guardar.
-        }
-
-        if (madre) {
-          const transfers = await getTransfersForMonth([madre.id, ...hijas.map((h) => h.id)], year, month)
-          // Una hija cuenta como "ya confirmada" este mes si ya recibió, en
-          // transferencias madre→esa hija este mes (sin importar el origen:
-          // el botón de la app, el Shortcut de iPhone, o una carga manual),
-          // al menos el monto planeado — no solo las que llevan la
-          // idempotency_key de este flujo. Chequear solo la clave exacta
-          // deja pasar un segundo "Confirmar" real cuando el reparto de este
-          // mes ya se hizo por otro canal, duplicando plata de verdad (bug
-          // real detectado probando esto). Comparar solo "existe alguna
-          // transferencia" sin sumar el monto tiene el problema inverso: una
-          // transferencia chica y no relacionada (un ajuste manual cualquiera)
-          // marcaría la hija como "financiada" aunque el reparto real nunca
-          // haya llegado — por eso se suma el monto real recibido. La
-          // idempotency_key sigue protegiendo el insert en sí
-          // (createTransfersIgnoringDuplicates) contra un doble click o una
-          // carrera dentro de la misma sesión.
-          const transferredByHijaId = {}
-          for (const t of transfers) {
-            if (t.from_account_id !== madre.id) continue
-            transferredByHijaId[t.to_account_id] = (transferredByHijaId[t.to_account_id] ?? 0) + Number(t.amount)
-          }
-          const allFunded = hijas.length > 0 && hijas.every((hija) => {
-            const amount = Number(loadedValues[hija.id]) || 0
-            return amount === 0 || (transferredByHijaId[hija.id] ?? 0) >= amount
-          })
-          if (!cancelled) setAlreadyTransferred(allFunded)
         }
       } catch (err) {
         if (!cancelled) setError(err.message)
@@ -112,7 +112,7 @@ export default function MonthlyAllocationSection({ hijas, madre, year, month, on
     }
     load()
     return () => { cancelled = true }
-  }, [hijas, madre, year, month, reloadKey])
+  }, [hijas, madre, year, month])  // Sin reloadKey
 
   function handleChange(accountId, raw) {
     const num = raw === '' ? '' : Number(raw)
@@ -154,7 +154,7 @@ export default function MonthlyAllocationSection({ hijas, madre, year, month, on
       // Si subtractFromMother está activo, también crear transfers reales
       // que resten del balance de la madre. Si no, solo guardar el plan
       // presupuestario sin restar saldo.
-      if (subtractFromMother && createTransfers) {
+      if (subtractFromMother) {
         await handleConfirmTransfers()
       }
     } catch (err) {
