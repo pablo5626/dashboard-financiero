@@ -22,6 +22,10 @@ export default function MonthlyAllocationSection({ hijas, madre, year, month, on
   })
   const [subtractFromMother, setSubtractFromMother] = useState(true)
 
+  // Ref para rastrear si ya se inicializó el componente (para evitar que los inputs
+  // se "muevan" por re-renders innecesarios al guardar).
+  const hasInitialized = useRef(false)
+
   // Key para forzar recarga de allocations tras guardar
   const [reloadKey, setReloadKey] = useState(0)
 
@@ -59,12 +63,17 @@ export default function MonthlyAllocationSection({ hijas, madre, year, month, on
 
         // Inicializar valores a 0 para cuentas sin allocation existente,
         // de modo que la cuenta madre y hijas siempre tengan un valor definido.
-        if (madre) {
+        // Solo inicializar en el primer montaje, no en cada re-render al guardar.
+        if (madre && !hasInitialized.current) {
+          hasInitialized.current = true
           const initialized = {}
           allAccounts.forEach((a) => {
             initialized[a.id] = loadedValues[a.id] !== undefined ? loadedValues[a.id] : 0
           })
           if (!cancelled) { setValues(initialized) }
+        } else if (madre) {
+          // En re-renders subsiguientes, mantener el valor actual de values
+          // para evitar que los inputs se "muevan" al guardar.
         }
 
         if (madre) {
