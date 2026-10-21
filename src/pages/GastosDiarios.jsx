@@ -30,7 +30,7 @@ const PATTERN_MONTHS_BACK = 6
 const CHART_COLORS = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)', 'var(--series-5)', 'var(--series-6)', 'var(--series-7)', 'var(--series-8)']
 
 function formatDate(iso) {
-  return new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', timeZone: 'UTC' })
+  return new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })
 }
 
 // Misma escala de colores que budgetToneColor en Diario.jsx, para que el
@@ -58,7 +58,7 @@ function groupTransactionsByDate(rows) {
 }
 
 function formatDateHeader(dateStr) {
-  return new Date(`${dateStr}T00:00:00Z`).toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })
+  return new Date(`${dateStr}T00:00:00Z`).toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short' })
 }
 
 export default function GastosDiarios() {
