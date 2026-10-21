@@ -85,13 +85,27 @@ two rows because `accounts.currency` holds a single currency per row; and both
 are `kind = 'hija'` even though they sit out the monthly madre→hijas ritual.
 
 **The monthly ritual, in order:**
-1. **Start of month, in Cuentas** — review the "Distribución mensual" (it comes
-   pre-filled from last month's template), *Guardar distribución*, then
-   *Confirmar transferencia real* **once**. That second button is what turns
-   the plan into real `account_transfers` rows madre→hija and drops Bold's
-   balance; it's deliberately separate, and re-running it duplicates transfers.
-2. Load the month's **"Saldos iniciales"** (by hand, or via the iPhone
-   Shortcut).
+1. **Start of month, in Cuentas** — the "Distribución mensual" card has a
+   **switch** ("El reparto sale de la cuenta madre", general de la app,
+   activada por defecto), the **"Saldo inicial de <madre>"** field (with what
+   the madre had at the start of the month — her anchor for the month), one
+   row per hija with the amount assigned to her, and two buttons. *Guardar
+   distribución* (step 1) only saves the **plan**: `account_allocations` for
+   each hija and the madre's starting balance in `monthly_initial_balances`.
+   Nothing moves yet. *Confirmar transferencia real* (step 2) turns that plan
+   into real `account_transfers` rows madre→hija — **and that's where the
+   numbers line up**: each hija's balance starts at her assigned amount and
+   her spending subtracts from it, and the madre's balance drops by the total
+   distributed. The two steps are deliberately separate (the user asked for
+   it): a plan is not a movement, and until step 2 the daughters' cards say
+   *"recibiste $0 de $X asignados — falta confirmar la transferencia"*.
+   With the switch **off** ("esa plata no salió de la madre") there is no
+   step 2: the daughters' amounts are written as their **starting balance**
+   (`monthly_initial_balances` with `source = 'distribution'`) and the madre
+   is left untouched.
+2. Load the month's **"Saldos iniciales"** for the *hijas* (by hand, or via
+   the iPhone Shortcut) — the madre's is the "Saldo inicial" field of the
+   distribution card, not this section.
 3. **During the month, in Gastos** — import the MonIA CSV with the month/year
    picker (re-importing is safe: it dedups on `monia_id`) and drain the two
    queues: "Pendientes de banco" and "Compras en divisa por confirmar".
@@ -372,7 +386,33 @@ in `src/lib/balanceAnchors.js`, shared by `fetchBalancesForMonth` in
 earlier "one row required per account per month" model — see "Ajuste de saldo
 (opcional)" under `Cuentas.jsx` below for why a monthly re-entry stopped being
 mandatory. `account_allocations` is the separate "how much was
-budgeted this month" figure, not the balance. `parent_account_id` on
+budgeted this month" figure, not the balance — **it is the PLAN, and it never
+moves money**: the numbers it holds are what `MonthlyAllocationSection`'s
+"Confirmar transferencia real" (step 2 of the ritual) turns into real
+`account_transfers` madre→hija rows, and *those* are what enter the balance
+math. Before that confirmation the daughters' balances don't include the
+assignment yet, which is why their cards say "recibiste $0 de $X asignados —
+falta confirmar la transferencia" (`distributedIn` in
+`fetchBalancesForMonth` compares what actually arrived from the madre with
+the plan). An earlier iteration papered over the gap by adding the madre's
+own `allocated_amount` to her balance inside `fetchBalancesForMonth` — that
+patch is gone: the madre declares her starting balance for the month in the
+"Saldo inicial de <madre>" field of the distribution card (an
+`monthly_initial_balances` row, i.e. an anchor like any other account), and
+the reparto that leaves her is the transfers, not a formula.
+**With the switch "El reparto sale de la cuenta madre" OFF** the daughters'
+amounts don't arrive as transfers at all: each one is written as **her own
+anchor** for the month (`monthly_initial_balances` with
+`source = 'distribution'`) and the madre is never debited. The two modes
+write different things, so the app cleans up after itself when one of them
+is switched off: the ON mode deletes the month's `source = 'distribution'`
+anchors after creating the transfers (both at once would count the same
+money twice), and the OFF mode refuses to write an anchor for a hija that
+already received the reparto as a transfer. The OFF mode also never
+overwrites an anchor that came from the Shortcut or from a manual
+"Ajuste de saldo" — the real balance wins there (that's why the `source`
+column exists: `'manual'` / `'shortcut'` / `'distribution'`).
+`parent_account_id` on
 `accounts` is purely a structural/UI grouping (e.g. for the Sankey view) —
 it says nothing about where an account's money actually comes from; that's
 always `account_transfers`. **A hija's saldo (balance) is not the same as
@@ -390,8 +430,8 @@ madre→hijas ritual (an unexpected income straight into Dale, say) is real
 spendable money, and measuring against the plan alone would flag spending it
 as an overdraft. `account_allocations` is deliberately left untouched by
 this — it keeps meaning exactly "lo que la madre repartió este mes", so
-`MonthlyAllocationSection`'s "Total a distribuir" and "Confirmar
-transferencia real" keep asking Bold only for what Bold actually owes.
+`MonthlyAllocationSection`'s "Total a distribuir" keeps asking Bold only for
+what Bold actually owes.
 **Transfers never expand the disponible, only real income transactions do** —
 a madre→hija transfer *is* the allocation (counting it would double the
 budget) and a hija→hija top-up is money that was already inside.
@@ -1902,14 +1942,37 @@ Supabase, no sample data left anywhere:
   `monthly_initial_balances` with `source: 'manual'|'shortcut'`; see "Ajuste
   de saldo (opcional)" below for why this stopped being a monthly chore),
   monthly allocation editor with previous-month templating
-  (`MonthlyAllocationSection.jsx`), which also has a "Confirmar
-  transferencia real" button that turns that month's planned amounts into
-  actual `account_transfers` rows (madre → each hija) once, so the
-  madre's computed balance drops automatically instead of needing a
-  manual `monthly_initial_balances` adjustment — kept as a deliberate
-  second step from "Guardar distribución" because `account_transfers` has
-  no upsert key, so merging the two would duplicate transfers on every
-  re-save of the plan; a `TransferHistorySection.jsx` below it lists the
+  (`MonthlyAllocationSection.jsx`), now split in **two deliberate steps**:
+  *"Guardar distribución"* saves the **plan** (an `account_allocations` row
+  per hija + the madre's "Saldo inicial" as an `monthly_initial_balances`
+  anchor) and moves nothing; *"Confirmar transferencia real"* is what turns
+  that plan into actual `account_transfers` rows (madre → each hija), so the
+  daughters' balances start at their assigned amount and the madre's drops by
+  the total distributed. The sync (`transfersApi.syncMonthlyDistributionTransfers`)
+  **updates** the amount of an existing ritual transfer instead of inserting a
+  second one (the old `upsert` used `ignoreDuplicates`, so changing a number
+  silently did nothing), dates the movement **inside the selected month**
+  (it used to be `new Date()`, which filed a past month's reparto under
+  today), deletes the transfer of a hija whose amount went back to 0, and
+  **adopts** a pre-existing madre→hija transfer of that month (e.g. one
+  written by the iPhone Shortcut, which carries no `idempotency_key`) rather
+  than duplicating it. The step-2 transfers are written with
+  `consumes_budget = false` — the reparto is the daughter's budget for the
+  month, not "money that left the madre to be spent elsewhere" (that number
+  feeds "% usado"). The card also has the **"El reparto sale de la cuenta
+  madre"** switch (a general app preference in `localStorage`, see
+  `src/lib/distributionMode.js`): **off**, the daughters' amounts are written
+  as their own month anchor (`source = 'distribution'`) instead of as
+  transfers, the madre is left untouched, and there is no step 2 at all (the
+  "Confirmar transferencia real" button disappears — the plan already is the
+  saldo inicial). Switching modes never rewrites history: the cleanup of the
+  other mode's leftovers happens the next time that month is saved (ON deletes
+  the month's `source = 'distribution'` anchors after creating the transfers,
+  OFF refuses to write an anchor for a hija that already got the reparto as a
+  transfer) and a month that already has ritual transfers offers a
+  "Quitar las transferencias del reparto" button (behind a `ConfirmDialog`,
+  `transfersApi.removeMonthlyDistributionTransfers`) instead of deleting them
+  silently. A `TransferHistorySection.jsx` below it lists the
   month's transfers (any account pair, not just madre→hija) with a small
   add/delete form, covering the "Historial de transferencias" line from
   `prompt-dashboard-financiero.md`. A transfer between accounts of
@@ -1988,6 +2051,17 @@ Supabase, no sample data left anywhere:
   "Saldo inicial (opcional)" field for that path — so "load it once, when
   you create the account" is true for every account, not only multi-currency
   ones.
+
+  **The madre is NOT in this table anymore** — her starting balance for the
+  month is declared in the distribution card ("Saldo inicial de <madre>",
+  `MonthlyAllocationSection.jsx`), which writes the very same
+  `monthly_initial_balances` row. Leaving her in both places meant two
+  different screens writing (and wiping) the same row: the "Ajuste de saldo"
+  save iterates the pockets of the accounts it lists, so with the madre
+  excluded from the list her row is never touched from here. The "Origen"
+  column now also recognizes `source = 'distribution'` (the anchor the
+  monthly distribution writes when the switch "el reparto sale de la cuenta
+  madre" is off) and shows it as "Reparto".
 - **`GastosDiarios.jsx`**: this page shrank a lot mid-session — both its
   category CRUD (moved to `SettingsPanel.jsx`) and its manual entry form and
   search card (see below) are gone, leaving it focused on the MonIA
@@ -2342,13 +2416,13 @@ unprompted, they're deliberate cuts, not oversights:
   `onConflict: 'user_id,idempotency_key'` + `ignoreDuplicates: true`) — a
   double-click, a stale reload, or two open tabs confirming the same month
   now gets silently absorbed at the DB level instead of creating duplicate
-  real transfers. **The mount-time "already confirmed" check deliberately
-  does NOT rely on that key matching** — it treats a hija as already funded
-  this month if *any* madre→that-hija transfer exists this month, from any
-  origin (the app's own button, the iPhone Shortcut, or a manual entry via
-  `TransferHistorySection`), and only shows the button when some hija with
-  a nonzero planned amount still lacks one. An earlier version of this guard
-  matched only rows carrying the exact ritual `idempotency_key`, which was
+  real transfers. **The sync deliberately does NOT rely on that key alone**
+  (`transfersApi.syncMonthlyDistributionTransfers`): it looks up the month's
+  madre→hija transfers by pair, and a row that carries no `idempotency_key` —
+  i.e. one written by the iPhone Shortcut or by hand — is **adopted** (its
+  amount is updated to match the plan and the ritual key is attached) instead
+  of creating a second row for the same movement. An earlier version of this
+  guard matched only rows carrying the exact ritual `idempotency_key`, which was
   wrong: since the iPhone Shortcut inserts its own madre→hija rows with no
   such key, that version failed to recognize a distribution already done via
   the Shortcut and let a second real click through — this was caught by

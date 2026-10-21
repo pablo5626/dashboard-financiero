@@ -140,13 +140,34 @@ export async function getMonthlyInitialBalances(accounts, year, month) {
   return byPocket
 }
 
+// `source` dice de dónde salió el número: 'manual' (a mano o desde la app),
+// 'shortcut' (el Shortcut de iPhone) o 'distribution' (el reparto mensual,
+// cuando el switch "el reparto sale de la cuenta madre" está apagado). Sirve
+// para que una cosa NO pise a la otra: el reparto nunca pisa un saldo que
+// se cargó a mano o llegó por Shortcut, y el "Ajuste de saldo" nunca pisa el
+// ancla que puso el reparto.
 export async function saveMonthlyInitialBalances(rows, year, month) {
-  const payload = rows.map(({ accountId, amount, currency }) => ({
-    account_id: accountId, year, month, initial_balance: amount, currency, source: 'manual',
+  const payload = rows.map(({ accountId, amount, currency, source }) => ({
+    account_id: accountId, year, month, initial_balance: amount, currency, source: source || 'manual',
   }))
   const { error } = await supabase
     .from('monthly_initial_balances')
     .upsert(payload, { onConflict: 'user_id,account_id,year,month,currency' })
+  if (error) throw error
+}
+
+// Borra el saldo inicial (ancla) de un bolsillo para un mes. Se usa para
+// limpiar el ancla que dejó el reparto cuando el switch vuelve a "activado"
+// (ahí la plata llega por transferencia y las dos cosas a la vez contarían la
+// plata doble).
+export async function deleteMonthlyInitialBalance(accountId, year, month, currency = 'COP') {
+  const { error } = await supabase
+    .from('monthly_initial_balances')
+    .delete()
+    .eq('account_id', accountId)
+    .eq('year', year)
+    .eq('month', month)
+    .eq('currency', currency)
   if (error) throw error
 }
 
@@ -161,7 +182,7 @@ export async function saveMonthlyInitialBalances(rows, year, month) {
 // moneda adicional se devuelve además con la clave compuesta
 // "accountId:currency" — ver currencyPockets.js.
 export async function fetchBalancesForMonth(accounts, year, month) {
-  if (accounts.length === 0) return { balances: {}, allocated: {}, transferredOut: {} }
+  if (accounts.length === 0) return { balances: {}, allocated: {}, transferredOut: {}, transferredIn: {}, distributedIn: {} }
 
   const accountIds = accounts.map((a) => a.id)
   const madre = accounts.find((a) => a.kind === 'madre')
@@ -187,7 +208,7 @@ export async function fetchBalancesForMonth(accounts, year, month) {
 
   const [{ data: transfers, error: e2 }, { data: transactions, error: e3 }, { data: allocations, error: e4 }] =
     await Promise.all([
-      supabase.from('account_transfers').select('from_account_id, to_account_id, amount, currency, to_amount, to_currency, consumes_budget, transfer_date').gte('transfer_date', rangeStart).lt('transfer_date', nextMonthStart),
+      supabase.from('account_transfers').select('from_account_id, to_account_id, amount, currency, to_amount, to_currency, consumes_budget, transfer_date, idempotency_key').gte('transfer_date', rangeStart).lt('transfer_date', nextMonthStart),
       supabase.from('transactions').select('account_id, amount, currency, occurred_at').gte('occurred_at', rangeStart).lt('occurred_at', nextMonthStart).in('account_id', accountIds),
       supabase.from('account_allocations').select('account_id, allocated_amount, currency').eq('year', year).eq('month', month).in('account_id', accountIds),
     ])
@@ -215,17 +236,17 @@ export async function fetchBalancesForMonth(accounts, year, month) {
   }
   for (const row of allocations) {
     const key = keyFor(row.account_id, row.currency)
-    if (key) {
-      allocated[key] = Number(row.allocated_amount)
-      // Sumar allocated_amount al balance de la madre cuando existan allocations.
-      // Si la toggle "Restar de la cuenta madre" está activa, esto hará que el
-      // valor que el usuario pone en la distribución se refleje en el balance visible.
-      // Las transfers ya restan los amounts de las hijas, así que el balance final
-      // será: balance_original + allocations_madre - transfers_hijas.
-      if (row.account_id === madreId) {
-        balances[key] = (balances[key] ?? 0) + Number(row.allocated_amount)
-      }
-    }
+    if (key) allocated[key] = Number(row.allocated_amount)
+    // account_allocations es el PLAN ("lo que la madre repartió este mes"),
+    // no un movimiento: no suma ni resta al saldo. El movimiento real de la
+    // plata son las transferencias madre→hija (paso 2 del ritual, ver
+    // syncMonthlyDistributionTransfers), y esas sí entran en la matemática de
+    // arriba. Antes se sumaba el allocated_amount de la madre a su propio
+    // balance: era un parche de display (hacía que la tarjeta de la madre
+    // mostrara el número de su fila de distribución en vez de su saldo real)
+    // y se duplicaba si la madre tenía ancla. La madre declara su saldo
+    // inicial del mes en la fila "Saldo inicial" de la distribución, que se
+    // guarda en monthly_initial_balances.
   }
 
   // transferredOut alimenta el "% usado" del mes CONSULTADO específicamente
@@ -233,7 +254,30 @@ export async function fetchBalancesForMonth(accounts, year, month) {
   // varios meses (desde la ancla más vieja), hay que acotarlo al mes target
   // antes de sumarlo, o el % usado se inflaría arrastrando meses anteriores.
   const transfersThisMonth = transfers.filter((t) => t.transfer_date >= targetMonthStart && t.transfer_date < nextMonthStart)
-  return { balances, allocated, transferredOut: sumOutgoingByAccount(transfersThisMonth, accounts) }
+  const transferredOut = sumOutgoingByAccount(transfersThisMonth, accounts)
+
+  // transferredIn: transferencias donde esta cuenta es el destino (entradas).
+  // Se computa por pocket key igual que transferredOut, para el mismo mes.
+  // Se EXCLUYEN las que salen de la madre (el reparto mensual): esas ya
+  // aparecen como "asignado" en la tarjeta de la hija, así que sumarlas
+  // también acá mostraría la misma plata dos veces.
+  const transferredIn = {}
+  // distributedIn: lo que le entró a cada cuenta DESDE LA MADRE este mes —
+  // o sea, cuánto del reparto mensual se confirmó de verdad. Es lo que
+  // permite decir en la tarjeta "recibiste $0 de $50.000 asignados" y que
+  // quede claro que falta confirmar la transferencia.
+  const distributedIn = {}
+  for (const t of transfersThisMonth) {
+    const toKey = t.to_account_id ? keyFor(t.to_account_id, t.to_currency ?? t.currency) : null
+    if (!toKey) continue
+    const amount = Number(t.to_amount ?? t.amount)
+    if (t.from_account_id === madreId) {
+      distributedIn[toKey] = (distributedIn[toKey] ?? 0) + amount
+    } else {
+      transferredIn[toKey] = (transferredIn[toKey] ?? 0) + amount
+    }
+  }
+  return { balances, allocated, transferredOut, transferredIn, distributedIn }
 }
 
 // Saldo total de una cuenta convertido a COP — para una cuenta multi-moneda

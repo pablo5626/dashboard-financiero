@@ -22,6 +22,12 @@ export default function MonthlyInitialBalancesSection({ accounts, year, month, b
   // accountRows más abajo.
   const [selectedCurrency, setSelectedCurrency] = useState({})
 
+  // La cuenta madre NO aparece acá: su saldo inicial del mes se declara en
+  // "Distribución mensual" (fila "Saldo inicial de <madre>"), que es el
+  // mismo dato. Dejarla en los dos lugares haría que dos escrituras peleen
+  // por la misma fila de monthly_initial_balances.
+  const otherAccounts = accounts.filter((a) => a.kind !== 'madre')
+
   // Cada bolsillo (ej. arq USD y arq EUR) tiene su propio saldo inicial del
   // mes (ver la unique(...,currency) de monthly_initial_balances) — pero una
   // cuenta multi-moneda ya no aporta una fila SIEMPRE VISIBLE por bolsillo:
@@ -31,8 +37,8 @@ export default function MonthlyInitialBalancesSection({ accounts, year, month, b
   // meses solo hace falta tocar un bolsillo por vez. `values` sigue
   // indexado por bolsillo (p.key), así que cambiar de moneda y volver no
   // pierde lo ya tipeado en el otro campo.
-  const accountRows = accounts.map((a) => ({ account: a, pockets: flattenAccountPockets([a]) }))
-  const pockets = flattenAccountPockets(accounts) // lista plana, sin agrupar — la sigue usando la carga/guardado
+  const accountRows = otherAccounts.map((a) => ({ account: a, pockets: flattenAccountPockets([a]) }))
+  const pockets = flattenAccountPockets(otherAccounts) // lista plana, sin agrupar — la sigue usando la carga/guardado
 
   useEffect(() => {
     let cancelled = false
@@ -102,7 +108,8 @@ export default function MonthlyInitialBalancesSection({ accounts, year, month, b
           acá todos los meses. Solo tocá esto si el banco real dice un número distinto (una comisión no
           capturada, un cargo que no llegó por MonIA): lo que cargues acá pasa a ser el nuevo punto de partida
           desde este mes en adelante. También se puede cargar desde un Shortcut de iPhone que le pegue directo
-          a Supabase — lo que llegue por Shortcut también aparece reflejado abajo.
+          a Supabase — lo que llegue por Shortcut también aparece reflejado abajo. El saldo inicial de la cuenta
+          madre se carga en "Distribución mensual".
         </p>
         {error && <p style={{ color: 'var(--status-critical)', font: 'var(--font-footnote)' }}>{error}</p>}
 
@@ -131,7 +138,7 @@ export default function MonthlyInitialBalancesSection({ accounts, year, month, b
                         />
                       </td>
                       <td style={{ font: 'var(--font-caption)', color: 'var(--text-muted)' }}>
-                        {row ? (row.source === 'shortcut' ? 'Shortcut' : 'Manual') : '— sin ajustar —'}
+                        {row ? (row.source === 'shortcut' ? 'Shortcut' : row.source === 'distribution' ? 'Reparto' : 'Manual') : '— sin ajustar —'}
                       </td>
                     </tr>
                   )
@@ -167,7 +174,7 @@ export default function MonthlyInitialBalancesSection({ accounts, year, month, b
                       </div>
                     </td>
                     <td style={{ font: 'var(--font-caption)', color: 'var(--text-muted)' }}>
-                      {row ? (row.source === 'shortcut' ? 'Shortcut' : 'Manual') : '— sin ajustar —'}
+                      {row ? (row.source === 'shortcut' ? 'Shortcut' : row.source === 'distribution' ? 'Reparto' : 'Manual') : '— sin ajustar —'}
                     </td>
                   </tr>
                 )
@@ -181,7 +188,7 @@ export default function MonthlyInitialBalancesSection({ accounts, year, month, b
 
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <button
-              type="submit" disabled={saving || accounts.length === 0}
+              type="submit" disabled={saving || otherAccounts.length === 0}
               style={{ minHeight: 'var(--touch-target)', padding: '0 var(--space-2)', borderRadius: 10, background: 'var(--series-1)', color: '#fff', fontWeight: 600, opacity: saving ? 0.6 : 1 }}
             >
               {saving ? 'Guardando…' : 'Guardar ajuste'}

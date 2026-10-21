@@ -14,6 +14,7 @@ import {
 import { getRates } from '../lib/exchangeRatesApi.js'
 import { getAccountFlowsForMonth } from '../lib/transactionsApi.js'
 import { flattenAccountPockets } from '../lib/currencyPockets.js'
+import { isDistributionFromMother, setDistributionFromMother } from '../lib/distributionMode.js'
 import { usePeriod } from '../lib/PeriodContext.jsx'
 import styles from './Cuentas.module.css'
 
@@ -29,18 +30,26 @@ export default function Cuentas() {
   const [spent, setSpent] = useState({})
   const [income, setIncome] = useState({})
   const [transferredOut, setTransferredOut] = useState({})
+  const [transferredIn, setTransferredIn] = useState({})
+  const [distributedIn, setDistributedIn] = useState({})
   const [rates, setRates] = useState([])
   const [error, setError] = useState(null)
   const [editingId, setEditingId] = useState(null)
   const [edit, setEdit] = useState(emptyEdit)
   const [activePocket, setActivePocket] = useState({}) // accountId -> pocketKey
   const [confirmArchive, setConfirmArchive] = useState(null) // { id, name } | null
+  // ¿El reparto mensual sale de la cuenta madre? (preferencia general de la
+  // app, recordada en localStorage — ver src/lib/distributionMode.js). En
+  // "desactivado" cada hija arranca el mes con su monto como saldo inicial y
+  // la madre no se toca; en "activado" la plata llega como transferencia
+  // madre→hija y la madre baja el total repartido.
+  const [fromMother, setFromMother] = useState(() => isDistributionFromMother())
 
   async function reload() {
     try {
       const rows = await listAccounts()
       setAccounts(rows)
-      const [{ balances: b, allocated: a, transferredOut: out }, currentRates, flows] = await Promise.all([
+      const [{ balances: b, allocated: a, transferredOut: out, transferredIn: tin, distributedIn: din }, currentRates, flows] = await Promise.all([
         fetchBalancesForMonth(rows, year, month),
         getRates(),
         getAccountFlowsForMonth(rows, year, month),
@@ -48,6 +57,8 @@ export default function Cuentas() {
       setBalances(b)
       setAllocated(a)
       setTransferredOut(out)
+      setTransferredIn(tin)
+      setDistributedIn(din)
       setRates(currentRates)
       setSpent(flows.spent)
       setIncome(flows.income)
@@ -65,11 +76,31 @@ export default function Cuentas() {
   useEffect(() => {
     window.addEventListener('dashboard:rates-changed', reload)
     window.addEventListener('dashboard:accounts-changed', reload)
+    window.addEventListener('dashboard:transactions-changed', reload)
     return () => {
       window.removeEventListener('dashboard:rates-changed', reload)
       window.removeEventListener('dashboard:accounts-changed', reload)
+      window.removeEventListener('dashboard:transactions-changed', reload)
     }
   }, [])
+
+  // El interruptor del reparto vive en la tarjeta de abajo, pero el estado
+  // está acá (es el padre) — el evento solo avisa que hay que releer el
+  // flag, igual que dashboard:accounts-changed.
+  useEffect(() => {
+    function onModeChanged() {
+      setFromMother(isDistributionFromMother())
+      reload()
+    }
+    window.addEventListener('dashboard:distribution-mode-changed', onModeChanged)
+    return () => window.removeEventListener('dashboard:distribution-mode-changed', onModeChanged)
+  }, [])
+
+  function handleFromMotherChange(value) {
+    setFromMother(value)
+    setDistributionFromMother(value)
+    window.dispatchEvent(new Event('dashboard:distribution-mode-changed'))
+  }
 
   const madre = accounts?.find((a) => a.kind === 'madre')
   const hijas = accounts?.filter((a) => a.kind === 'hija') ?? []
@@ -202,6 +233,12 @@ export default function Cuentas() {
           // plata salió de acá para gastarse desde otro bolsillo, no sigue
           // disponible.
           const movidoAmt = transferredOut[active.key] ?? 0
+          const ingresadoAmt = transferredIn[active.key] ?? 0
+          // Lo que le entró DE VERDAD desde la madre este mes (el reparto
+          // confirmado). Si es menos que lo asignado, falta confirmar la
+          // transferencia real — sin esta línea no se entiende por qué el
+          // saldo no cuadra con lo que dice "de $X asignados".
+          const repartidoAmt = distributedIn[active.key] ?? 0
           const usado = spentAmt + movidoAmt
           const pct = disponible > 0 ? Math.round((usado / disponible) * 100) : null
           const isEditing = editingId === account.id
@@ -343,6 +380,13 @@ export default function Cuentas() {
                   ? `de ${formatByCurrency(disponible, currency)} disponibles (${alloc != null ? formatByCurrency(alloc, currency) : formatByCurrency(0, currency)} asignados + ${formatByCurrency(incomeAmt, currency)} de ingresos)`
                   : alloc != null ? `de ${formatByCurrency(alloc, currency)} asignados este mes` : 'sin distribución definida este mes'}
               </div>
+              {fromMother && alloc != null && alloc > 0 && repartidoAmt !== alloc && (
+                <div style={{ font: 'var(--font-caption)', color: 'var(--status-warning)', marginBottom: 8 }}>
+                  {repartidoAmt > 0
+                    ? `recibiste ${formatByCurrency(repartidoAmt, currency)} de ${formatByCurrency(alloc, currency)} asignados — falta confirmar el resto`
+                    : `recibiste $0 de ${formatByCurrency(alloc, currency)} asignados — falta confirmar la transferencia`}
+                </div>
+              )}
               {pct != null && (
                 <>
                   <div style={{ height: 6, background: 'var(--gridline)', borderRadius: 3, overflow: 'hidden' }}>
@@ -352,7 +396,8 @@ export default function Cuentas() {
                     {pct > 100
                       ? `Sobregirada — ${pct - 100}% por encima de lo ${incomeAmt > 0 ? 'disponible' : 'asignado'}`
                       : `${pct}% usado`}
-                    {movidoAmt > 0 && ` — ${formatByCurrency(movidoAmt, currency)} movidos a otras cuentas`}
+                    {movidoAmt > 0 && ` — ${formatByCurrency(movidoAmt, currency)} movidos a otras`}
+                    {ingresadoAmt > 0 && ` +${formatByCurrency(ingresadoAmt, currency)} recibidos de otras`}
                   </div>
                 </>
               )}
@@ -362,7 +407,11 @@ export default function Cuentas() {
           )
         })}
 
-        <MonthlyAllocationSection hijas={hijasCop} madre={madre} year={year} month={month} onSaved={reload} />
+        <MonthlyAllocationSection
+          hijas={hijasCop} madre={madre} year={year} month={month} onSaved={reload}
+          madreBalance={madre ? (balances[madre.id] ?? 0) : 0}
+          fromMother={fromMother} onFromMotherChange={handleFromMotherChange}
+        />
 
         <FixedExpensesSection accounts={accounts ?? []} />
 
