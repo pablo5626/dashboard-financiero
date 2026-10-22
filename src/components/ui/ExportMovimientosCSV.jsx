@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Card from './Card.jsx'
 import { Field, Segmented } from './FormKit.jsx'
 import { exportTransactionsCSV } from '../../lib/transactionsApi.js'
@@ -29,17 +29,6 @@ const SEMESTRE_OPTIONS = [
 const anioActual = new Date().getFullYear()
 const ANIO_OPTIONS = Array.from({ length: 11 }, (_, i) => ({ value: anioActual - 5 + i, label: String(anioActual - 5 + i) }))
 
-const selectStyle = {
-  minHeight: 'var(--touch-target)',
-  borderRadius: 10,
-  border: '1px solid var(--border-hairline)',
-  padding: '0 var(--space-1)',
-  width: '100%',
-  background: 'var(--surface)',
-  color: 'var(--text-primary)',
-  fontSize: 'var(--font-body)',
-}
-
 const buttonStyle = {
   minHeight: 'var(--touch-target)',
   borderRadius: 10,
@@ -55,6 +44,97 @@ const buttonStyle = {
 
 const buttonDisabledStyle = { ...buttonStyle, opacity: 0.6, cursor: 'not-allowed' }
 
+// Dropdown custom que respeta el tema oscuro de la app y no se desborda
+// como el <select> nativo (que abre un fondo blanco fuera del panel).
+function CustomSelect({ label, value, options, onChange }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+
+  function handleClickOutside(e) {
+    if (ref.current && !ref.current.contains(e.target)) {
+      setOpen(false)
+    }
+  }
+
+  useEffect(() => {
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const selected = options.find((o) => o.value === value) ?? options[0]
+
+  const triggerStyle = {
+    minHeight: 'var(--touch-target)',
+    borderRadius: 10,
+    border: '1px solid var(--border-hairline)',
+    padding: '0 var(--space-1)',
+    width: '100%',
+    background: 'var(--surface-1)',
+    color: 'var(--text-primary)',
+    fontSize: 'var(--font-body)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    cursor: 'pointer',
+    textAlign: 'left',
+  }
+
+  const dropdownStyle = {
+    position: 'absolute',
+    top: 'calc(100% + 6px)',
+    left: 0,
+    right: 0,
+    width: '100%',
+    background: 'var(--surface-raised)',
+    border: '1px solid var(--border-hairline)',
+    borderRadius: 10,
+    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.25)',
+    zIndex: 200,
+    maxHeight: 260,
+    overflowY: 'auto',
+  }
+
+  const optionStyle = (isSelected) => ({
+    padding: 'var(--space-1) var(--space-2)',
+    color: isSelected ? 'var(--series-1)' : 'var(--text-primary)',
+    background: isSelected
+      ? 'color-mix(in srgb, var(--series-1) 12%, var(--surface-1))'
+      : 'transparent',
+    cursor: 'pointer',
+    fontSize: 'var(--font-body)',
+    borderBottom: '1px solid var(--border-hairline)',
+    ':hover': { background: 'var(--surface-1)' },
+  })
+
+  return (
+    <div ref={ref} style={{ position: 'relative', width: '100%' }}>
+      <Field label={label}>
+        <button type="button" onClick={() => setOpen((prev) => !prev)} style={triggerStyle}>
+          <span>{selected.label}</span>
+          <span style={{ fontSize: 14, color: 'var(--text-muted)' }}>▾</span>
+        </button>
+      </Field>
+      {open && (
+        <div style={dropdownStyle}>
+          {options.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              onClick={() => { setOpen(false); onChange(o.value) }}
+              style={optionStyle(o.value === value)}
+            >
+              {o.label}
+              {o.value === value && (
+                <span style={{ float: 'right', color: 'var(--series-1)' }}>✓</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function ExportMovimientosCSV() {
   const [tipo, setTipo] = useState('mes')
   const [anio, setAnio] = useState(anioActual)
@@ -62,7 +142,7 @@ export default function ExportMovimientosCSV() {
   const [trimestre, setTrimestre] = useState(3)
   const [semestre, setSemestre] = useState(2)
   const [cargando, setCargando] = useState(false)
-  const [resultado, setResultado] = useState(null) // { nombreArchivo, count, startISO, endISO }
+  const [resultado, setResultado] = useState(null)
   const [error, setError] = useState(null)
 
   async function handleExportar() {
@@ -94,24 +174,20 @@ export default function ExportMovimientosCSV() {
   switch (tipo) {
     case 'mes':
       selectorPeriodo = (
-        <Field label="Mes">
-          <select value={mes} onChange={(e) => setMes(Number(e.target.value))} style={selectStyle}>
-            {MES_OPTIONS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-          </select>
-        </Field>
+        <CustomSelect label="Mes" value={mes} options={MES_OPTIONS} onChange={(v) => setMes(v)} />
       )
       break
     case 'trimestre':
       selectorPeriodo = (
         <Field label="Trimestre">
-          <Segmented options={TRIMESTRE_OPTIONS} value={trimestre} onChange={(v) => setTrimestre(Number(v))} />
+          <Segmented options={TRIMESTRE_OPTIONS} value={trimestre} onChange={(v) => setTrimestre(v)} />
         </Field>
       )
       break
     case 'semestre':
       selectorPeriodo = (
         <Field label="Semestre">
-          <Segmented options={SEMESTRE_OPTIONS} value={semestre} onChange={(v) => setSemestre(Number(v))} />
+          <Segmented options={SEMESTRE_OPTIONS} value={semestre} onChange={(v) => setSemestre(v)} />
         </Field>
       )
       break
@@ -130,11 +206,7 @@ export default function ExportMovimientosCSV() {
         <Segmented options={PERIOD_OPTIONS} value={tipo} onChange={(v) => { setTipo(v); setResultado(null) }} />
       </Field>
 
-      <Field label="Año">
-        <select value={anio} onChange={(e) => { setAnio(Number(e.target.value)); setResultado(null) }} style={selectStyle}>
-          {ANIO_OPTIONS.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
-        </select>
-      </Field>
+      <CustomSelect label="Año" value={anio} options={ANIO_OPTIONS} onChange={(v) => { setAnio(v); setResultado(null) }} />
 
       {selectorPeriodo}
 
