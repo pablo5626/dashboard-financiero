@@ -177,6 +177,14 @@ export function IconFilter(props) {
   )
 }
 
+export function IconDownload(props) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M3 12v8h2v-8zM21 12v8h-2v-8zM12 3v16M12 3l7 7M12 3l-7 7" />
+    </svg>
+  )
+}
+
 export function IconExchange(props) {
   return (
     <svg {...base} {...props}>

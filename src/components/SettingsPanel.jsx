@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { IconSettings, IconClose, IconChevronRight, IconTag, IconHash, IconAccounts, IconDebts, IconGoals, IconExchange, IconExpenses, IconBudget, IconAutoCapture } from './icons.jsx'
+import { IconSettings, IconClose, IconChevronRight, IconTag, IconHash, IconAccounts, IconDebts, IconGoals, IconExchange, IconExpenses, IconBudget, IconAutoCapture, IconDownload } from './icons.jsx'
 import AutoCaptureSettings from './AutoCaptureSettings.jsx'
+import ExportMovimientosCSV from './ui/ExportMovimientosCSV.jsx'
 import ColorSwatchPicker from './ui/ColorSwatchPicker.jsx'
 import ConfirmDialog from './ui/ConfirmDialog.jsx'
 import { Field, InfoCard, ChipPicker, Segmented } from './ui/FormKit.jsx'
@@ -69,6 +70,7 @@ const SETTINGS_SECTIONS = [
   { key: 'gastos-fijos', label: 'Gastos fijos', subtitle: 'Agregar un gasto fijo recurrente', Icon: IconExpenses },
   { key: 'tasas', label: 'Tasas de cambio', subtitle: 'COP/USD/EUR, a mano o buscadas automáticamente', Icon: IconExchange },
   { key: 'captura', label: 'Captura automática', subtitle: 'Apple Pay y notificaciones del banco', Icon: IconAutoCapture },
+  { key: 'exportar', label: 'Exportar CSV', subtitle: 'Movimientos por mes, trimestre, semestre o año', Icon: IconDownload },
 ]
 
 // Botón + panel de ajustes, montado una sola vez en AppShell y siempre
@@ -1335,6 +1337,16 @@ export default function SettingsPanel() {
             )}
 
             {activeSection?.key === 'captura' && <AutoCaptureSettings />}
+
+            {activeSection?.key === 'exportar' && (
+            <>
+            <h3 className={styles.sectionTitle}>Exportar CSV</h3>
+            <p className={styles.hint}>
+              Descargá los movimientos de cuentas de un período en formato CSV. El nombre del archivo usa un código corto, p. ej. <strong>movimientos_26AQ3.csv</strong> (trimestre 3 de 2026).
+            </p>
+            <ExportMovimientosCSV />
+            </>
+            )}
 
             {activeSection?.key === 'tasas' && (
             <>

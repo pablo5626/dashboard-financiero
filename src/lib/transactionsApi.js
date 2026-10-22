@@ -906,6 +906,106 @@ export function detectRecurringCandidates(expenses, existingFixedNames, minMonth
 // por category_id ya resuelto (no por nombre en cada fila) para no depender
 // del join; si la categoría "Préstamo" no existe en el catálogo del usuario
 // todavía, categoryId es null y no hay nada que detectar.
+// ============================================================================
+// EXPORTACIÓN DE MOVIMIENTOS A CSV
+// ============================================================================
+
+// Códigos cortos de período para el nombre del archivo:
+//   - Mes:       26M10  (año 26, mes 10)
+//   - Trimestre: 26AQ3  (año 26, trimestre 3)
+//   - Semestre:  26S2   (año 26, semestre 2)
+//   - Año:       26A    (año 26)
+const ANO_CORTO = (anio) => String(anio).slice(-2)
+
+export function codigoPeriodo({ tipo, anio, mes, trimestre, semestre }) {
+  const a = ANO_CORTO(anio)
+  switch (tipo) {
+    case 'mes': return `${a}M${String(mes).padStart(2, '0')}`
+    case 'trimestre': return `${a}AQ${trimestre}`
+    case 'semestre': return `${a}S${semestre}`
+    case 'ano': return `${a}A`
+    default: return `${a}`
+  }
+}
+
+// Rango de fechas [inicio, fin) en UTC ISO para un período dado.
+export function rangoFechasPeriodo({ tipo, anio, mes, trimestre, semestre }) {
+  let start, end
+  switch (tipo) {
+    case 'mes': {
+      start = new Date(Date.UTC(anio, mes - 1, 1))
+      end = mes === 12
+        ? new Date(Date.UTC(anio + 1, 0, 1))
+        : new Date(Date.UTC(anio, mes, 1))
+      break
+    }
+    case 'trimestre': {
+      const mesInicial = (trimestre - 1) * 3 + 1 // Q1->1, Q2->4, Q3->7, Q4->10
+      start = new Date(Date.UTC(anio, mesInicial - 1, 1))
+      end = new Date(Date.UTC(anio, mesInicial + 2, 1)) // +3 meses
+      break
+    }
+    case 'semestre': {
+      const mesInicial = (semestre - 1) * 6 + 1 // S1->1, S2->7
+      start = new Date(Date.UTC(anio, mesInicial - 1, 1))
+      end = new Date(Date.UTC(anio, mesInicial + 5, 1)) // +6 meses
+      break
+    }
+    case 'ano': {
+      start = new Date(Date.UTC(anio, 0, 1))
+      end = new Date(Date.UTC(anio + 1, 0, 1))
+      break
+    }
+    default:
+      throw new Error(`Tipo de período desconocido: ${tipo}`)
+  }
+  return {
+    startISO: start.toISOString(),
+    endISO: end.toISOString(),
+    startLabel: start.toISOString().slice(0, 10),
+    endLabel: end.toISOString().slice(0, 10),
+  }
+}
+
+// Exporta movimientos de un período a CSV. Excluye filas con tags ignorados
+// (traslado/moneda/ignorar) porque ya están contabilizadas en otro lado.
+// Devuelve { csv, nombreArchivo, count }.
+export async function exportTransactionsCSV({ tipo, anio, mes, trimestre, semestre }) {
+  const { startISO, endISO } = rangoFechasPeriodo({ tipo, anio, mes, trimestre, semestre })
+
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('*, categories(name), accounts(name)')
+    .gte('occurred_at', startISO)
+    .lt('occurred_at', endISO)
+    .order('occurred_at', { ascending: false })
+  if (error) throw error
+
+  const filas = (data ?? []).filter((t) => !isIgnoredRow(t.tags))
+
+  const csvRows = filas.map((t) => ({
+    fecha: t.occurred_at.slice(0, 10),
+    descripcion: t.purpose,
+    categoria: t.categories?.name ?? '',
+    cuenta: t.accounts?.name ?? '',
+    monto: Number(t.amount),
+    moneda: t.currency || 'COP',
+    tipo: Number(t.amount) < 0 ? 'Gasto' : 'Ingreso',
+    tags: (t.tags ?? []).join(';'),
+    origen: t.origin,
+  }))
+
+  const csv = Papa.unparse(csvRows, {
+    headers: true,
+    delimiter: ',',
+    newline: '\r\n',
+  })
+
+  const nombreArchivo = `movimientos_${codigoPeriodo({ tipo, anio, mes, trimestre, semestre })}.csv`
+
+  return { csv, nombreArchivo, count: csvRows.length, startISO, endISO }
+}
+
 export async function listUnreviewedLoanTransactions(categoryId) {
   if (!categoryId) return []
   const { data, error } = await supabase
