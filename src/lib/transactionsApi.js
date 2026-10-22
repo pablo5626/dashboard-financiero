@@ -984,7 +984,9 @@ export async function exportTransactionsCSV({ tipo, anio, mes, trimestre, semest
   const filas = (data ?? []).filter((t) => !isIgnoredRow(t.tags))
 
   const csvRows = filas.map((t) => ({
+    id: t.id,
     fecha: t.occurred_at.slice(0, 10),
+    creado_en: t.created_at,
     descripcion: t.purpose,
     categoria: t.categories?.name ?? '',
     cuenta: t.accounts?.name ?? '',
