@@ -695,20 +695,25 @@ export async function deleteTransaction(id) {
 // Toma los objetos de cuenta (no ids) porque es currency-aware, igual que
 // fetchBalancesForMonth: cada cuenta solo suma filas en su propia moneda, para
 // no mezclar euros con pesos en un mismo total.
-export async function getAccountFlowsForMonth(accounts, year, month) {
+export async function getAccountFlowsForMonth(accounts, year, month, timezone) {
   if (accounts.length === 0) return { spent: {}, income: {} }
   const accountIds = accounts.map((a) => a.id)
   const pocketIndex = buildPocketIndex(accounts)
+  const tz = timezone ?? detectTimezone()
+
   const monthStart = `${year}-${String(month).padStart(2, '0')}-01`
   const nextMonthStart = month === 12
     ? `${year + 1}-01-01`
     : `${year}-${String(month + 1).padStart(2, '0')}-01`
 
+  const startISO = localDateToUTCISO(monthStart, tz)
+  const endISO = localDateToUTCISO(nextMonthStart, tz)
+
   const { data, error } = await supabase
     .from('transactions')
     .select('account_id, amount, currency')
-    .gte('occurred_at', monthStart)
-    .lt('occurred_at', nextMonthStart)
+    .gte('occurred_at', startISO)
+    .lt('occurred_at', endISO)
     .in('account_id', accountIds)
   if (error) throw error
 
@@ -724,15 +729,19 @@ export async function getAccountFlowsForMonth(accounts, year, month) {
   return { spent, income }
 }
 
-export async function listTransactionsForMonth(year, month) {
+export async function listTransactionsForMonth(year, month, timezone) {
+  const tz = timezone ?? detectTimezone()
   const monthStart = `${year}-${String(month).padStart(2, '0')}-01`
   const after = month === 12 ? { year: year + 1, month: 1 } : { year, month: month + 1 }
   const nextStart = `${after.year}-${String(after.month).padStart(2, '0')}-01`
 
+  const startISO = localDateToUTCISO(monthStart, tz)
+  const endISO = localDateToUTCISO(nextStart, tz)
+
   const { data, error } = await supabase
     .from('transactions')
     .select('*, categories(name), accounts(name)')
-    .gte('occurred_at', monthStart).lt('occurred_at', nextStart)
+    .gte('occurred_at', startISO).lt('occurred_at', endISO)
     .order('occurred_at', { ascending: false })
   if (error) throw error
   return data
@@ -745,16 +754,14 @@ export async function listTransactionsForMonth(year, month) {
 // formato/zona horaria que occurredAt al guardar (ver Diario.jsx: today()
 // usa la fecha calendario en UTC, igual que QuickCaptureFAB), para que un
 // movimiento recién guardado siempre caiga dentro del rango que se consulta.
-export async function listTransactionsForDay(dateStr) {
-  const start = dateStr
-  const next = new Date(`${dateStr}T00:00:00Z`)
-  next.setUTCDate(next.getUTCDate() + 1)
-  const end = next.toISOString().slice(0, 10)
+export async function listTransactionsForDay(dateStr, timezone) {
+  const tz = timezone ?? detectTimezone()
+  const { startISO, endISO } = localDateBounds(dateStr, tz)
 
   const { data, error } = await supabase
     .from('transactions')
     .select('*, categories(name), accounts(name)')
-    .gte('occurred_at', start).lt('occurred_at', end)
+    .gte('occurred_at', startISO).lt('occurred_at', endISO)
     .order('occurred_at', { ascending: false })
   if (error) throw error
   return data
@@ -764,11 +771,15 @@ export async function listTransactionsForDay(dateStr) {
 // trae lo mismo que listTransactionsForDay pero para un rango, porque el
 // period picker de Diario necesita listar los movimientos (categoría,
 // cuenta, tags), no solo sumarlos.
-export async function listTransactionsForDateRange(startDateStr, endDateStrExclusive) {
+export async function listTransactionsForDateRange(startDateStr, endDateStrExclusive, timezone) {
+  const tz = timezone ?? detectTimezone()
+  const startISO = localDateToUTCISO(startDateStr, tz)
+  const endISO = localDateToUTCISO(endDateStrExclusive, tz)
+
   const { data, error } = await supabase
     .from('transactions')
     .select('*, categories(name), accounts(name)')
-    .gte('occurred_at', startDateStr).lt('occurred_at', endDateStrExclusive)
+    .gte('occurred_at', startISO).lt('occurred_at', endISO)
     .order('occurred_at', { ascending: false })
   if (error) throw error
   return data
@@ -928,42 +939,113 @@ export function codigoPeriodo({ tipo, anio, mes, trimestre, semestre }) {
   }
 }
 
-// Rango de fechas [inicio, fin) en UTC ISO para un período dado.
-export function rangoFechasPeriodo({ tipo, anio, mes, trimestre, semestre }) {
-  let start, end
+// Zona horaria del navegador para cortar los días según la hora local del usuario.
+// Ej. Colombia (UTC-5): una transacción a las 11 PM del 31/10 no debe irse al 1/11 en UTC.
+export function detectTimezone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone
+  } catch {
+    return 'America/Bogota'
+  }
+}
+
+// Convierte una fecha local "YYYY-MM-DD" en la zona horaria dada a su inicio en UTC ISO.
+// Retorna el instante de medianoche de esa fecha en la zona, expresado en UTC.
+export function localDateToUTCISO(dateStr, timezone) {
+  const tz = timezone ?? detectTimezone()
+  const [year, month, day] = dateStr.split('-').map(Number)
+
+  // Mediodía UTC del día dado, para calcular el offset de la zona objetivo
+  const noonUTC = new Date(Date.UTC(year, month - 1, day, 12, 0, 0))
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+  }).formatToParts(noonUTC)
+
+  let localHour = 0
+  let localMinute = 0
+  for (const part of parts) {
+    if (part.type === 'hour') localHour = parseInt(part.value, 10)
+    if (part.type === 'minute') localMinute = parseInt(part.value, 10)
+  }
+
+  // offsetMinutes = cuántos minutos está la zona local por delante de UTC (puede ser negativo)
+  // En Colombia (UTC-5), mediodía UTC son las 7:00 AM local → offset = -300 minutos
+  const offsetMinutes = (localHour - 12) * 60 + localMinute
+
+  // Medianoche local en la zona dada, expresada en UTC
+  const startUTC = new Date(Date.UTC(year, month - 1, day, 0, 0, 0))
+  startUTC.setUTCMinutes(startUTC.getUTCMinutes() - offsetMinutes)
+
+  return startUTC.toISOString()
+}
+
+// Límites [inicio, fin) de un día completo en zona horaria dada, expresados en UTC ISO
+export function localDateBounds(dateStr, timezone) {
+  const tz = timezone ?? detectTimezone()
+  const startISO = localDateToUTCISO(dateStr, tz)
+
+  const [year, month, day] = dateStr.split('-').map(Number)
+  const nextDay = new Date(Date.UTC(year, month - 1, day + 1, 0, 0, 0))
+  const nextStr = `${nextDay.getUTCFullYear()}-${String(nextDay.getUTCMonth() + 1).padStart(2, '0')}-${String(nextDay.getUTCDate()).padStart(2, '0')}`
+  const endISO = localDateToUTCISO(nextStr, tz)
+
+  return { startISO, endISO }
+}
+
+// Rango de fechas [inicio, fin) en UTC ISO para un período dado, ajustado a la zona horaria local.
+export function rangoFechasPeriodo({ tipo, anio, mes, trimestre, semestre, timezone }) {
+  const tz = timezone ?? detectTimezone()
+  let startISO, endISO
   switch (tipo) {
     case 'mes': {
-      start = new Date(Date.UTC(anio, mes - 1, 1))
-      end = mes === 12
-        ? new Date(Date.UTC(anio + 1, 0, 1))
-        : new Date(Date.UTC(anio, mes, 1))
+      startISO = localDateToUTCISO(`${anio}-${String(mes).padStart(2, '0')}-01`, tz)
+      const endMonth = mes === 12 ? 1 : mes + 1
+      const endYear = mes === 12 ? anio + 1 : anio
+      endISO = localDateToUTCISO(`${endYear}-${String(endMonth).padStart(2, '0')}-01`, tz)
       break
     }
     case 'trimestre': {
       const mesInicial = (trimestre - 1) * 3 + 1 // Q1->1, Q2->4, Q3->7, Q4->10
-      start = new Date(Date.UTC(anio, mesInicial - 1, 1))
-      end = new Date(Date.UTC(anio, mesInicial + 2, 1)) // +3 meses
+      startISO = localDateToUTCISO(`${anio}-${String(mesInicial).padStart(2, '0')}-01`, tz)
+      const mesFinal = mesInicial + 3
+      let endYear = anio
+      let endMonth = mesFinal
+      if (endMonth > 12) {
+        endMonth -= 12
+        endYear += 1
+      }
+      endISO = localDateToUTCISO(`${endYear}-${String(endMonth).padStart(2, '0')}-01`, tz)
       break
     }
     case 'semestre': {
       const mesInicial = (semestre - 1) * 6 + 1 // S1->1, S2->7
-      start = new Date(Date.UTC(anio, mesInicial - 1, 1))
-      end = new Date(Date.UTC(anio, mesInicial + 5, 1)) // +6 meses
+      startISO = localDateToUTCISO(`${anio}-${String(mesInicial).padStart(2, '0')}-01`, tz)
+      const mesFinal = mesInicial + 6
+      let endYear = anio
+      let endMonth = mesFinal
+      if (endMonth > 12) {
+        endMonth -= 12
+        endYear += 1
+      }
+      endISO = localDateToUTCISO(`${endYear}-${String(endMonth).padStart(2, '0')}-01`, tz)
       break
     }
     case 'ano': {
-      start = new Date(Date.UTC(anio, 0, 1))
-      end = new Date(Date.UTC(anio + 1, 0, 1))
+      startISO = localDateToUTCISO(`${anio}-01-01`, tz)
+      endISO = localDateToUTCISO(`${anio + 1}-01-01`, tz)
       break
     }
     default:
       throw new Error(`Tipo de período desconocido: ${tipo}`)
   }
   return {
-    startISO: start.toISOString(),
-    endISO: end.toISOString(),
-    startLabel: start.toISOString().slice(0, 10),
-    endLabel: end.toISOString().slice(0, 10),
+    startISO,
+    endISO,
+    startLabel: startISO.slice(0, 10),
+    endLabel: endISO.slice(0, 10),
   }
 }
 
